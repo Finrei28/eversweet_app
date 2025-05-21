@@ -1,0 +1,253 @@
+"use client"
+
+import { formatCurrency } from "@/lib/formatters"
+import { useOrderContext } from "@/providers/order-provider"
+import { Ionicons } from "@expo/vector-icons"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { Audio } from "expo-av"
+import { useLocalSearchParams, useRouter } from "expo-router"
+import { StatusBar } from "expo-status-bar"
+import { useEffect, useRef } from "react"
+import {
+  Animated,
+  Dimensions,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native"
+
+export default function NewOrderAlert() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const router = useRouter()
+  const { findPendingOrdersById, updateOrderStatus, orderAlertQueue } =
+    useOrderContext()
+  const sound = useRef<Audio.Sound | null>(null)
+  const fadeAnim = useRef(new Animated.Value(0)).current
+  const windowHeight = Dimensions.get("window").height
+  const order = findPendingOrdersById(id)
+  const hasAccepted = useRef(false)
+
+  // Play notification sound and animation when component mounts
+  useEffect(() => {
+    const fadeIn = Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    })
+
+    fadeIn.start()
+
+    const playSound = async () => {
+      const soundEnabled = await AsyncStorage.getItem("soundEnabled")
+      // If sound is not explicitly disabled
+      if (soundEnabled !== "false") {
+        try {
+          const { sound: newSound } = await Audio.Sound.createAsync(
+            require("../../assets/sounds/chinese-justin.mp3"),
+            { shouldPlay: true, volume: 1.0 }
+          )
+          newSound.setIsLoopingAsync(true)
+          sound.current = newSound
+        } catch (error) {
+          console.error("Error playing sound", error)
+        }
+      }
+    }
+
+    playSound()
+
+    // Check if auto-accept is enabled
+    const checkAutoAccept = async () => {
+      const autoAccept = await AsyncStorage.getItem("autoAccept")
+      if (autoAccept === "true" && order) {
+        setTimeout(() => {
+          handleAccept()
+        }, 5000) // Auto-accept after 5 seconds
+      }
+    }
+
+    checkAutoAccept()
+
+    return () => {
+      if (sound.current) {
+        sound.current.unloadAsync()
+      }
+    }
+  }, [])
+
+  if (!order) {
+    // Close the modal if order not found
+    if (sound.current) {
+      sound.current.unloadAsync()
+    }
+    setTimeout(() => {
+      if (router.canGoBack?.()) {
+        router.back()
+      } else {
+        router.replace("/current-orders")
+      }
+    }, 200)
+
+    return null
+  }
+
+  const handleAccept = async () => {
+    if (hasAccepted.current) return // Prevent double execution
+    hasAccepted.current = true
+    // Fade out animation before closing
+    await updateOrderStatus(order.id, "ACCEPTED")
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      if (orderAlertQueue.length === 0) {
+        setTimeout(() => {
+          router.push(`/order-details/${order.id}`)
+        }, 100)
+      }
+    })
+
+    return
+  }
+
+  // const handleDecline = async () => {
+  //   // Fade out animation before closing
+  //   await updateOrderStatus(order.id, "DECLINED")
+  //   Animated.timing(fadeAnim, {
+  //     toValue: 0,
+  //     duration: 200,
+  //     useNativeDriver: true,
+  //   }).start(() => {
+  //     // if (router.canGoBack?.()) {
+  //     //   router.back()
+  //     // }
+  //   })
+
+  //   return
+  // }
+
+  return (
+    <View className="flex-1 items-center justify-center bg-black/60">
+      <StatusBar style="light" />
+
+      <Animated.View
+        style={{
+          opacity: fadeAnim,
+          transform: [
+            {
+              translateY: fadeAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [windowHeight * 0.1, 0],
+              }),
+            },
+          ],
+        }}
+        className="bg-white m-8 rounded-xl overflow-hidden w-11/12 max-w-2xl shadow-2xl"
+      >
+        {/* Header */}
+        <View className="bg-indigo-600 p-4">
+          <View className="flex-row items-center">
+            <Ionicons name="notifications" size={24} color="white" />
+            <Text className="text-white text-lg font-bold ml-2">
+              New Order Request
+            </Text>
+          </View>
+        </View>
+
+        {/* Order summary */}
+        <View className="p-4">
+          <View className="flex-row justify-between mb-2">
+            <Text className="text-xl font-semibold">
+              Order #{order.tempOrderId}
+            </Text>
+            <Text className="font-bold text-lg">
+              {formatCurrency(order.priceInCents / 100)}
+            </Text>
+          </View>
+
+          <Text className="text-gray-500 mb-4">
+            {order.desserts.length} items
+          </Text>
+
+          {/* Order items preview */}
+          <View className="bg-gray-50 rounded-lg p-3 mb-4">
+            {order.desserts.slice(0, 3).map((item) => {
+              const pricePerItem =
+                (item.dessert.priceInCents +
+                  item.customisations.reduce((total, customisation) => {
+                    return (
+                      total +
+                      customisation.customisation.priceInCents *
+                        customisation.quantity
+                    )
+                  }, 0)) /
+                100
+              return (
+                <View key={item.id} className="flex-row justify-between mb-1">
+                  <Text className="text-gray-700">
+                    {item.quantity}x {item.dessert.name}
+                  </Text>
+                  <Text className="text-gray-700">
+                    {formatCurrency(pricePerItem * item.quantity)}
+                  </Text>
+                </View>
+              )
+            })}
+
+            {order.desserts.length > 3 && (
+              <Text className="text-gray-500 text-center mt-1">
+                +{order.desserts.length - 3} more items
+              </Text>
+            )}
+          </View>
+
+          {/* Customer info */}
+          <View className="mb-5">
+            <Text className="font-medium mb-1">Customer</Text>
+            <Text className="text-gray-700">{`${order.customerFirstName} ${order.customerLastName}`}</Text>
+            <Text className="text-gray-500">{order.customerPhoneNumber}</Text>
+          </View>
+
+          {/* Has customizations notice */}
+          {order.desserts.some(
+            (item) => item.customisations && item.customisations.length > 0
+          ) && (
+            <View className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4 flex-row items-center">
+              <Ionicons name="alert-circle" size={20} color="#F59E0B" />
+              <Text className="text-amber-800 ml-2">
+                This order has special instructions
+              </Text>
+            </View>
+          )}
+
+          {/* Accept/Decline buttons */}
+          <View className="flex-row mt-2">
+            {/* <TouchableOpacity
+              className="flex-1 bg-red-500 py-3 rounded-lg items-center justify-center mr-2"
+              onPress={handleDecline}
+            >
+              <Text className="text-white font-medium">Decline</Text>
+            </TouchableOpacity> */}
+
+            <TouchableOpacity
+              className="flex-1 bg-green-500 py-3 rounded-lg items-center justify-center ml-2"
+              onPress={handleAccept}
+            >
+              <Text className="text-white font-medium">Accept</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            className="mt-3 py-2 items-center"
+            onPress={() => router.push(`/order-details/${order.id}`)}
+          >
+            <Text className="text-indigo-600 font-medium">
+              View Complete Details
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
+  )
+}

@@ -1,0 +1,101 @@
+{
+  "expo": {
+    "name": "EversweetAdmin",
+    "slug": "eversweet_admin",
+    "version": "1.0.0",
+    "orientation": {
+      "default": "default",
+      "supportedOrientations": ["PORTRAIT", "LANDSCAPE_RIGHT"]
+    },
+    "icon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1747456979/eversweet_square_u6iyov.png",
+    "scheme": "eversweetappadmin",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "androidNavigationBar": {
+      "behavior": "sticky-immersive"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "requiresFullScreen": true,
+      "bundleIdentifier": "nz.co.eversweet.admin",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to thermal printers",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to thermal printers",
+        "UIBackgroundModes": [
+          "audio",
+          "fetch",
+          "remote-notification",
+          "bluetooth-central",
+          "audio",
+          "fetch",
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1747456979/eversweet_square_u6iyov.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "nz.co.eversweet.admin",
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1747456979/eversweet_square_u6iyov.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      [
+        "expo-splash-screen",
+        {
+          "image": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1742296950/eversweetLogo_epxrke.jpg",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      "expo-secure-store",
+      ["expo-font"],
+      "expo-audio",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": ["peripheral", "central"],
+          "bluetoothAlwaysPermission": "This app uses Bluetooth to connect to thermal printers"
+        }
+      ],
+      [
+        "react-native-permissions",
+        {
+          "iosPermissions": ["Bluetooth"]
+        }
+      ],
+
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "LANDSCAPE"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "017213af-a1de-45ca-8d67-bddf66aa04ed"
+      }
+    },
+    "owner": "finrei127"
+  }
+}

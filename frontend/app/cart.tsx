@@ -1,0 +1,188 @@
+import { View, Text, FlatList, TouchableOpacity, Button } from "react-native"
+import { useCartStore } from "@/store/cart"
+import AntDesign from "@expo/vector-icons/AntDesign"
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+} from "@react-navigation/native"
+import { useCallback, useState } from "react"
+import { Customisations, Dessert } from "@/utils/types"
+import CustomModal from "@/utils/modal"
+import Toast from "react-native-toast-message"
+import CustomHeader from "@/_components/custom-header"
+import Checkout from "./checkout"
+import { router } from "expo-router"
+import { getEarnablePoints } from "@/lib/formatters"
+
+export default function CartPage() {
+  const navigation = useNavigation()
+  const route = useRoute()
+  const cartItems = useCartStore((state) => state.items)
+  const clearCart = useCartStore((state) => state.clearCart)
+  const removeItem = useCartStore((state) => state.removeItem)
+  const incrementItem = useCartStore((state) => state.incrementItem)
+  const decrementItem = useCartStore((state) => state.decrementItem)
+  const getTotalCost = useCartStore((state) => state.getTotalCost)
+  const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
+  const [selectedDessertCustomisations, setSelectedDessertCustomisations] =
+    useState<Customisations | null>(null)
+  const [selectedDessertPriceInCents, setSelectedDessertPriceInCents] =
+    useState<number | null>(null)
+  const [modalVisible, setModalVisible] = useState(false)
+  const [type, setType] = useState<"points" | "cents">("cents")
+  const [editId, setEditId] = useState<string | null>(null)
+
+  const total = getTotalCost()
+
+  useFocusEffect(
+    useCallback(() => {
+      const title = "Back"
+
+      navigation.setOptions({
+        headerBackTitle: title,
+      })
+    }, [navigation, route.key])
+  )
+
+  return (
+    <>
+      <CustomHeader />
+      <View className="flex-1 bg-background pt-5 px-5 pb-10">
+        <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
+
+        {cartItems.length === 0 ? (
+          <Text className="text-base text-center mt-12 text-gray-500">
+            Your cart is empty.
+          </Text>
+        ) : (
+          <>
+            <FlatList
+              data={cartItems}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
+              renderItem={({ item }) => (
+                <View className="py-3 border-b border-gray-200">
+                  <View className="flex-row justify-between py-3">
+                    <View>
+                      <Text className="text-lg font-semibold">
+                        {item.dessert.name}
+                      </Text>
+                      {item.customisations.map((customisation) => (
+                        <Text key={customisation.id}>{`${
+                          customisation.quantity === 0 ? `- ` : `+ `
+                        } ${customisation.name} ${
+                          customisation.quantity > 1
+                            ? `x${customisation.quantity}`
+                            : ``
+                        }`}</Text>
+                      ))}
+                    </View>
+                    <Text className="text-lg font-semibold">
+                      ${(Number(item.itemPriceInCents) / 100).toFixed(2)}
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between items-center">
+                    <View className="flex-row items-center gap-10">
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSelectedDessert(item.dessert)
+                          setSelectedDessertCustomisations(item.customisations)
+                          setSelectedDessertPriceInCents(item.itemPriceInCents)
+                          setType(item.loyaltyPointsUsed ? "points" : "cents")
+                          setEditId(item.id)
+                          setModalVisible(true)
+                        }}
+                      >
+                        <Text className="text-primary font-bold text-xl">
+                          Edit
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity onPress={() => removeItem(item.id)}>
+                        <AntDesign name="delete" size={24} color="red" />
+                      </TouchableOpacity>
+                    </View>
+                    <View className="flex-row items-center gap-4">
+                      <TouchableOpacity
+                        onPress={() => decrementItem(item.id)}
+                        className={`w-10 h-10 rounded-full justify-center items-center ${
+                          item.loyaltyPointsUsed
+                            ? "bg-gray-300"
+                            : "bg-secondary"
+                        }`}
+                        disabled={!!item.loyaltyPointsUsed}
+                      >
+                        <Text className="text-xl font-bold">-</Text>
+                      </TouchableOpacity>
+
+                      <Text className="text-lg font-semibold">
+                        {item.quantity}
+                      </Text>
+
+                      <TouchableOpacity
+                        onPress={() => incrementItem(item.id)}
+                        className={`w-10 h-10 rounded-full justify-center items-center ${
+                          item.loyaltyPointsUsed
+                            ? "bg-gray-300"
+                            : "bg-secondary"
+                        }`}
+                        disabled={!!item.loyaltyPointsUsed}
+                      >
+                        <Text className="text-xl font-bold">+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              )}
+            />
+
+            <View className="mt-5 border-t border-gray-300 pt-4">
+              <View className="items-center flex-row justify-between">
+                <TouchableOpacity onPress={clearCart}>
+                  <Text className="text-red-500 text-xl">Clear cart</Text>
+                </TouchableOpacity>
+                <View>
+                  <Text className="text-lg font-bold text-right">
+                    Total: ${(total / 100).toFixed(2)}
+                  </Text>
+                  {total > 0 && (
+                    <Text>Earnable points: {getEarnablePoints(total)}</Text>
+                  )}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => router.push("/checkout")}
+                className="mt-4 bg-primary py-3 rounded-lg items-center"
+              >
+                <Text className="text-white font-bold">Checkout</Text>
+              </TouchableOpacity>
+            </View>
+            {modalVisible && (
+              <CustomModal
+                modalVisible={modalVisible}
+                setModalVisible={setModalVisible}
+                selectedDessert={selectedDessert}
+                type={type}
+                state="edit"
+                customisations={selectedDessertCustomisations}
+                editItemPrice={selectedDessertPriceInCents}
+                showToast={() => {
+                  Toast.show({
+                    type: "success",
+                    text1: `Your changes have been saved`,
+                    position: "bottom",
+                    visibilityTime: 2000,
+                    autoHide: true,
+                    bottomOffset: 30,
+                  })
+                }}
+                editId={editId}
+              />
+            )}
+          </>
+        )}
+      </View>
+    </>
+  )
+}

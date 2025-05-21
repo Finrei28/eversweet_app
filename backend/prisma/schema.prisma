@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Account {
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String?
+  access_token             String?
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String?
+  session_state            String?
+  refresh_token_expires_in Int?
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                   String          @id @default(cuid())
+  username             String?         @unique
+  password             String
+  email                String          @unique
+  emailVerified        DateTime?
+  image                String?
+  role                 Role
+  requires2FAExpiresAt DateTime?
+  otp                  String?
+  otpExpiresAt         DateTime?
+  firstName            String?
+  lastName             String?
+  phone                String?
+  stripeCustomerId     String?
+  pushToken            String?
+  accounts             Account[]
+  Authenticator        Authenticator[]
+  Loyalty              Loyalty?
+  appOrders            Order[]         @relation("UserOrders")
+  sessions             Session[]
+  cart                 CartItem[]
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Dessert {
+  id                     String                          @id @default(cuid())
+  name                   String
+  chineseName            String
+  description            String?
+  priceInCents           Int
+  priceInLoyaltyPoints   Int                             @default(500)
+  imagePath              String
+  imagePublicId          String
+  ingredients            String[]
+  isAvailableForPurchase Boolean                         @default(false)
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+  categoryId             String
+  category               Category                        @relation(fields: [categoryId], references: [id])
+  customisations         DessertCustomisationOnDessert[]
+  orders                 OrderDessert[]
+}
+
+model Category {
+  id             String                  @id @default(cuid())
+  name           String
+  chineseName    String
+  customisations CategoryCustomisation[]
+  desserts       Dessert[]
+}
+
+model DessertCustomisation {
+  id                     String                          @id @default(cuid())
+  name                   String
+  chineseName            String
+  priceInCents           Int
+  isAvailableForPurchase Boolean                         @default(false)
+  categories             CategoryCustomisation[]
+  desserts               DessertCustomisationOnDessert[]
+  orderCustomisations    OrderDessertCustomisation[]
+}
+
+model CategoryCustomisation {
+  id              String               @id @default(cuid())
+  categoryId      String
+  customisationId String
+  category        Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, customisationId])
+}
+
+model DessertCustomisationOnDessert {
+  dessertId       String
+  customisationId String
+  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  dessert         Dessert              @relation(fields: [dessertId], references: [id], onDelete: Cascade)
+
+  @@id([dessertId, customisationId])
+}
+
+model TempOrderCounter {
+  id      String      @id @default(cuid())
+  date    DateTime @unique
+  counter Int
+}
+
+model Order {
+  id                  String         @id @default(cuid())
+  tempOrderId         String
+  priceInCents        Int
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  customerFirstName   String
+  customerLastName    String
+  customerEmail       String
+  customerPhoneNumber String?
+  completedAt         DateTime?
+  pickedUpAt          DateTime?
+  status              Status
+  pickUpTime          DateTime       @default(now())
+  GST                 Int
+  appUserId           String?
+  source              OrderSource    @default(WEBSITE)
+  appUser             User?          @relation("UserOrders", fields: [appUserId], references: [id])
+  desserts            OrderDessert[]
+  paymentIntentId     String?
+  paymentMethodId     String?
+  notified            Boolean        @default(false)
+  
+  @@index([status])
+}
+
+model OrderDessertCustomisation {
+  id              String               @id @default(cuid())
+  orderDessertId  String
+  customisationId String
+  quantity        Int                  @default(1)
+  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  orderDessert    OrderDessert         @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
+}
+
+model OrderDessert {
+  id             String                      @id @default(cuid())
+  orderId        String
+  dessertId      String
+  quantity       Int
+  dessert        Dessert                     @relation(fields: [dessertId], references: [id])
+  order          Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customisations OrderDessertCustomisation[]
+
+  @@unique([orderId, dessertId, id])
+}
+
+model Feedback {
+  id              String   @id @default(cuid())
+  rating          Int
+  createdAt       DateTime @default(now())
+  feedbackMessage String
+  name            String?
+  email           String
+}
+
+model Loyalty {
+  id     String @id @default(cuid())
+  points Int
+  userId String @unique
+  User   User   @relation(fields: [userId], references: [id])
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum OrderSource {
+  WEBSITE
+  APP
+}
+
+enum Status {
+  PENDING
+  ACCEPTED
+  MAKING
+  READY
+  PICKED_UP
+}
+
+
+model CartItem {
+  id                String          @id @default(uuid())
+  user              User            @relation(fields: [userId], references: [id])
+  userId            String
+  dessert           DessertInCart         @relation(fields: [dessertId], references: [id])
+  dessertId         String
+  itemPriceInCents  Int
+  quantity          Int
+  loyaltyPointsUsed Int?
+  customisations    CustomisationInCart[]
+}
+
+model CustomisationInCart {
+  id            String   @id @default(uuid())
+  cartItem      CartItem @relation(fields: [cartItemId], references: [id])
+  cartItemId    String
+  chineseName   String
+  name          String
+  quantity      Int
+}
+
+model DessertInCart {
+  id                  String   @id @default(uuid())
+  name                String
+  chineseName         String
+  description         String?
+  priceInCents        Int
+  priceInLoyaltyPoints Int
+  imagePath           String
+  ingredients         String[] // Stored as string[] (PostgreSQL/SQLite)
+  cartItems           CartItem[]
+}

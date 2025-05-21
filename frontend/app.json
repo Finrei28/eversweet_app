@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "eversweet_app",
+    "slug": "eversweet_app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+    "scheme": "myapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "extra": {
+      "eas": {
+        "projectId": "c393dcac-7d8e-424c-9c79-d13a5085ffc8"
+      }
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "nz.co.eversweet",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "nz.co.eversweet"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "owner": "finrei127"
+  }
+}
