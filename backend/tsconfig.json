@@ -12,5 +12,6 @@
     "jsx": "react",
     "allowJs": true,
     "typeRoots": ["./src/types"]
-  }
+  },
+  "include": ["src"]
 }
