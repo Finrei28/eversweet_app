@@ -7,7 +7,9 @@
     "dev": "nodemon src/index.ts",
     "email": "cp .env ./node_modules/react-email && email dev --dir src/email --port 3001",
     "postinstall": "prisma generate",
-    "start": "node src/index.ts"
+    "start": "node src/index.js",
+    "build": "tsc",
+    "vercel-build": "tsc"
   },
   "keywords": [],
   "author": "",
