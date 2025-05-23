@@ -1,7 +1,7 @@
 import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { Expo } from "expo-server-sdk"
-import { Status } from "@prisma/client"
+import { Order, $Enums } from "@prisma/client"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import {
@@ -15,7 +15,6 @@ import {
   endOfMonth,
 } from "date-fns"
 import { emitNewOrder } from "../socket"
-
 const expo = new Expo()
 
 export const adminSignIn = async (req: Request, res: Response) => {
@@ -291,7 +290,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     return
   }
 
-  if (!Object.values(Status).includes(newStatus)) {
+  if (!Object.values($Enums.Status).includes(newStatus)) {
     res.status(400).json({ message: "Invalid status" })
     return
   }
@@ -459,7 +458,7 @@ export const getOverview = async (req: Request, res: Response) => {
     // Count orders per day
     eachDayOfInterval({ start: weekStart, end: weekEnd }).forEach(
       (day, index) => {
-        const ordersForDay = thisWeeksOrders.filter((order) =>
+        const ordersForDay = thisWeeksOrders.filter((order: Order) =>
           isSameDay(new Date(order.createdAt), day)
         )
         overview[index].value = ordersForDay.length
@@ -467,7 +466,10 @@ export const getOverview = async (req: Request, res: Response) => {
     )
 
     const todaySales =
-      todaysOrders.reduce((total, order) => total + order.priceInCents, 0) / 100
+      todaysOrders.reduce(
+        (total, order: Order) => total + order.priceInCents,
+        0
+      ) / 100
 
     res.status(200).json({ overview, today, week, month, todaySales })
     return
@@ -537,7 +539,7 @@ export const getFutureOrders = async () => {
         },
       },
     })
-
+    //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
       if (timeBetween <= 15 * 60 * 1000) return false
