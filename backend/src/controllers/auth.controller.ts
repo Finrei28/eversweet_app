@@ -7,8 +7,8 @@ import { z } from "zod"
 import { Resend } from "resend"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
-import { $Enums } from "@prisma/client"
 import { emitNewOrder } from "../socket"
+import { Status } from "../types/types"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -272,7 +272,7 @@ export const getUserOrders = async (req: Request, res: Response) => {
     const userId = (req as any).userId
 
     const { status } = req.body
-    if (!Object.values($Enums.Status).includes(status)) {
+    if (!Object.values(Status).includes(status)) {
       res.status(400).json({ message: "Invalid status" })
       return
     }

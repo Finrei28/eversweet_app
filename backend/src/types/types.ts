@@ -1,5 +1,3 @@
-import { $Enums } from "@prisma/client"
-
 export type FullOrderType = {
   id: string
   tempOrderId: string
@@ -12,7 +10,7 @@ export type FullOrderType = {
   customerPhoneNumber: string | null
   pickedUpAt: Date | null
   pickUpTime: Date
-  status: $Enums.Status // Assuming $Enums.Status refers to an enum for order status
+  status: StatusType // Assuming $Enums.Status refers to an enum for order status
   desserts: {
     id: string
     dessertId: string
@@ -36,4 +34,40 @@ export type FullOrderType = {
       }
     }[]
   }[]
+}
+
+export type OrderType = {
+  id: string
+  tempOrderId: string
+  priceInCents: number
+  GST: number
+  createdAt: Date
+  customerFirstName: string
+  customerLastName: string
+  customerEmail: string
+  customerPhoneNumber: string | null
+  completedAt: Date | null
+  pickedUpAt: Date | null
+  pickUpTime: Date
+  status: StatusType
+  appUserId: string | null
+  source: "WEBSITE" | "APP"
+  paymentIntentId: string | null
+  paymentMethodId: string | null
+  notified: boolean
+}
+
+export type StatusType =
+  | "PENDING"
+  | "ACCEPTED"
+  | "MAKING"
+  | "READY"
+  | "PICKED_UP"
+
+export enum Status {
+  PENDING = "PENDING",
+  ACCEPTED = "ACCEPTED",
+  MAKING = "MAKING",
+  READY = "READY",
+  PICKED_UP = "PICKED_UP",
 }
