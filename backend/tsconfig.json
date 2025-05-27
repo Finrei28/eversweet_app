@@ -13,5 +13,5 @@
     "allowJs": true,
     "typeRoots": ["./src/types"]
   },
-  "include": ["src"]
+  "include": ["src/**/*"]
 }

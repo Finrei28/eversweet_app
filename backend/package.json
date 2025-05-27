@@ -8,8 +8,7 @@
     "email": "cp .env ./node_modules/react-email && email dev --dir src/email --port 3001",
     "postinstall": "prisma generate",
     "start": "node dist/index.js",
-    "build": "tsc",
-    "vercel-build": "tsc"
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
