@@ -16,6 +16,12 @@ export function formatNumber(amount: number) {
 
 export const formatDate = (dateString: string) => {
   const date = new Date(dateString)
+  console.log(
+    "formatDate called with dateString:",
+    dateString,
+    "Parsed date:",
+    date
+  )
   return new Intl.DateTimeFormat("en-NZ", {
     weekday: "long",
     year: "numeric",
@@ -27,6 +33,7 @@ export const formatDate = (dateString: string) => {
 }
 
 export const getCollectionTime = (date: Date) => {
+  console.log("getCollectionTime called with date:", date)
   return new Intl.DateTimeFormat("en-NZ", {
     year: "numeric",
     month: "numeric",

@@ -6,10 +6,18 @@ import clientRoutes from "./routes/client.routes"
 import stripeRoutes from "./routes/stripe.routes"
 import notificationRoutes from "./routes/notification.routes"
 import adminRoutes from "./routes/admin.routes"
-import { Server } from "socket.io"
+import { Server, Socket } from "socket.io"
 import http from "http"
 import cron from "node-cron"
 import { getFutureOrders } from "./controllers/admin.controller"
+import jwt from "jsonwebtoken"
+
+// Extend Socket type to include userId
+declare module "socket.io" {
+  interface Socket {
+    userId?: string
+  }
+}
 
 dotenv.config()
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
@@ -17,12 +25,66 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
 const app = express()
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
-const io = new Server(server, {
+
+// Initialize Socket.IO with CORS configuration
+export const io = new Server(server, {
   cors: {
-    origin: "*", // or restrict to your frontend domain
+    origin: "*", // In production, restrict this to your app's domain
     methods: ["GET", "POST"],
+    allowedHeaders: ["Authorization"],
+    credentials: true,
   },
 })
+
+// Authentication middleware for socket connections
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token
+  console.log("Socket connection attempt ", token)
+  if (!token) {
+    return next(new Error("Authentication error"))
+  }
+
+  // In a real app, verify the token here
+  // For example: verifyJWT(token)
+
+  jwt.verify(
+    token,
+    process.env.JWT_SECRET!,
+    (
+      err: jwt.VerifyErrors | null,
+      decoded: jwt.JwtPayload | string | undefined
+    ) => {
+      if (err) {
+        return next(new Error("Authentication error"))
+      }
+      console.log("Decoded token: ", decoded)
+    }
+  )
+
+  // Attach user info to the socket
+  socket.userId = "admin" // This would come from the token verification
+  next()
+})
+
+// Handle socket connections
+io.on("connection", (socket) => {
+  console.log(`User connected: ${socket.userId}`)
+
+  // Join admin room if user is admin
+  if (socket.userId === "admin") {
+    socket.join("admin-room")
+  }
+
+  socket.on("disconnect", () => {
+    console.log(`User disconnected: ${socket.userId}`)
+  })
+})
+
+// Function to emit new order event
+//@ts-ignore
+export const emitNewOrder = (order) => {
+  io.to("admin-room").emit("new-order", order)
+}
 
 interface CorsOptions {
   origin: (

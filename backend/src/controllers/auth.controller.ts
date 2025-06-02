@@ -7,7 +7,7 @@ import { z } from "zod"
 import { Resend } from "resend"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
-import { emitNewOrder } from "../socket"
+import { emitNewOrder } from "../index"
 import { Status } from "../types/types"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)

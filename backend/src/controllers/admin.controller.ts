@@ -13,7 +13,7 @@ import {
   startOfMonth,
   endOfMonth,
 } from "date-fns"
-import { emitNewOrder } from "../socket"
+import { emitNewOrder } from "../index"
 import { OrderType, Status } from "../types/types"
 const expo = new Expo()
 
