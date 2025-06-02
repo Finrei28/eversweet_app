@@ -3,20 +3,16 @@
     "name": "EversweetAdmin",
     "slug": "eversweet_admin",
     "version": "1.0.0",
-    "orientation": {
-      "default": "default",
-      "supportedOrientations": ["PORTRAIT", "LANDSCAPE_RIGHT"]
-    },
+    "orientation": "portrait",
     "icon": "./assets/images/eversweet_1024.png",
     "scheme": "eversweetappadmin",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "androidNavigationBar": {
-      "behavior": "sticky-immersive"
+      "visible": "sticky-immersive"
     },
     "ios": {
       "supportsTablet": true,
-      "requiresFullScreen": true,
       "bundleIdentifier": "nz.co.eversweet.admin",
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to thermal printers",

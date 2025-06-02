@@ -161,7 +161,7 @@ export default function NewOrderAlert() {
             {getCollectionTime(new Date())}
           </Text>
           <Text className="text-gray-500 mb-4">
-            {getCollectionTime(order.pickUpTime)}
+            Pick up at {getCollectionTime(new Date(order.pickUpTime))}
           </Text>
           <View className="flex-row justify-between mb-2">
             <Text className="text-xl font-semibold">
