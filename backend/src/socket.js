@@ -5,10 +5,10 @@ import { Server } from "socket.io"
 
 // Create Express app and HTTP server
 const app = express()
-const server = http.createServer(app)
+// const server = http.createServer(app)
 
 // Initialize Socket.IO with CORS configuration
-const io = new Server(server, {
+const io = new Server(app, {
   cors: {
     origin: "*", // In production, restrict this to your app's domain
     methods: ["GET", "POST"],
@@ -59,7 +59,7 @@ export const emitNewOrder = (orderId) => {
 
 // Start the server
 const PORT = process.env.SOCKET_PORT || 3001
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`Socket.IO server running on port ${PORT}`)
 })
 
