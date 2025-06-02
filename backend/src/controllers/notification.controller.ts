@@ -159,7 +159,7 @@ export const orderStatusChange = async (req: Request, res: Response) => {
     switch (newStatus) {
       case "ACCEPTED":
         title = "Your order has been accepted!"
-        body = `Order #${orderNumber} has been accepted and waiting to be made.`
+        body = `Order #${orderNumber} has been accepted and is waiting to be made.`
         break
       case "READY":
         title = "Your order is ready!"
