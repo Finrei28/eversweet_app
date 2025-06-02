@@ -1,14 +1,14 @@
-import jwt from "jsonwebtoken"
-import express from "express"
-import http from "http"
-import { Server } from "socket.io"
+const jwt = require("jsonwebtoken")
+const express = require("express")
+const http = require("http")
+const { Server } = require("socket.io")
 
 // Create Express app and HTTP server
 const app = express()
-// const server = http.createServer(app)
+const server = http.createServer(app)
 
 // Initialize Socket.IO with CORS configuration
-const io = new Server(app, {
+const io = new Server(server, {
   cors: {
     origin: "*", // In production, restrict this to your app's domain
     methods: ["GET", "POST"],
@@ -53,13 +53,13 @@ io.on("connection", (socket) => {
 })
 
 // Function to emit new order event
-export const emitNewOrder = (orderId) => {
+const emitNewOrder = (orderId) => {
   io.to("admin-room").emit("new-order", orderId)
 }
 
 // Start the server
 const PORT = process.env.SOCKET_PORT || 3001
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Socket.IO server running on port ${PORT}`)
 })
 
