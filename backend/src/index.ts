@@ -70,6 +70,6 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id)
 })
 
-app.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`)
+server.listen(PORT, () => {
+  console.log(`Server + Socket.IO running on ${PORT}`)
 })
