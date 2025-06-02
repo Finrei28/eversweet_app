@@ -42,7 +42,7 @@ const corsOptions: CorsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true) // Allow
     } else {
-      callback(new Error("Not allowed by CORS")) // Block
+      callback(new Error(`Not allowed by CORS ${origin}`)) // Block
     }
   }, // Change this to your frontend URL
   methods: "GET,POST,PATCH,PUT",

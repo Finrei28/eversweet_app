@@ -1,6 +1,7 @@
-const { Server } = require("socket.io")
-const http = require("http")
-const express = require("express")
+import jwt from "jsonwebtoken"
+import express from "express"
+import http from "http"
+import { Server } from "socket.io"
 
 // Create Express app and HTTP server
 const app = express()
@@ -25,6 +26,12 @@ io.use((socket, next) => {
 
   // In a real app, verify the token here
   // For example: verifyJWT(token)
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return next(new Error("Authentication error"))
+    }
+  })
 
   // Attach user info to the socket
   socket.userId = "admin" // This would come from the token verification
