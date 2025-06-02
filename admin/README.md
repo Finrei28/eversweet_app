@@ -1,4 +1,24 @@
-# Welcome to your Expo app 👋
+# Welcome Eversweet Admin 👋
+
+# App Audio Permission Explanation
+
+This project uses the [`expo-av`](https://docs.expo.dev/versions/latest/sdk/av/) library to provide audio alert functionality for store staff.
+
+## Why `expo-av` is used
+
+- The app plays alert sounds whenever a **new order arrives**.
+- This feature notifies store employees (admins) in real-time so they can **accept and prepare orders efficiently**.
+- `expo-av` is used **only for audio playback** of alert tones, and **does not record or capture any audio** from the user’s device.
+
+## Privacy and Permissions
+
+- The `android.permission.RECORD_AUDIO` permission is included because `expo-av` supports audio recording features.
+- **However, this app does NOT use or activate microphone recording in any way.**
+- The microphone permission is required by `expo-av` internally but is **not utilized by the app**.
+
+---
+
+If you have any questions or concerns about privacy or app permissions, please contact us at [eversweet@eversweet.co.nz].
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
