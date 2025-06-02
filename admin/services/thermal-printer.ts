@@ -80,7 +80,7 @@ class ThermalPrinterService {
   private setupBleListener() {
     // Listen for state changes
     this.bleManager.onStateChange((state) => {
-      console.log("Bluetooth state changed to:", state)
+      // console.log("Bluetooth state changed to:", state)
     }, true)
   }
 
@@ -153,7 +153,7 @@ class ThermalPrinterService {
 
     // Stop any existing scan
     this.bleManager.stopDeviceScan()
-    console.log("🔍 Starting Bluetooth scan...")
+    // console.log("🔍 Starting Bluetooth scan...")
     // Start scanning
     return new Promise((resolve) => {
       this.bleManager.startDeviceScan(
@@ -169,7 +169,7 @@ class ThermalPrinterService {
 
           if (device && device.name) {
             this.discoveredDevices.set(device.id, device)
-            console.log("Found device:", device.name, device.id)
+            // console.log("Found device:", device.name, device.id)
           }
         }
       )
@@ -190,7 +190,7 @@ class ThermalPrinterService {
       this.bleManager.stopDeviceScan()
       this.isScanning = false
       this.emitScanStateChange()
-      console.log("BLE scan stopped")
+      // console.log("BLE scan stopped")
     }
   }
 
@@ -373,15 +373,15 @@ class ThermalPrinterService {
         await this.disconnectPrinter()
       }
 
-      console.log(`Connecting to device: ${deviceId}`)
+      // console.log(`Connecting to device: ${deviceId}`)
 
       // Connect to the device
       const device = await this.bleManager.connectToDevice(deviceId)
-      console.log("Connected to device:", device.name)
+      // console.log("Connected to device:", device.name)
 
       // Discover services and characteristics
       await device.discoverAllServicesAndCharacteristics()
-      console.log("Discovered services and characteristics")
+      // console.log("Discovered services and characteristics")
 
       // Find the printer service and characteristic
       const services = await device.services()
@@ -399,7 +399,7 @@ class ThermalPrinterService {
         )
 
         if (isKnownService) {
-          console.log("Found potential printer service:", serviceUuid)
+          // console.log("Found potential printer service:", serviceUuid)
           foundService = service
 
           // Look for a writable characteristic
@@ -417,7 +417,7 @@ class ThermalPrinterService {
               )
 
               if (isKnownChar) {
-                console.log("Found potential printer characteristic:", charUuid)
+                // console.log("Found potential printer characteristic:", charUuid)
                 foundCharacteristic = characteristic
                 break
               }
@@ -439,7 +439,7 @@ class ThermalPrinterService {
               characteristic.isWritableWithResponse ||
               characteristic.isWritableWithoutResponse
             ) {
-              console.log("Found writable characteristic:", characteristic.uuid)
+              // console.log("Found writable characteristic:", characteristic.uuid)
               foundService = service
               foundCharacteristic = characteristic
               break
@@ -476,7 +476,7 @@ class ThermalPrinterService {
     if (this.connectedDevice) {
       try {
         await this.bleManager.cancelDeviceConnection(this.connectedDevice.id)
-        console.log("Disconnected from device:", this.connectedDevice.name)
+        // console.log("Disconnected from device:", this.connectedDevice.name)
       } catch (error) {
         console.error("Error disconnecting from printer:", error)
       } finally {

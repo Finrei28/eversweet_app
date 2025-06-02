@@ -195,11 +195,6 @@ export default function OrderDetails() {
             {/* Order Totals */}
             <View className="mt-4 pt-3 border-t border-gray-200">
               <View className="flex-row justify-between mb-1">
-                <Text className="text-gray-500">Subtotal</Text>
-                <Text>{formatCurrency(order.priceInCents / 100)}</Text>
-              </View>
-
-              <View className="flex-row justify-between mb-1">
                 <Text className="text-gray-500">GST</Text>
                 <Text>{formatCurrency(order.GST / 100)}</Text>
               </View>

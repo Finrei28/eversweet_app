@@ -1,6 +1,6 @@
 "use client"
 
-import { formatCurrency } from "@/lib/formatters"
+import { formatCurrency, getCollectionTime } from "@/lib/formatters"
 import { useOrderContext } from "@/providers/order-provider"
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
@@ -157,6 +157,12 @@ export default function NewOrderAlert() {
 
         {/* Order summary */}
         <View className="p-4">
+          <Text className="text-gray-500 mb-4">
+            {getCollectionTime(new Date())}
+          </Text>
+          <Text className="text-gray-500 mb-4">
+            {getCollectionTime(order.pickUpTime)}
+          </Text>
           <View className="flex-row justify-between mb-2">
             <Text className="text-xl font-semibold">
               Order #{order.tempOrderId}

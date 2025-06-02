@@ -30,10 +30,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const token = await getToken()
 
       if (!token) {
-        console.log("No auth token found, skipping socket connection")
+        console.error("No auth token found, skipping socket connection")
         return
       }
-      console.log({ url: process.env.EXPO_PUBLIC_SOCKET_URL })
       // Create socket connection
       const socketInstance = io(
         process.env.EXPO_PUBLIC_SOCKET_URL || "http://localhost:3001",
@@ -48,12 +47,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
       // Set up event listeners
       socketInstance.on("connect", () => {
-        console.log("Socket connected")
+        // console.log("Socket connected")
         setIsConnected(true)
       })
 
       socketInstance.on("disconnect", () => {
-        console.log("Socket disconnected")
+        // console.log("Socket disconnected")
         setIsConnected(false)
       })
 
@@ -65,6 +64,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       // Listen for new orders
       socketInstance.on("new-order", async (order: Order) => {
         // Add the order to the context
+        // console.log("New order received:", order)
         setPendingOrders((prev) => [...prev, order])
         setTimeout(() => {
           setOrderAlertQueue((prev) => [...prev, order.id])
