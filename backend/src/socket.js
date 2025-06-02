@@ -53,7 +53,7 @@ io.on("connection", (socket) => {
 })
 
 // Function to emit new order event
-const emitNewOrder = (orderId) => {
+export const emitNewOrder = (orderId) => {
   io.to("admin-room").emit("new-order", orderId)
 }
 
