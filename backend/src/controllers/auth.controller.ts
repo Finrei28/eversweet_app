@@ -574,7 +574,12 @@ export const createOrder = async (req: Request, res: Response) => {
       subject: "Order Confirmation",
       react: EmailOrderConfirmation({ order: newOrder }),
     })
-    emitNewOrder(newOrder)
+    if (
+      newOrder.pickUpTime.getTime() - new Date().getTime() <=
+      1000 * 60 * 15
+    ) {
+      emitNewOrder(newOrder)
+    }
 
     await db.order.update({
       where: { id: newOrder.id },
