@@ -20,6 +20,7 @@ const io = new Server(server, {
 // Authentication middleware for socket connections
 io.use((socket, next) => {
   const token = socket.handshake.auth.token
+  console.log("Socket connection attempt ", token)
   if (!token) {
     return next(new Error("Authentication error"))
   }
@@ -31,6 +32,7 @@ io.use((socket, next) => {
     if (err) {
       return next(new Error("Authentication error"))
     }
+    console.log("Decoded token: ", decoded)
   })
 
   // Attach user info to the socket

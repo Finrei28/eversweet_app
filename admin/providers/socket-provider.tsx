@@ -33,11 +33,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         console.log("No auth token found, skipping socket connection")
         return
       }
-
+      console.log({ url: process.env.EXPO_PUBLIC_SOCKET_URL })
       // Create socket connection
       const socketInstance = io(
         process.env.EXPO_PUBLIC_SOCKET_URL || "http://localhost:3001",
         {
+          transports: ["polling"],
           auth: { token },
           reconnection: true,
           reconnectionAttempts: 5,
