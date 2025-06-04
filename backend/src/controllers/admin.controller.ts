@@ -307,11 +307,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       },
     })
 
-    // In a real app, you would get the user's push token from your database
-    // Example: const user = await db.collection('users').findOne({ _id: userId })
-    // const pushToken = user.pushToken
-
-    // For this example, we'll assume you have the token
+    // If there is a customerId i.e, it is an app order, send a push notification
     const tickets = []
     if (customerId && newStatus !== "PICKED_UP") {
       const token = await db.user.findUnique({
@@ -323,7 +319,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           role: true,
           pushToken: true,
         },
-      }) // In a real app, get this from the database
+      })
 
       const pushToken = token?.pushToken
 
@@ -340,7 +336,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       switch (newStatus) {
         case "ACCEPTED":
           title = "Your order has been accepted!"
-          body = `Order #${orderNumber} has been accepted and waiting to be made.`
+          body = `Order #${orderNumber} has been accepted and is waiting to be made.`
           break
         case "READY":
           title = "Your order is ready!"
