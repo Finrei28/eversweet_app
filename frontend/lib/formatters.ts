@@ -26,7 +26,6 @@ export const formatDate = (dateString: string) => {
   }).format(date)
 }
 
-// Calculate collection time (30 minutes after order time)
 export const getCollectionTime = (date: Date) => {
   return new Intl.DateTimeFormat("en-NZ", {
     year: "numeric",

@@ -540,6 +540,7 @@ function CheckoutContent() {
 
             {cartItems.map((item, index) => (
               <View
+                key={item.id}
                 className={`${
                   index < cartItems.length - 1
                     ? "border-b border-gray-100 py-4"
@@ -572,12 +573,6 @@ function CheckoutContent() {
             ))}
 
             <View className="mt-4 pt-3 border-t border-gray-200">
-              <View className="flex-row justify-between mb-1">
-                <Text className="text-gray-500">Subtotal</Text>
-                <Text className="font-medium">
-                  ${calculateTotal().toFixed(2)}
-                </Text>
-              </View>
               <View className="flex-row justify-between mb-1">
                 <Text className="text-gray-500">GST Included (15%)</Text>
                 <Text className="font-medium">

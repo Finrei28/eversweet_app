@@ -100,7 +100,7 @@ export default function OrderDetails() {
               <View className="mt-2 bg-amber-50 px-3 py-2 rounded-lg border border-amber-200 flex-row items-center">
                 <Ionicons name="alert-circle" size={18} color="#F59E0B" />
                 <Text className="text-amber-800 ml-2 font-medium">
-                  This order has customizations
+                  This order has customisations
                 </Text>
               </View>
             )}

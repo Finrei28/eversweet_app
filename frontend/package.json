@@ -2,7 +2,6 @@
   "name": "eversweet_app",
   "main": "expo-router/entry",
   "version": "1.0.0",
-  "proxy": "http://localhost:3000",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
