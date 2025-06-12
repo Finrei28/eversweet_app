@@ -17,8 +17,8 @@ import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
 import CustomModal from "@/utils/modal"
-import { getToken } from "@/services/authToken"
 import { useLoyaltyStore } from "@/store/points"
+import { useAuth } from "@/store/authProvider"
 
 export default function Loyalty() {
   const [selectedCategory, setSelectedCategory] =
@@ -31,34 +31,17 @@ export default function Loyalty() {
 
   const cartItems = useCartStore((state) => state.items)
 
-  const {
-    data: categories,
-    refetch: refetchCategories,
-    error: categoriesError,
-    loading: categoriesLoading,
-  } = useFetch(fetchCategoriesWithDesserts)
+  const { data: categories, loading: categoriesLoading } = useFetch(
+    fetchCategoriesWithDesserts
+  )
 
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading: loadingToken } = useAuth()
 
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
-  useFocusEffect(
-    useCallback(() => {
-      const fetchToken = async () => {
-        const storedToken = await getToken()
-        setToken(storedToken)
-        setLoadingToken(false)
-      }
-
-      fetchToken()
-    }, [])
-  )
 
   useEffect(() => {
     if (token) {
       useLoyaltyStore.getState().fetchPoints()
-    } else {
-      setToken(null)
     }
   }, [token])
 

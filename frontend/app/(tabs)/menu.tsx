@@ -19,33 +19,25 @@ import useFetch from "@/services/use_fetch"
 import CustomModal from "@/utils/modal"
 import Toast from "react-native-toast-message"
 import { SafeAreaProvider } from "react-native-safe-area-context"
-import { getToken } from "@/services/authToken"
+import { useAuth } from "@/store/authProvider"
 
 export default function Menu() {
   const [selectedCategory, setSelectedCategory] =
     useState<DessertCategory | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>("")
-  const [quantity, setQuantity] = useState(1)
   const { categoryParam } = useLocalSearchParams()
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
-  const [token, setToken] = useState<string | null>(null)
+  const { token } = useAuth()
 
   const router = useRouter()
-  const addItem = useCartStore((state) => state.addItem)
   const cartItems = useCartStore((state) => state.items)
 
-  const {
-    data: menu,
-    error,
-    loading,
-  } = useFetch(() => fetchCategoriesWithDesserts())
+  const { data: menu, loading } = useFetch(() => fetchCategoriesWithDesserts())
 
   useFocusEffect(
     useCallback(() => {
       const fetchData = async () => {
-        const token = await getToken()
-        setToken(token)
         if (!menu) return
 
         const selected = categoryParam

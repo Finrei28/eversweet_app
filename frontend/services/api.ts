@@ -9,6 +9,7 @@ import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
 import { format } from "date-fns"
 import { getToken } from "./authToken"
+import { useAuth } from "@/store/authProvider"
 
 const url = process.env.EXPO_PUBLIC_URL!
 
@@ -62,17 +63,20 @@ export async function createAccount(formData: createAccountData) {
   }
 }
 
-export async function signIn({
-  email,
-  password,
-}: {
-  email: string
-  password: string
-}) {
+export async function signIn(
+  {
+    email,
+    password,
+  }: {
+    email: string
+    password: string
+  },
+  signInProvider: (token: string) => Promise<void> // pass from context
+): Promise<string> {
   if (!email || !password) {
     throw new Error("Email and password are required.")
   }
-  // Fetch only necessary fields
+
   try {
     const res = await fetch(`${url}/api/auth/signin`, {
       method: "POST",
@@ -81,20 +85,19 @@ export async function signIn({
         "Content-Type": "application/json",
       },
     })
+
     const data = await res.json()
 
     if (res.status === 401) {
-      // Email doesn't exist
       throw new Error("Incorrect email or password.")
     }
+
     if (!res.ok) {
-      throw new Error(`Failed to sign in, please try again later`)
+      throw new Error("Failed to sign in, please try again later.")
     }
 
-    // const data = await res.json()
-
-    await SecureStore.setItemAsync("token", data.token)
-    return data.name
+    await signInProvider(data.token) // Set token and user
+    return data.name // Optionally return name or user data
   } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
   }

@@ -2,21 +2,18 @@ import BouncingLoader from "@/_components/loader"
 import { StatusBadge } from "@/_components/orderStatusBadge"
 import PageHeader from "@/_components/pageheader"
 import { formatDate, getCollectionTime } from "@/lib/formatters"
-import { getUserOrders, sendOrderStatusNotification } from "@/services/api"
-import { getToken } from "@/services/authToken"
+import { getUserOrders } from "@/services/api"
 import useFetch from "@/services/use_fetch"
+import { useAuth } from "@/store/authProvider"
 import { Order } from "@/utils/types"
 import { Feather } from "@expo/vector-icons"
-import { format } from "date-fns"
 import { useFocusEffect, useRouter } from "expo-router"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import {
-  Animated,
   Image,
   Platform,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -24,25 +21,11 @@ import {
 
 export default function Orders() {
   const router = useRouter()
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading } = useAuth()
   const [refreshing, setRefreshing] = useState(false)
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
-  const prevOrdersRef = useRef<Order[] | null>(null)
 
   // Use our custom animation hook
-
-  useFocusEffect(
-    useCallback(() => {
-      const fetchToken = async () => {
-        const storedToken = await getToken()
-        setToken(storedToken)
-        setLoadingToken(false)
-      }
-
-      fetchToken()
-    }, [])
-  )
 
   const {
     data: orders,
@@ -82,7 +65,7 @@ export default function Orders() {
   const completedOrders =
     orders?.filter((order) => order.status === "READY") || []
 
-  if (loadingToken || ordersLoading) {
+  if (loading || ordersLoading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />
@@ -102,19 +85,23 @@ export default function Orders() {
       <View className="flex-1 bg-background">
         <PageHeader />
         <View
-          className={`flex-1 items-center justify-center px-4 ${
+          className={`flex-1 justify-center items-center ${
             Platform.OS === "ios" ? "mt-32" : "mt-24"
           }`}
         >
-          <Feather name="user-x" size={64} color="#D1D5DB" />
-          <Text className="mt-4 text-xl text-center text-gray-500">
-            Please sign in to see your orders
+          <Text className="text-xl font-bold text-center px-4">
+            Sign in to view your orders
           </Text>
           <TouchableOpacity
-            onPress={() => router.push("/signin")}
-            className="mt-6 bg-primary py-3 px-6 rounded-lg"
+            onPress={() => {
+              router.push({
+                pathname: "/signin",
+                params: { redirectTo: "/rewards" },
+              })
+            }}
+            className="bg-primary p-3 rounded-lg w-1/3 items-center mt-5"
           >
-            <Text className="text-white font-medium">Sign In</Text>
+            <Text className="text-white text-xl">Sign in</Text>
           </TouchableOpacity>
         </View>
       </View>

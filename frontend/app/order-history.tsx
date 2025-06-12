@@ -13,32 +13,19 @@ import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
-import { getToken } from "@/services/authToken"
 import useFetch from "@/services/use_fetch"
 import { getUserOrders } from "@/services/api"
-import { FontAwesome } from "@expo/vector-icons"
 import { formatDate } from "@/lib/formatters"
+import { useAuth } from "@/store/authProvider"
 
 export default function OrderHistory() {
   const router = useRouter()
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading: loadingToken } = useAuth()
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null)
-
-  useEffect(() => {
-    const fetchToken = async () => {
-      const storedToken = await getToken()
-      setToken(storedToken)
-      setLoadingToken(false)
-    }
-
-    fetchToken()
-  }, [])
 
   const {
     data: orders,
     loading: ordersLoading,
-    error: ordersError,
     refetch: refetchOrders,
   } = useFetch(() => getUserOrders("PICKED_UP"))
 

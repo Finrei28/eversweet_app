@@ -2,36 +2,21 @@
 
 import { View, Text, TouchableOpacity, ScrollView } from "react-native"
 import type React from "react"
-import { useEffect, useState } from "react"
 import PageHeader from "@/_components/pageheader"
-import useFetch from "@/services/use_fetch"
-import { getUserLoyaltyPoints } from "@/services/api"
-import { getToken, removeToken } from "@/services/authToken"
 import BouncingLoader from "@/_components/loader"
 import { useRouter } from "expo-router"
 import { MaterialIcons, Feather } from "@expo/vector-icons"
 import { useLoyaltyStore } from "@/store/points"
+import { useAuth } from "@/store/authProvider"
 
 export default function Profile() {
   const router = useRouter()
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
-
-  useEffect(() => {
-    const fetchToken = async () => {
-      const storedToken = await getToken()
-      setToken(storedToken)
-      setLoadingToken(false)
-    }
-
-    fetchToken()
-  }, [])
+  const { token, signOutProvider, loading } = useAuth()
 
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
 
   const handleLogout = async () => {
-    await removeToken()
-    setToken(null)
+    await signOutProvider()
     // Refresh the screen or navigate to home
     router.replace("/")
   }
@@ -66,7 +51,7 @@ export default function Profile() {
     </TouchableOpacity>
   )
 
-  if (loadingToken)
+  if (loading)
     return (
       <View className="flex-1 bg-background">
         <PageHeader />

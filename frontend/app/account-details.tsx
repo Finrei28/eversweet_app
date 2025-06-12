@@ -10,15 +10,14 @@ import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
-import { getToken } from "@/services/authToken"
 import useFetch from "@/services/use_fetch"
 import { getUserProfile, updateUserProfile } from "@/services/api"
+import { useAuth } from "@/store/authProvider"
 
 export default function AccountDetails() {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading: loadingToken } = useAuth()
 
   // Form state
   const [formData, setFormData] = useState({
@@ -28,20 +27,9 @@ export default function AccountDetails() {
     phone: "",
   })
 
-  useEffect(() => {
-    const fetchToken = async () => {
-      const storedToken = await getToken()
-      setToken(storedToken)
-      setLoadingToken(false)
-    }
-
-    fetchToken()
-  }, [])
-
   const {
     data: userProfile,
     loading: profileLoading,
-    error: profileError,
     refetch: refetchProfile,
   } = useFetch(getUserProfile)
 

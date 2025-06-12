@@ -12,6 +12,7 @@ import {
   setupNotificationListeners,
   handleNotification,
 } from "@/services/notifications"
+import { AuthProvider } from "@/store/authProvider"
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -62,14 +63,16 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          headerTintColor: "#e6aa6b",
-        }}
-      />
-      <Toast />
+      <AuthProvider>
+        <StatusBar barStyle="dark-content" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            headerTintColor: "#e6aa6b",
+          }}
+        />
+        <Toast />
+      </AuthProvider>
     </SafeAreaProvider>
   )
 }

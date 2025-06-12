@@ -15,6 +15,7 @@ import { useRouter, useLocalSearchParams } from "expo-router"
 import { signIn } from "@/services/api"
 import CustomHeader from "@/_components/custom-header"
 import Toast from "react-native-toast-message"
+import { useAuth } from "@/store/authProvider"
 
 export default function signin() {
   const [email, setEmail] = useState("")
@@ -22,6 +23,7 @@ export default function signin() {
   const [isLoading, setIsLoading] = useState(false)
   const { redirectTo } = useLocalSearchParams()
   const router = useRouter()
+  const { signInProvider } = useAuth()
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -30,7 +32,7 @@ export default function signin() {
     }
     setIsLoading(true)
     try {
-      const name = await signIn({ email, password })
+      const name = await signIn({ email, password }, signInProvider)
       setEmail("")
       setPassword("")
       Toast.show({

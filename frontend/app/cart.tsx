@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity, Button } from "react-native"
+import { View, Text, FlatList, TouchableOpacity } from "react-native"
 import { useCartStore } from "@/store/cart"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import {
@@ -11,7 +11,6 @@ import { Customisations, Dessert } from "@/utils/types"
 import CustomModal from "@/utils/modal"
 import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
-import Checkout from "./checkout"
 import { router } from "expo-router"
 import { getEarnablePoints } from "@/lib/formatters"
 

@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import {
   View,
   Text,
@@ -9,7 +8,6 @@ import {
   Linking,
   Platform,
 } from "react-native"
-import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import { parse, isAfter, isBefore } from "date-fns"
@@ -41,9 +39,6 @@ const store = {
 }
 
 export default function StoreInfo() {
-  const router = useRouter()
-  const [selectedStore, setSelectedStore] = useState<string | null>(null)
-
   const openMaps = (address: string) => {
     const url = Platform.select({
       ios: `maps:0,0?q=${address}`,

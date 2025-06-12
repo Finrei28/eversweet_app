@@ -13,7 +13,6 @@ import {
 import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
-import { getToken } from "@/services/authToken"
 import {
   StripeProvider,
   CardField,
@@ -23,6 +22,7 @@ import {
 import { getSavedCards, saveCard, removeCard } from "@/services/stripe-api"
 import { getUserProfile } from "@/services/api"
 import { AccountData } from "@/utils/types"
+import { useAuth } from "@/store/authProvider"
 
 // Your Stripe publishable key - should be in environment variables
 
@@ -39,8 +39,7 @@ export default function PaymentMethodsStripe() {
 function PaymentMethodsContent() {
   const router = useRouter()
   const { createToken, createPaymentMethod } = useStripe()
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading: loadingToken } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [showAddCard, setShowAddCard] = useState(false)
@@ -50,18 +49,6 @@ function PaymentMethodsContent() {
   )
   const [processingCard, setProcessingCard] = useState(false)
   const [userDetails, setUserDetails] = useState<AccountData | null>(null)
-
-  useEffect(() => {
-    const fetchToken = async () => {
-      const user = await getUserProfile()
-      const storedToken = await getToken()
-      setUserDetails(user)
-      setToken(storedToken)
-      setLoadingToken(false)
-    }
-
-    fetchToken()
-  }, [])
 
   // Fetch saved cards when component mounts
   useEffect(() => {

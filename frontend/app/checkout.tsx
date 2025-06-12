@@ -17,7 +17,6 @@ import { useFocusEffect, useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
-import { getToken } from "@/services/authToken"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 import {
   getSavedCards,
@@ -31,12 +30,12 @@ import DateTimePickerModal from "react-native-modal-datetime-picker"
 import { isOutsideBusinessHours } from "@/lib/businessHours"
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "@/store/points"
-import { formatDate } from "@/lib/formatters"
 import {
   getEstimatedPickUpTime,
   getNextValidPickupTime,
   getOpenCloseTime,
 } from "@/lib/checkoutHelpers"
+import { useAuth } from "@/store/authProvider"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -46,8 +45,7 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment } = useStripe()
-  const [token, setToken] = useState<string | null>(null)
-  const [loadingToken, setLoadingToken] = useState(true)
+  const { token, loading: loadingToken } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
@@ -77,15 +75,6 @@ function CheckoutContent() {
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
   const { openTime, closeTime } = getOpenCloseTime(pickupDate)
-
-  useEffect(() => {
-    const fetchToken = async () => {
-      const storedToken = await getToken()
-      setToken(storedToken)
-      setLoadingToken(false)
-    }
-    fetchToken()
-  }, [])
 
   // Fetch saved cards when component mounts
 

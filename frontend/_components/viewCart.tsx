@@ -1,25 +1,15 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native"
 import { useRouter } from "expo-router"
 import { useCartStore } from "@/store/cart"
-import { getToken } from "@/services/authToken"
-import { useEffect, useState } from "react"
+import { useAuth } from "@/store/authProvider"
 
 // import your cart state/store (example below)
 
 const ViewCart = () => {
   const router = useRouter()
-  const [token, setToken] = useState<string | null>(null)
   const getTotalItems = useCartStore((state) => state.getTotalItems)
   const totalQuantity = getTotalItems()
-
-  useEffect(() => {
-    const getTokenFunction = async () => {
-      const token = await getToken()
-      setToken(token)
-    }
-
-    getTokenFunction()
-  }, [])
+  const { token } = useAuth()
 
   const handlePress = () => {
     router.push("/cart")
