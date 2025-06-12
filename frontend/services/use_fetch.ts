@@ -17,7 +17,6 @@ export default function useFetch<T>(
 
       setData(result)
     } catch (error) {
-      console.log("usefetch", error)
       setError(error instanceof Error ? error : new Error("An error occurred."))
     } finally {
       setLoading(false)

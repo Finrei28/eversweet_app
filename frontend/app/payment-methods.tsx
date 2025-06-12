@@ -171,7 +171,7 @@ function PaymentMethodsContent() {
       <View className="flex-1 bg-background">
         <CustomHeader />
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#10B981" />
+          <ActivityIndicator size="large" color="#e6aa6b" />
         </View>
       </View>
     )
@@ -252,7 +252,7 @@ function PaymentMethodsContent() {
               disabled={processingCard || !cardDetails?.complete}
             >
               {processingCard ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color="#e6aa6b" />
               ) : (
                 <Text className="text-white font-medium">Add Card</Text>
               )}
@@ -263,7 +263,7 @@ function PaymentMethodsContent() {
         {/* Saved Payment Methods */}
         {loadingCards ? (
           <View className="bg-white rounded-xl shadow-sm p-6 items-center mb-6">
-            <ActivityIndicator size="large" color="#10B981" />
+            <ActivityIndicator size="large" color="#e6aa6b" />
             <Text className="mt-2 text-gray-500">
               Loading payment methods...
             </Text>
@@ -313,7 +313,9 @@ function PaymentMethodsContent() {
         <View className="mb-6">
           <View className="flex-row items-center justify-center mb-2">
             <Feather name="lock" size={14} color="#6B7280" />
-            <Text className="text-gray-500 text-sm ml-1">Payments secured</Text>
+            <Text className="text-gray-500 text-sm ml-1">
+              Payments secured by Stripe
+            </Text>
           </View>
           <Text className="text-gray-400 text-xs text-center">
             Your payment information is processed securely. We do not store your

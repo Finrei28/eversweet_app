@@ -114,10 +114,6 @@ function CheckoutContent() {
       appState.current.match(/inactive|background/) &&
       nextAppState === "active"
     ) {
-      console.log(
-        "App has come to the foreground with payment/order in progress"
-      )
-
       // Check if we have a payment intent or order in progress
       if (paymentIntentId) {
         await verifyPaymentStatus(paymentIntentId)

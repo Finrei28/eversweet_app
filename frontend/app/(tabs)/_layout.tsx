@@ -2,6 +2,7 @@ import { Image } from "react-native"
 import React from "react"
 import { Tabs } from "expo-router"
 import Entypo from "@expo/vector-icons/Entypo"
+import Ionicons from "@expo/vector-icons/Ionicons"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
 
@@ -57,7 +58,7 @@ export default function _layout() {
             tabBarActiveTintColor: "#e6aa6b", // active color
             tabBarInactiveTintColor: "#999999", // optional: inactive color
             tabBarIcon: ({ color, size }) => (
-              <AntDesign name="star" color={color} size={size ?? 24} />
+              <Ionicons name="star" color={color} size={size ?? 24} />
             ),
           }}
         />
@@ -69,7 +70,7 @@ export default function _layout() {
             tabBarActiveTintColor: "#e6aa6b", // active color
             tabBarInactiveTintColor: "#999999", // optional: inactive color
             tabBarIcon: ({ color, size }) => (
-              <AntDesign name="user" color={color} size={size ?? 24} />
+              <Ionicons name="receipt" color={color} size={size ?? 24} />
             ),
           }}
         />

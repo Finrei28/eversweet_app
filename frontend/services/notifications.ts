@@ -77,7 +77,7 @@ export async function savePushToken(pushToken: string) {
   try {
     const authToken = await getToken()
     if (!authToken) {
-      console.log("User not authenticated, cannot save push token")
+      // console.log("User not authenticated, cannot save push token")
       return false
     }
 
@@ -138,7 +138,6 @@ export function handleNotification(notification: Notifications.Notification) {
   if (data.type === "ORDER_STATUS_CHANGED") {
     // Navigate to the order details screen or update UI
     router.replace("/orders")
-    console.log("Order status changed:", data.orderId, data.newStatus)
 
     // You could use a navigation ref or event emitter to navigate
     // Example: navigationRef.current?.navigate('OrderDetails', { orderId: data.orderId })

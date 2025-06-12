@@ -62,10 +62,10 @@ export default function OrderHistory() {
     }
   }
 
-  const handleReorder = (orderId: string) => {
-    // Implement reorder functionality
-    console.log(`Reordering items from order ${orderId}`)
-  }
+  // const handleReorder = (orderId: string) => {
+  //   // Implement reorder functionality
+  //   console.log(`Reordering items from order ${orderId}`)
+  // }
 
   if (loadingToken || ordersLoading) {
     return (
