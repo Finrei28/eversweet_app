@@ -4,7 +4,7 @@
     "slug": "eversweet_app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+    "icon": "./assets/images/eversweet_1024.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -22,7 +22,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+        "foregroundImage": "./assets/images/eversweet_1024.png",
         "backgroundColor": "#ffffff"
       },
       "package": "nz.co.eversweet"
@@ -30,14 +30,14 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png"
+      "favicon": "./assets/images/eversweet_1024.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1743833655/eversweetTransLogo_qz1kmg.png",
+          "image": "./assets/images/transparent_logo_1024.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
