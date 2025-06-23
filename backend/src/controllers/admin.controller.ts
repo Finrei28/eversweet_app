@@ -477,7 +477,7 @@ export const getOverview = async (req: Request, res: Response) => {
   }
 }
 
-// Get orders that are 5 minutes before pick up time if order.desserts.length < 3, 10 minutes if order.desserts.length < 6, 15 minutes if more
+// Get future orders where pickUpTime is more than 15 minutes from when the order was created
 export const getFutureOrders = async () => {
   try {
     const now = new Date()
@@ -502,6 +502,7 @@ export const getFutureOrders = async () => {
         customerEmail: true,
         customerPhoneNumber: true,
         priceInCents: true,
+        source: true,
         GST: true,
         appUserId: true,
         desserts: {
@@ -538,10 +539,10 @@ export const getFutureOrders = async () => {
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
-      if (timeBetween <= 15 * 60 * 1000) return false
+      if (timeBetween <= 15 * 60 * 1000 && order.source === "APP") return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.length
-      let minutesBefore = 16
+      let minutesBefore = 16 // default to item count >= 6, taking 15 minutes to prepare
       if (count < 3) minutesBefore = 6
       else if (count < 6) minutesBefore = 11
 
