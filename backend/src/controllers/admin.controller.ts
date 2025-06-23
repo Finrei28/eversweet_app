@@ -59,13 +59,13 @@ export const getPendingOrders = async (req: Request, res: Response) => {
 
   try {
     const now = new Date()
-    const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60 * 1000)
+    const fiveFromNow = new Date(now.getTime() + 5 * 60 * 1000)
     const orders = await db.order.findMany({
       where: {
         status: "PENDING",
         pickUpTime: {
           gt: now,
-          lte: fifteenMinutesFromNow,
+          lte: fiveFromNow,
         },
       },
       select: {
