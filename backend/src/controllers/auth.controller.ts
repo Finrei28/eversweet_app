@@ -579,12 +579,12 @@ export const createOrder = async (req: Request, res: Response) => {
       1000 * 60 * 15
     ) {
       emitNewOrder(newOrder)
+      await db.order.update({
+        where: { id: newOrder.id },
+        data: { notified: true }, // ✅ persist notification state
+      })
     }
 
-    await db.order.update({
-      where: { id: newOrder.id },
-      data: { notified: true }, // ✅ persist notification state
-    })
     res.status(201).json({ order: newOrder })
   } catch (error) {
     if (error instanceof z.ZodError) {
