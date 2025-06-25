@@ -547,7 +547,10 @@ export const getFutureOrders = async () => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
       if (timeBetween <= 15 * 60 * 1000 && order.source === "APP") return false
       // Calculate how early we should start preparing based on dessert count
-      const count = order.desserts.length
+      const count = order.desserts.reduce(
+        (total, item) => total + item.quantity,
+        0
+      )
       let minutesBefore = 16 // default to item count >= 6, taking 15 minutes to prepare
       if (count < 3) minutesBefore = 6
       else if (count < 6) minutesBefore = 11
