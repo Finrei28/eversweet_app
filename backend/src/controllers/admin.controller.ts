@@ -64,7 +64,6 @@ export const getPendingOrders = async (req: Request, res: Response) => {
       where: {
         status: "PENDING",
         pickUpTime: {
-          gt: now,
           lte: fiveFromNow,
         },
       },
@@ -509,6 +508,7 @@ export const getFutureOrders = async () => {
         customerPhoneNumber: true,
         priceInCents: true,
         source: true,
+        notified: true,
         GST: true,
         appUserId: true,
         desserts: {
@@ -545,7 +545,12 @@ export const getFutureOrders = async () => {
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
-      if (timeBetween <= 15 * 60 * 1000 && order.source === "APP") return false
+      if (
+        timeBetween <= 15 * 60 * 1000 &&
+        order.source === "APP" &&
+        order.notified === true
+      )
+        return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
