@@ -499,6 +499,8 @@ export const createOrder = async (req: Request, res: Response) => {
             },
 
             quantity: dessertItem.quantity,
+            priceInCents: dessertItem.itemPriceInCents, // get price from order item
+            loyaltyPointsUsed: dessertItem.loyaltyPointsUsed ?? null,
             customisations: {
               create: dessertItem.customisations.map((customisationsItem) => ({
                 customisation: {

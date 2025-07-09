@@ -187,7 +187,8 @@ model OrderDessert {
   dessert        Dessert                     @relation(fields: [dessertId], references: [id])
   order          Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customisations OrderDessertCustomisation[]
-
+  priceInCents   Int                         @default(0)
+  loyaltyPointsUsed Int?
   @@unique([orderId, dessertId, id])
 }
 
