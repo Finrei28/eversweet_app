@@ -12,7 +12,7 @@ export default function PrivacyPolicy() {
       <ScrollView className="flex-1 px-4">
         <View className="mt-6 mb-4">
           <Text className="text-2xl font-bold">Privacy Policy</Text>
-          <Text className="text-gray-500 mt-1">Last updated: May 8, 2023</Text>
+          <Text className="text-gray-500 mt-1">Last updated: 18 Sep, 2025</Text>
         </View>
 
         <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
@@ -32,8 +32,8 @@ export default function PrivacyPolicy() {
           </Text>
           <View className="ml-4 mb-4">
             <Text className="text-gray-700 mb-2">
-              • Identity Data: includes first name, last name, username or
-              similar identifier.
+              • Identity Data: includes first name, last name, email or similar
+              identifier.
             </Text>
             <Text className="text-gray-700 mb-2">
               • Contact Data: includes email address and telephone numbers.

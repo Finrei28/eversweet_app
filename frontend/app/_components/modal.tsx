@@ -1,21 +1,25 @@
 import {
   View,
-  Modal,
   Image,
   Text,
   TouchableOpacity,
   ScrollView,
+  PanResponder,
+  Pressable,
+  Animated,
+  Dimensions,
 } from "react-native"
-import { Dessert } from "./types"
+import Modal from "react-native-modal"
+import { Dessert } from "../../utils/types"
 import { useCartStore } from "@/store/cart"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { SafeAreaView } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import BouncingLoader from "@/_components/loader"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useFetch from "@/services/use_fetch"
 import { getAvailableCustomisations } from "@/services/api"
-import { Customisations } from "./types"
+import { Customisations } from "../../utils/types"
 import uuid from "react-native-uuid"
 
 type CustomModalProps = {
@@ -52,6 +56,7 @@ export default function CustomModal({
   const [price, setPrice] = useState(
     editItemPrice ? editItemPrice : selectedDessert.priceInCents
   )
+  const [buttonLoading, setButtonLoading] = useState(false)
   const [customisationQuantity, setCustomisationQuantity] =
     useState<Customisations>([])
   const points = Math.round(selectedDessert.priceInCents / 5) * 5
@@ -68,6 +73,51 @@ export default function CustomModal({
       setCustomisationQuantity(initialQuantities)
     }
   }, [state, customisations])
+
+  // ---------- PANRESPONDER (for outside-ScrollView swipe/tap) ----------
+  // We'll attach this to the header area (above the ScrollView) and
+  // the footer/button area (below the ScrollView). That means swipes
+  // or taps that start on those non-scrolling areas will close the modal.
+  const translateY = useRef(new Animated.Value(0)).current
+  const screenHeight = Dimensions.get("window").height
+
+  const closeWithAnimation = () => {
+    Animated.timing(translateY, {
+      toValue: screenHeight, // slide down off screen
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setModalVisible(false)
+      // Reset AFTER modal fully closes/unmounts
+      setTimeout(() => {
+        translateY.setValue(0)
+      }, 0)
+    })
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderMove: (_, gesture) => {
+        if (gesture.dy > 0) {
+          translateY.setValue(gesture.dy)
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy > 200 || gesture.vy > 1) {
+          closeWithAnimation()
+        } else {
+          // snap back
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start()
+        }
+      },
+    })
+  ).current
+
+  // --------------------------------------------------------------------
 
   const handleIncrease = (ingredientName: string) => {
     const customisation = availableCustomisations.find(
@@ -94,7 +144,7 @@ export default function CustomModal({
               setPrice((prev) => prev + customisation.priceInCents)
             }
 
-            // Increase price only if crossing 1 → 2
+            // Increase price only if crossing 1 → 2 //
             else if (item.quantity >= 1) {
               setPrice((prev) => prev + customisation.priceInCents)
             }
@@ -162,7 +212,7 @@ export default function CustomModal({
           id: customisation.id,
           name: customisation.name,
           chineseName: customisation.chineseName,
-          quantity: 0, // Set initial quantity to 1
+          quantity: 0, // Set initial quantity to 0
         }
 
         return [...prev, newCustomization]
@@ -172,18 +222,22 @@ export default function CustomModal({
   }
 
   const insets = useSafeAreaInsets()
-
   return (
     <Modal
-      animationType="slide"
-      transparent={true}
-      visible={modalVisible}
-      onRequestClose={() => setModalVisible(false)}
+      isVisible={modalVisible}
+      backdropOpacity={0.5}
+      animationIn="slideInUp"
+      animationOut="fadeOut"
+      style={{ justifyContent: "flex-end", margin: 0 }}
+      onBackdropPress={closeWithAnimation}
+      propagateSwipe={true}
     >
-      <View
+      <Animated.View
         style={{
+          transform: [{ translateY }],
           paddingTop: insets.top ? insets.top : 20,
           paddingBottom: insets.bottom ? insets.bottom : 30,
+          borderRadius: 20,
         }}
         className="flex-1 bg-background bg-opacity-60 justify-center "
       >
@@ -196,44 +250,46 @@ export default function CustomModal({
           <SafeAreaView className="flex-1 justify-between bg-background rounded-lg px-2">
             {selectedDessert && (
               <>
-                <View>
-                  <View className="flex-row items-center justify-center mb-5">
-                    <TouchableOpacity
-                      onPress={() => setModalVisible(false)}
-                      className="absolute left-8"
-                    >
-                      <AntDesign name="close" size={30} color="#e6aa6b" />
-                    </TouchableOpacity>
+                {/* ---------- HEADER AREA (attach pan handlers here) ---------- */}
+                <View {...panResponder.panHandlers} className="w-full">
+                  {/* Tapping/swiping this header area will close the modal. */}
+                  <View>
+                    <View className="flex-row items-center justify-center mb-5">
+                      <View className="items-center">
+                        <Text className="text-3xl font-bold text-center">
+                          {selectedDessert.name}
+                        </Text>
+                        <Text className="text-gray-600 italic text-2xl font-semibold text-center">
+                          {selectedDessert.chineseName}
+                        </Text>
+                      </View>
+                    </View>
 
-                    <View className="items-center">
-                      <Text className="text-3xl font-bold">
-                        {selectedDessert.name}
+                    <Image
+                      source={{ uri: selectedDessert.imagePath }}
+                      style={{ width: "100%", height: 200, borderRadius: 10 }}
+                      resizeMode="cover"
+                      className="px-3"
+                    />
+                    <View className="px-3">
+                      <Text className="mt-5 ">
+                        Ingredients: {selectedDessert.ingredients.join(", ")}
                       </Text>
-                      <Text className="text-gray-600 italic text-2xl font-semibold">
-                        {selectedDessert.chineseName}
+                      <Text className="mt-2 font-semibold text-lg">
+                        Price:{" "}
+                        {type === "cents"
+                          ? `$ ${Number(price) / 100}`
+                          : `${points} points`}
                       </Text>
                     </View>
                   </View>
-
-                  <Image
-                    source={{ uri: selectedDessert.imagePath }}
-                    style={{ width: "100%", height: 200, borderRadius: 10 }}
-                    resizeMode="cover"
-                    className="px-3"
-                  />
-                  <View className="px-3">
-                    <Text className="mt-5 ">
-                      Ingredients: {selectedDessert.ingredients.join(", ")}
-                    </Text>
-                    <Text className="mt-2 font-semibold text-lg">
-                      Price:{" "}
-                      {type === "cents"
-                        ? `$ ${Number(price) / 100}`
-                        : `${points} points`}
-                    </Text>
-                  </View>
                 </View>
-                <ScrollView className="">
+
+                {/* ---------- SCROLLABLE CUSTOMISATIONS ---------- */}
+                <ScrollView
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={false}
+                >
                   {selectedDessert.ingredients
                     .filter((ingredient) =>
                       availableCustomisations.some((c) => c.name === ingredient)
@@ -307,6 +363,7 @@ export default function CustomModal({
                         </View>
                       )
                     })}
+
                   {type === "cents" &&
                     availableCustomisations
                       ?.filter(
@@ -365,12 +422,14 @@ export default function CustomModal({
                       })}
                 </ScrollView>
 
-                <View>
+                {/* ---------- FOOTER / BUTTONS (attach pan handlers here too) ---------- */}
+                <View {...panResponder.panHandlers}>
                   <TouchableOpacity
+                    disabled={buttonLoading}
                     onPress={async () => {
+                      setButtonLoading(true)
                       if (state === "add") {
                         await addItem({
-                          id: uuid.v4(),
                           dessert: selectedDessert,
                           quantity,
                           loyaltyPointsUsed: type === "points" ? points : null,
@@ -387,8 +446,8 @@ export default function CustomModal({
                           itemPriceInCents: type === "points" ? 0 : price,
                         })
                       }
+                      setButtonLoading(false)
                       setModalVisible(false)
-                      showToast?.()
                     }}
                     className="bg-primary p-3 mt-3 items-center rounded-lg"
                   >
@@ -408,7 +467,7 @@ export default function CustomModal({
             )}
           </SafeAreaView>
         )}
-      </View>
+      </Animated.View>
     </Modal>
   )
 }

@@ -21,7 +21,6 @@ import {
 } from "@stripe/stripe-react-native"
 import { getSavedCards, saveCard, removeCard } from "@/services/stripe-api"
 import { getUserProfile } from "@/services/api"
-import { AccountData } from "@/utils/types"
 import { useAuth } from "@/store/authProvider"
 
 // Your Stripe publishable key - should be in environment variables
@@ -38,17 +37,15 @@ export default function PaymentMethodsStripe() {
 
 function PaymentMethodsContent() {
   const router = useRouter()
-  const { createToken, createPaymentMethod } = useStripe()
+  const { createPaymentMethod } = useStripe()
   const { token, loading: loadingToken } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [showAddCard, setShowAddCard] = useState(false)
-  const [saveCardForFuture, setSaveCardForFuture] = useState(true)
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(
     null
   )
   const [processingCard, setProcessingCard] = useState(false)
-  const [userDetails, setUserDetails] = useState<AccountData | null>(null)
 
   // Fetch saved cards when component mounts
   useEffect(() => {
@@ -80,13 +77,14 @@ function PaymentMethodsContent() {
 
     try {
       // Create a payment method with the card details
+      const user = await getUserProfile()
       const { paymentMethod, error: pmError } = await createPaymentMethod({
         paymentMethodType: "Card",
         paymentMethodData: {
           billingDetails: {
             // You can add billing details here if collected from the user
-            email: userDetails.email,
-            name: `${userDetails.firstName} ${userDetails.lastName}`,
+            email: user.email,
+            name: `${user.firstName} ${user.lastName}`,
           },
         },
       })
@@ -98,10 +96,8 @@ function PaymentMethodsContent() {
         throw new Error("Failed to create payment method")
       }
 
-      if (saveCardForFuture) {
-        // Save the card to the customer's account
-        await saveCard(paymentMethod.id)
-      }
+      // Save the card to the customer's account
+      await saveCard(paymentMethod.id)
 
       // Refresh the list of saved cards
       await fetchSavedCards()
@@ -223,7 +219,7 @@ function PaymentMethodsContent() {
               />
             </View>
 
-            <View className="flex-row items-center justify-between mb-4">
+            {/* <View className="flex-row items-center justify-between mb-4">
               <Text>Save card for future use</Text>
               <Switch
                 value={saveCardForFuture}
@@ -231,7 +227,7 @@ function PaymentMethodsContent() {
                 trackColor={{ false: "#D1D5DB", true: "#10B981" }}
                 thumbColor="#FFFFFF"
               />
-            </View>
+            </View> */}
 
             <TouchableOpacity
               onPress={handleAddCard}

@@ -16,7 +16,7 @@ import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
-import CustomModal from "@/utils/modal"
+import CustomModal from "@/app/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 
@@ -76,7 +76,10 @@ export default function Loyalty() {
 
     const index = categories.findIndex((cat) => cat.id === id)
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ x: index * 120, animated: true })
+      scrollViewRef.current.scrollTo({
+        x: index < 7 ? index * 130 : index * 150,
+        animated: true,
+      })
     }
   }
 
@@ -124,7 +127,9 @@ export default function Loyalty() {
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 10 }}
-                    className="mt-36 h-16"
+                    className={`${
+                      Platform.OS === "ios" ? "mt-32" : "mt-24"
+                    } h-24`}
                   >
                     <View className="flex-row gap-4 items-center rounded-lg">
                       {categories.map((category) => (

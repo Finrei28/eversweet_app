@@ -7,6 +7,16 @@ import React, {
   ReactNode,
 } from "react"
 import * as SecureStore from "expo-secure-store"
+import { jwtDecode } from "jwt-decode"
+
+interface DecodedToken {
+  userId: string
+  email: string
+  role: string
+  firstName: string
+  exp: number
+  iat: number
+}
 
 interface AuthContextType {
   token: string | null
@@ -25,8 +35,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const getStoredToken = async () => {
       const storedToken = await SecureStore.getItemAsync("token")
+      console.log(storedToken)
       if (storedToken) {
-        setToken(storedToken)
+        const decoded: DecodedToken = jwtDecode(storedToken)
+        const now = Date.now() / 1000
+        if (decoded.exp > now) {
+          setToken(storedToken) // ✅ valid
+        } else {
+          await removeToken() // ❌ expired
+          setToken(null)
+        }
       }
       setLoading(false)
     }

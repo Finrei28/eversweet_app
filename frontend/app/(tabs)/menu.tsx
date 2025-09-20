@@ -16,7 +16,7 @@ import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
-import CustomModal from "@/utils/modal"
+import CustomModal from "@/app/_components/modal"
 import Toast from "react-native-toast-message"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
@@ -66,10 +66,12 @@ export default function Menu() {
 
   const scrollToCategory = (id: string) => {
     if (!menu) return
-
     const index = menu.findIndex((cat) => cat.id === id)
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ x: index * 120, animated: true })
+      scrollViewRef.current.scrollTo({
+        x: index < 7 ? index * 130 : index * 150,
+        animated: true,
+      })
     }
   }
 
@@ -79,12 +81,16 @@ export default function Menu() {
         <PageHeader />
         {cartItems.length > 0 && <ViewCart />}
         {loading ? (
-          <View className="flex-1 items-center justify-center mt-32">
+          <View
+            className={`flex-1 items-center justify-center ${
+              Platform.OS === "ios" ? "mt-32" : "mt-24"
+            }`}
+          >
             <BouncingLoader />
           </View>
         ) : (
           <>
-            {menu && menu.length > 0 && selectedCategory && (
+            {menu && menu.length > 0 && (
               <ScrollView
                 ref={scrollViewRef}
                 horizontal
@@ -101,7 +107,7 @@ export default function Menu() {
                     <TouchableOpacity
                       key={category.id}
                       className={`rounded-full px-4 p-2 text-sm font-medium text-gray-700 ${
-                        selectedCategory.id === category.id
+                        selectedCategory?.id === category.id
                           ? "bg-secondary text-primary"
                           : ""
                       }`}
@@ -177,8 +183,8 @@ export default function Menu() {
                 )}
               />
             ) : (
-              <View className="flex-1 items-center justify-center">
-                <Text className="text-xl font-bold text-center mb-6">
+              <View className="flex-1 items-center justify-center mt-16">
+                <Text className="text-xl font-bold text-center">
                   No desserts available for this category.
                 </Text>
               </View>
@@ -189,16 +195,6 @@ export default function Menu() {
                 setModalVisible={setModalVisible}
                 selectedDessert={selectedDessert}
                 type="cents"
-                showToast={() => {
-                  Toast.show({
-                    type: "success",
-                    text1: `${selectedDessert.name} added to cart`,
-                    position: "bottom",
-                    visibilityTime: 2000,
-                    autoHide: true,
-                    bottomOffset: 60,
-                  })
-                }}
               />
             )}
           </>

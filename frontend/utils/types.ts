@@ -108,3 +108,20 @@ export type OrderStatus =
   | "MAKING"
   | "READY"
   | "PICKED_UP"
+
+export type CartItem = {
+  id: string
+  customisations: Customisations
+  dessert: Dessert
+  itemPriceInCents: number
+  quantity: number
+  loyaltyPointsUsed: number | null
+}
+
+export type AddCartItem = {
+  customisations: Customisations
+  dessert: Dessert
+  itemPriceInCents: number
+  quantity: number
+  loyaltyPointsUsed: number | null
+}

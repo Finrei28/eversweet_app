@@ -8,7 +8,7 @@ import {
 } from "@react-navigation/native"
 import { useCallback, useState } from "react"
 import { Customisations, Dessert } from "@/utils/types"
-import CustomModal from "@/utils/modal"
+import CustomModal from "@/app/_components/modal"
 import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
@@ -51,9 +51,11 @@ export default function CartPage() {
         <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
 
         {cartItems.length === 0 ? (
-          <Text className="text-base text-center mt-12 text-gray-500">
-            Your cart is empty.
-          </Text>
+          <View className="flex-1 justify-center items-center mb-24">
+            <Text className="text-base text-center text-gray-500">
+              Your cart is empty.
+            </Text>
+          </View>
         ) : (
           <>
             <FlatList
@@ -66,15 +68,17 @@ export default function CartPage() {
                       <Text className="text-lg font-semibold">
                         {item.dessert.name}
                       </Text>
-                      {item.customisations.map((customisation) => (
-                        <Text key={customisation.id}>{`${
-                          customisation.quantity === 0 ? `- ` : `+ `
-                        } ${customisation.name} ${
-                          customisation.quantity > 1
-                            ? `x${customisation.quantity}`
-                            : ``
-                        }`}</Text>
-                      ))}
+                      {item.customisations.map((customisation) => {
+                        return (
+                          <Text key={customisation.id}>{`${
+                            customisation.quantity === 0 ? `- ` : `+ `
+                          } ${customisation.name} ${
+                            customisation.quantity > 1
+                              ? `x${customisation.quantity}`
+                              : ``
+                          }`}</Text>
+                        )
+                      })}
                     </View>
                     <Text className="text-lg font-semibold">
                       ${(Number(item.itemPriceInCents) / 100).toFixed(2)}
@@ -97,19 +101,23 @@ export default function CartPage() {
                         </Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity onPress={() => removeItem(item.id)}>
+                      <TouchableOpacity
+                        onPress={async () => await removeItem(item.id)}
+                      >
                         <AntDesign name="delete" size={24} color="red" />
                       </TouchableOpacity>
                     </View>
                     <View className="flex-row items-center gap-4">
                       <TouchableOpacity
-                        onPress={() => decrementItem(item.id)}
+                        onPress={async () => await decrementItem(item.id)}
                         className={`w-10 h-10 rounded-full justify-center items-center ${
                           item.loyaltyPointsUsed
                             ? "bg-gray-300"
                             : "bg-secondary"
                         }`}
-                        disabled={!!item.loyaltyPointsUsed}
+                        disabled={
+                          !!item.loyaltyPointsUsed || item.quantity <= 1
+                        }
                       >
                         <Text className="text-xl font-bold">-</Text>
                       </TouchableOpacity>
@@ -119,7 +127,7 @@ export default function CartPage() {
                       </Text>
 
                       <TouchableOpacity
-                        onPress={() => incrementItem(item.id)}
+                        onPress={async () => await incrementItem(item.id)}
                         className={`w-10 h-10 rounded-full justify-center items-center ${
                           item.loyaltyPointsUsed
                             ? "bg-gray-300"
@@ -137,7 +145,7 @@ export default function CartPage() {
 
             <View className="mt-5 border-t border-gray-300 pt-4">
               <View className="items-center flex-row justify-between">
-                <TouchableOpacity onPress={clearCart}>
+                <TouchableOpacity onPress={async () => await clearCart()}>
                   <Text className="text-red-500 text-xl">Clear cart</Text>
                 </TouchableOpacity>
                 <View>
@@ -166,16 +174,6 @@ export default function CartPage() {
                 state="edit"
                 customisations={selectedDessertCustomisations}
                 editItemPrice={selectedDessertPriceInCents}
-                showToast={() => {
-                  Toast.show({
-                    type: "success",
-                    text1: `Your changes have been saved`,
-                    position: "bottom",
-                    visibilityTime: 2000,
-                    autoHide: true,
-                    bottomOffset: 30,
-                  })
-                }}
                 editId={editId}
               />
             )}

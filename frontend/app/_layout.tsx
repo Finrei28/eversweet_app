@@ -2,6 +2,7 @@ import { Stack } from "expo-router"
 import "./global.css"
 import { StatusBar } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
+import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast from "react-native-toast-message"
 import { useEffect, useRef, useState } from "react"
 import { useLoyaltyStore } from "@/store/points"
@@ -13,6 +14,7 @@ import {
   handleNotification,
 } from "@/services/notifications"
 import { AuthProvider } from "@/store/authProvider"
+import { useCartStore } from "@/store/cart"
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -31,6 +33,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     useLoyaltyStore.getState().fetchPoints() // load fresh points on app start
+    useCartStore.getState().fetchCart() // load cart items on app start
   }, [])
 
   useEffect(() => {
@@ -62,17 +65,19 @@ export default function RootLayout() {
   }, [isAuthenticated])
 
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar barStyle="dark-content" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            headerTintColor: "#e6aa6b",
-          }}
-        />
-        <Toast />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <StatusBar barStyle="dark-content" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              headerTintColor: "#e6aa6b",
+            }}
+          />
+          <Toast />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   )
 }

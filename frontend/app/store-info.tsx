@@ -86,8 +86,12 @@ export default function StoreInfo() {
 
           <View className="flex-row items-center mb-2">
             <Feather name="mail" size={18} color="#6B7280" className="mr-2" />
-            <TouchableOpacity onPress={() => emailStore("info@eversweet.com")}>
-              <Text className="text-primary ml-2">eversweet@eversweet.com</Text>
+            <TouchableOpacity
+              onPress={() => emailStore("eversweet@eversweet.co.nz")}
+            >
+              <Text className="text-primary ml-2">
+                eversweet@eversweet.co.nz
+              </Text>
             </TouchableOpacity>
           </View>
 

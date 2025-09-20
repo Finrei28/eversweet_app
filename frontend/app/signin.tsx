@@ -88,7 +88,7 @@ export default function signin() {
 
           <View className="flex-1 justify-center">
             <Text className="text-center font-bold text-lg text-primary mb-2 px-10">
-              Sign in to start ordering and earning points!
+              Sign in to start ordering and earn points!
             </Text>
             <View className="items-center">
               <View className="w-3/4 max-w-md mb-4">

@@ -4,7 +4,7 @@
     "slug": "eversweet_app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/eversweet_1024.png",
+    "icon": "./assets/images/eversweet_bowl_1024.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -17,7 +17,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "nz.co.eversweet",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message."
       }
     },
     "android": {
@@ -37,7 +38,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/transparent_logo_1024.png",
+          "image": "./assets/images/eversweet_1024.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"

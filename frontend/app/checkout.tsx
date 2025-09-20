@@ -60,7 +60,7 @@ function CheckoutContent() {
   // Cart items and total
   const cartItems = useCartStore((state) => state.items)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
-  const clearCart = useCartStore((state) => state.clearCart)
+  const processOrder = useCartStore((state) => state.processOrder)
 
   // Pickup time state
   const nextValidTime = useMemo(
@@ -185,7 +185,7 @@ function CheckoutContent() {
 
       if (orderStatus.success) {
         // Order was successful, clear cart and navigate to success page
-        clearCart()
+        processOrder()
         setOrderInProgress(null)
         setPaymentIntentId(null)
         router.replace("/orders")
@@ -381,16 +381,8 @@ function CheckoutContent() {
     try {
       // Create order object
 
-      const orderData = {
-        items: cartItems.map(({ id, dessert, ...rest }) => ({
-          dessertId: dessert.id,
-          ...rest,
-        })),
-        paymentMethodId: totalAmount > 0 ? selectedCardId : null,
-        pickUpTime: pickupNow ? pickUpNowTime : pickupDate,
-        GST: calculateGST(),
-        totalPriceInCents: getTotalCost(),
-      }
+      const paymentMethodId = totalAmount > 0 ? selectedCardId : null
+      const pickUpTime = pickupNow ? pickUpNowTime : pickupDate
 
       // Get payment intent client secret from your server
 
@@ -418,39 +410,35 @@ function CheckoutContent() {
           throw new Error(`Payment failed with status: ${paymentIntent.status}`)
         }
 
-        const orderResponse = await createOrder(orderData, paymentIntent.id)
+        // Payment succeeded, now create the order in your system
+
+        const orderResponse = await createOrder(
+          paymentMethodId,
+          pickUpTime,
+          paymentIntent.id
+        )
         // Try to extract the order ID if it exists in the error response
         if (!orderResponse) {
           throw new Error("Failed to create order")
         }
         setOrderInProgress(orderResponse.id)
       } else {
-        const orderResponse = await createOrder(orderData, null)
+        // handle orders paid with points
+        const orderResponse = await createOrder(null, pickUpTime, null)
         if (!orderResponse) {
           throw new Error("Failed to create order")
         }
         setOrderInProgress(orderResponse.id)
       }
 
-      // Payment succeeded, now create the order in your system
-
-      if (totalAmount > 0) {
+      // If total amount is 0, refresh loyalty points
+      if (totalAmount === 0) {
         useLoyaltyStore.getState().fetchPoints()
       }
 
       // Clear cart
-      clearCart()
+      await processOrder()
 
-      // Show success message
-      Toast.show({
-        type: "success",
-        text1: "Order Placed",
-        text2: "Your order has been successfully placed.",
-        position: "bottom",
-        visibilityTime: 3000,
-        autoHide: true,
-        bottomOffset: 60,
-      })
       router.push("/orders")
     } catch (error: any) {
       if (paymentIntentId) {

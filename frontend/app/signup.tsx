@@ -56,6 +56,7 @@ export default function SignUp() {
     }
     try {
       await createAccount(signupData)
+      setVerifyEmail(true)
     } catch (error) {
       const message = (error as Error).message
 
@@ -64,8 +65,7 @@ export default function SignUp() {
       } else {
         Alert.alert("Sign-up failed", message || "An unknown error occurred.")
       }
-    } finally {
-      setVerifyEmail(true)
+      return
     }
   }
   return verifyEmail ? (

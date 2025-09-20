@@ -192,6 +192,10 @@ export default function Orders() {
             {completedOrders.map((order) => {
               const orderDate = new Date(order.createdAt)
               const pickUpTime = new Date(order.pickUpTime)
+              const totalItems = order.desserts.reduce(
+                (total, item) => total + item.quantity,
+                0
+              )
               return (
                 <View
                   key={order.id}
@@ -216,9 +220,7 @@ export default function Orders() {
                   <View className="p-4">
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Items</Text>
-                      <Text className="font-medium">
-                        {order.desserts.length}
-                      </Text>
+                      <Text className="font-medium">{totalItems}</Text>
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Total</Text>
@@ -336,6 +338,10 @@ export default function Orders() {
             {pendingOrders.map((order) => {
               const orderDate = new Date(order.createdAt)
               const pickUpTime = new Date(order.pickUpTime)
+              const totalItems = order.desserts.reduce(
+                (total, item) => total + item.quantity,
+                0
+              )
               return (
                 <View
                   key={order.id}
@@ -360,9 +366,7 @@ export default function Orders() {
                   <View className="p-4">
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Items</Text>
-                      <Text className="font-medium">
-                        {order.desserts.length}
-                      </Text>
+                      <Text className="font-medium">{totalItems}</Text>
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Total</Text>
