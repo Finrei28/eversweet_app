@@ -8,6 +8,8 @@ import React, {
 } from "react"
 import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
+import { UsersMembership } from "@/utils/types"
+import { getUsersMembership } from "@/services/stripe-api"
 
 interface DecodedToken {
   userId: string
@@ -20,6 +22,8 @@ interface DecodedToken {
 
 interface AuthContextType {
   token: string | null
+  usersMembership: UsersMembership | null
+  refetchUsersMembership: () => Promise<void>
   signInProvider: (token: string) => Promise<void>
   signOutProvider: () => Promise<void>
   loading: boolean
@@ -30,20 +34,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [usersMembership, setUsersMembership] =
+    useState<UsersMembership | null>(null)
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
     const getStoredToken = async () => {
       const storedToken = await SecureStore.getItemAsync("token")
-      console.log(storedToken)
       if (storedToken) {
         const decoded: DecodedToken = jwtDecode(storedToken)
         const now = Date.now() / 1000
         if (decoded.exp > now) {
           setToken(storedToken) // ✅ valid
+          const membership = await getUsersMembership()
+          setUsersMembership(membership)
         } else {
           await removeToken() // ❌ expired
           setToken(null)
+          setUsersMembership(null)
         }
       }
       setLoading(false)
@@ -51,19 +59,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     getStoredToken()
   }, [])
 
+  const refetchUsersMembership = async () => {
+    const membership = await getUsersMembership()
+    setUsersMembership(membership)
+  }
+
   const signInProvider = async (token: string) => {
     await SecureStore.setItemAsync("token", token)
     setToken(token)
+    const membership = await getUsersMembership()
+    setUsersMembership(membership)
   }
 
   const signOutProvider = async () => {
     await removeToken()
     setToken(null)
+    setUsersMembership(null)
   }
 
   return (
     <AuthContext.Provider
-      value={{ token, signInProvider, signOutProvider, loading }}
+      value={{
+        token,
+        usersMembership,
+        refetchUsersMembership,
+        signInProvider,
+        signOutProvider,
+        loading,
+      }}
     >
       {children}
     </AuthContext.Provider>

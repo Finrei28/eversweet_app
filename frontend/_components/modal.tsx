@@ -8,9 +8,10 @@ import {
   Pressable,
   Animated,
   Dimensions,
+  ActivityIndicator,
 } from "react-native"
 import Modal from "react-native-modal"
-import { Dessert } from "../../utils/types"
+import { Dessert } from "../utils/types"
 import { useCartStore } from "@/store/cart"
 import { useEffect, useState, useRef } from "react"
 import { SafeAreaView } from "react-native-safe-area-context"
@@ -19,32 +20,42 @@ import BouncingLoader from "@/_components/loader"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useFetch from "@/services/use_fetch"
 import { getAvailableCustomisations } from "@/services/api"
-import { Customisations } from "../../utils/types"
-import uuid from "react-native-uuid"
+import { Customisations } from "../utils/types"
+import { formatCurrency } from "@/lib/formatters"
+import { useAuth } from "@/store/authProvider"
 
 type CustomModalProps = {
+  refetchOffers?: () => Promise<void>
   modalVisible: boolean
+  setOfferModal?: React.Dispatch<React.SetStateAction<boolean>>
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
   selectedDessert: Dessert
+  setSelectedDessert?: React.Dispatch<React.SetStateAction<Dessert | null>>
   type: "cents" | "points"
   state?: "add" | "edit"
-  showToast?: () => void
   customisations?: Customisations
+  offerId?: string | null
+  offerItemPrice?: number
   editItemPrice?: number
   editId?: string
 }
 
 export default function CustomModal({
+  refetchOffers,
   modalVisible,
+  setOfferModal,
   setModalVisible,
+  setSelectedDessert,
   selectedDessert,
   type,
-  showToast,
   state = "add",
   customisations,
+  offerId,
+  offerItemPrice,
   editItemPrice,
   editId,
 }: CustomModalProps) {
+  const { usersMembership } = useAuth()
   const addItem = useCartStore((state) => state.addItem)
   const editItem = useCartStore((state) => state.editItem)
   const {
@@ -54,12 +65,19 @@ export default function CustomModal({
   } = useFetch(() => getAvailableCustomisations())
   const [quantity, setQuantity] = useState(1)
   const [price, setPrice] = useState(
-    editItemPrice ? editItemPrice : selectedDessert.priceInCents
+    editItemPrice !== undefined && editItemPrice !== null
+      ? editItemPrice
+      : offerItemPrice !== undefined && offerItemPrice !== null
+      ? offerItemPrice
+      : usersMembership?.isActive && !offerId
+      ? selectedDessert.priceInCents * 0.85
+      : selectedDessert.priceInCents
   )
   const [buttonLoading, setButtonLoading] = useState(false)
   const [customisationQuantity, setCustomisationQuantity] =
     useState<Customisations>([])
-  const points = Math.round(selectedDessert.priceInCents / 5) * 5
+
+  const points = Math.round(price / 5) * 5
 
   useEffect(() => {
     if (state === "edit" && customisations) {
@@ -88,6 +106,9 @@ export default function CustomModal({
       useNativeDriver: true,
     }).start(() => {
       setModalVisible(false)
+      if (setSelectedDessert) {
+        setSelectedDessert(null)
+      }
       // Reset AFTER modal fully closes/unmounts
       setTimeout(() => {
         translateY.setValue(0)
@@ -119,34 +140,35 @@ export default function CustomModal({
 
   // --------------------------------------------------------------------
 
-  const handleIncrease = (ingredientName: string) => {
+  const handleIncrease = (ingredientId: string) => {
     const customisation = availableCustomisations.find(
-      (c) => c.name === ingredientName
+      (c) => c.id === ingredientId
     )
 
     if (!customisation) return
 
     setCustomisationQuantity((prev) => {
-      const existingItem = prev.find((item) => item.name === ingredientName)
+      const existingItem = prev.find((item) => item.id === ingredientId)
 
       if (existingItem) {
         // If the customization already exists, increase the quantity
         const newQuantity = existingItem.quantity + 1
         if (newQuantity === 1) {
-          return prev.filter((item) => item.name !== ingredientName)
+          return prev.filter((item) => item.id !== ingredientId)
         }
 
         return prev.map((item) => {
-          if (item.name === ingredientName) {
-            const included =
-              selectedDessert.ingredients.includes(ingredientName)
+          if (item.id === ingredientId) {
+            const included = selectedDessert.ingredients.some(
+              (ingredient) => ingredient.id === ingredientId
+            )
             if (!included) {
-              setPrice((prev) => prev + customisation.priceInCents)
+              setPrice((prev) => prev + customisation.priceInCents * 0.85)
             }
 
             // Increase price only if crossing 1 → 2 //
             else if (item.quantity >= 1) {
-              setPrice((prev) => prev + customisation.priceInCents)
+              setPrice((prev) => prev + customisation.priceInCents * 0.85)
             }
 
             return { ...item, quantity: newQuantity }
@@ -163,48 +185,54 @@ export default function CustomModal({
         }
 
         // Increase price if this is the first customization
-        setPrice((prev) => prev + customisation.priceInCents)
+        setPrice((prev) => prev + customisation.priceInCents * 0.85)
 
         return [...prev, newCustomization] // Add new customization to the state
       }
     })
   }
 
-  const handleDecrease = (ingredientName: string) => {
+  const handleDecrease = (ingredientId: string) => {
     const customisation = availableCustomisations.find(
-      (c) => c.name === ingredientName
+      (c) => c.id === ingredientId
     )
     if (!customisation) return
 
     setCustomisationQuantity((prev) => {
-      const existingItem = prev.find((item) => item.name === ingredientName)
+      const existingItem = prev.find((item) => item.id === ingredientId)
 
-      const included = selectedDessert.ingredients.includes(ingredientName)
+      const included = selectedDessert.ingredients.some(
+        (ingredient) => ingredient.id === ingredientId
+      )
 
       if (existingItem) {
         // If the customization exists and quantity is more than 0, decrease the quantity
         if (existingItem.quantity > 0) {
           const newQuantity = existingItem.quantity - 1
           if (existingItem.quantity === 1) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
-            return prev.filter((item) => item.name !== ingredientName)
+            setPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents * 0.85)
+            )
+            return prev.filter((item) => item.id !== ingredientId)
           }
           if (!included) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
+            setPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents * 0.85)
+            )
             if (newQuantity === 0)
-              return prev.filter((item) => item.name !== ingredientName)
+              return prev.filter((item) => item.id !== ingredientId)
           }
 
           // Decrease price only if crossing 2 → 1
           else if (existingItem.quantity > 1) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
+            setPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents * 0.85)
+            )
           }
 
           // Return the updated array with the decreased quantity
           return prev.map((item) =>
-            item.name === ingredientName
-              ? { ...item, quantity: newQuantity }
-              : item
+            item.id === ingredientId ? { ...item, quantity: newQuantity } : item
           )
         }
       } else {
@@ -268,17 +296,20 @@ export default function CustomModal({
                     <Image
                       source={{ uri: selectedDessert.imagePath }}
                       style={{ width: "100%", height: 200, borderRadius: 10 }}
-                      resizeMode="cover"
+                      resizeMode="contain"
                       className="px-3"
                     />
                     <View className="px-3">
                       <Text className="mt-5 ">
-                        Ingredients: {selectedDessert.ingredients.join(", ")}
+                        Ingredients:{" "}
+                        {selectedDessert.ingredients
+                          .map((i) => i.name)
+                          .join(", ")}
                       </Text>
                       <Text className="mt-2 font-semibold text-lg">
                         Price:{" "}
                         {type === "cents"
-                          ? `$ ${Number(price) / 100}`
+                          ? `${formatCurrency(Number(price) / 100)}`
                           : `${points} points`}
                       </Text>
                     </View>
@@ -292,11 +323,13 @@ export default function CustomModal({
                 >
                   {selectedDessert.ingredients
                     .filter((ingredient) =>
-                      availableCustomisations.some((c) => c.name === ingredient)
+                      availableCustomisations.some(
+                        (c) => c.id === ingredient.id
+                      )
                     )
-                    .map((c) => {
+                    .map((ingredient) => {
                       const toppingQuantity = customisationQuantity.find(
-                        (item) => item.name === c
+                        (item) => item.id === ingredient.id
                       )?.quantity
 
                       const quantity =
@@ -308,12 +341,12 @@ export default function CustomModal({
 
                       return (
                         <View
-                          key={c}
+                          key={ingredient.id}
                           className="flex-row justify-between items-center rounded-lg bg-slate-50 p-3"
                         >
                           <View className="flex-row flex-1 items-center gap-4">
                             <View>
-                              <Text className="text-lg">{c}</Text>
+                              <Text className="text-lg">{ingredient.name}</Text>
                             </View>
 
                             <View className="ml-2 mr-2 bg-green-100  px-2 py-0.5 rounded-full">
@@ -326,7 +359,7 @@ export default function CustomModal({
                           <View className="flex-row items-center gap-3">
                             <TouchableOpacity
                               className="items-center justify-center"
-                              onPress={() => handleDecrease(c)}
+                              onPress={() => handleDecrease(ingredient.id)}
                               disabled={quantity === 0}
                             >
                               <AntDesign
@@ -347,7 +380,7 @@ export default function CustomModal({
                             <TouchableOpacity
                               className={`items-center justify-center`}
                               disabled={type === "points" && quantity === 1}
-                              onPress={() => handleIncrease(c)}
+                              onPress={() => handleIncrease(ingredient.id)}
                             >
                               <AntDesign
                                 name="pluscircleo"
@@ -367,12 +400,14 @@ export default function CustomModal({
                   {type === "cents" &&
                     availableCustomisations
                       ?.filter(
-                        (item) =>
-                          !selectedDessert.ingredients.includes(item.name)
+                        (c) =>
+                          !selectedDessert.ingredients.some(
+                            (ingredient) => ingredient.id === c.id
+                          )
                       )
                       .map((c) => {
                         const toppingQuantity = customisationQuantity.find(
-                          (item) => item.name === c.name
+                          (item) => item.id === c.id
                         )?.quantity
 
                         const quantity =
@@ -380,7 +415,7 @@ export default function CustomModal({
 
                         return (
                           <View
-                            key={c.name}
+                            key={c.id}
                             className="flex-row justify-between items-center rounded-lg bg-slate-50 p-3"
                           >
                             <View className="flex-row flex-1 items-center gap-4">
@@ -392,7 +427,7 @@ export default function CustomModal({
                             <View className="flex-row items-center gap-3">
                               <TouchableOpacity
                                 className="items-center justify-center"
-                                onPress={() => handleDecrease(c.name)}
+                                onPress={() => handleDecrease(c.id)}
                                 disabled={quantity === 0}
                               >
                                 <AntDesign
@@ -408,7 +443,7 @@ export default function CustomModal({
 
                               <TouchableOpacity
                                 className="items-center justify-center"
-                                onPress={() => handleIncrease(c.name)}
+                                onPress={() => handleIncrease(c.id)}
                               >
                                 <AntDesign
                                   name="pluscircleo"
@@ -435,6 +470,7 @@ export default function CustomModal({
                           loyaltyPointsUsed: type === "points" ? points : null,
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
+                          offerId: offerId ? offerId : null,
                         })
                       } else {
                         await editItem({
@@ -444,20 +480,34 @@ export default function CustomModal({
                           loyaltyPointsUsed: type === "points" ? points : null,
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
+                          offerId: offerId ? offerId : null,
                         })
                       }
                       setButtonLoading(false)
                       setModalVisible(false)
+                      if (setOfferModal) {
+                        setOfferModal(false)
+                      }
+                      if (setSelectedDessert) {
+                        setSelectedDessert(null)
+                      }
+                      if (refetchOffers) {
+                        refetchOffers()
+                      }
                     }}
                     className="bg-primary p-3 mt-3 items-center rounded-lg"
                   >
-                    <Text className="text-white font-bold">
-                      {state === "add" ? "Add to Cart" : "Edit"}
-                    </Text>
+                    {buttonLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text className="text-white font-bold">
+                        {state === "add" ? "Add to Cart" : "Edit"}
+                      </Text>
+                    )}
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    onPress={() => setModalVisible(false)}
+                    onPress={() => closeWithAnimation()}
                     className="p-3 items-center"
                   >
                     <Text className="text-gray-500">Cancel</Text>

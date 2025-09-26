@@ -16,7 +16,7 @@ import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
-import CustomModal from "@/app/_components/modal"
+import CustomModal from "@/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 
@@ -26,6 +26,7 @@ export default function Loyalty() {
   const [activeCategory, setActiveCategory] = useState<string>("")
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
+  const [previousIndex, setPreviousIndex] = useState(0)
 
   const router = useRouter()
 
@@ -76,10 +77,31 @@ export default function Loyalty() {
 
     const index = categories.findIndex((cat) => cat.id === id)
     if (scrollViewRef.current) {
+      const newIndex =
+        index >= previousIndex
+          ? index < 6
+            ? index * 130
+            : index < 7
+            ? index * 145
+            : index * 160
+          : index < 3
+          ? index
+          : index < 4
+          ? index * 50
+          : index < 5
+          ? index * 70
+          : index < 6
+          ? index * 100
+          : index < 7
+          ? index * 120
+          : index < 8
+          ? index * 135
+          : index * 140
       scrollViewRef.current.scrollTo({
-        x: index < 7 ? index * 130 : index * 150,
+        x: newIndex,
         animated: true,
       })
+      setPreviousIndex(index)
     }
   }
 

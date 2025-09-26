@@ -22,6 +22,7 @@ import {
 import { getSavedCards, saveCard, removeCard } from "@/services/stripe-api"
 import { getUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
+import BouncingLoader from "@/_components/loader"
 
 // Your Stripe publishable key - should be in environment variables
 
@@ -49,10 +50,12 @@ function PaymentMethodsContent() {
 
   // Fetch saved cards when component mounts
   useEffect(() => {
-    if (token) {
+    if (!token && !loadingToken) {
+      router.push("/signin")
+    } else {
       fetchSavedCards()
     }
-  }, [token])
+  }, [token, loadingToken])
 
   const fetchSavedCards = async () => {
     try {
@@ -154,22 +157,17 @@ function PaymentMethodsContent() {
       <View className="flex-1 bg-background">
         <CustomHeader />
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#e6aa6b" />
+          <BouncingLoader />
         </View>
       </View>
     )
-  }
-
-  if (!token) {
-    router.replace("/signin")
-    return null
   }
 
   return (
     <View className="flex-1 bg-background">
       <CustomHeader />
       <ScrollView className="flex-1 px-4">
-        <View className="flex-row justify-between items-center mt-6 mb-4">
+        <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Payment Methods</Text>
           {!showAddCard && (
             <TouchableOpacity
@@ -235,7 +233,7 @@ function PaymentMethodsContent() {
               disabled={processingCard || !cardDetails?.complete}
             >
               {processingCard ? (
-                <ActivityIndicator size="small" color="#e6aa6b" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text className="text-white font-medium">Add Card</Text>
               )}

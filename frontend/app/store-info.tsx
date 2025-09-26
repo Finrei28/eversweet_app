@@ -18,7 +18,9 @@ export const isStoreOpenNow = (): boolean => {
   const dayName = now.toLocaleDateString("en-NZ", { weekday: "long" })
   const hours = storeHours[dayName as keyof typeof storeHours]
 
-  if (!hours) return false
+  if (!hours) {
+    return false
+  }
 
   const [startStr, endStr] = hours
 
@@ -62,7 +64,7 @@ export default function StoreInfo() {
     <View className="flex-1 bg-background">
       <CustomHeader />
       <ScrollView className="flex-1 px-4">
-        <View className="mt-6 mb-4">
+        <View className="mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Store Information</Text>
         </View>
         {/* About Eversweet */}
@@ -169,7 +171,7 @@ export default function StoreInfo() {
               <View key={index} className="flex-row justify-between py-1">
                 <Text className="text-gray-700">{day}</Text>
                 <Text className="text-gray-700">
-                  {hours[0]} - {hours[1]}
+                  {hours ? `${hours[0]} - ${hours[1]}` : "Closed"}
                 </Text>
               </View>
             ))}

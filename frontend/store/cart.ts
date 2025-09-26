@@ -17,6 +17,7 @@ import {
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
+import { useAuth } from "./authProvider"
 
 interface CartState {
   items: CartItem[]
@@ -32,6 +33,7 @@ interface CartState {
   setError: (error: string | null) => void
   getTotalItems: () => number
   getTotalCost: () => number
+  getEarnablePoints: () => number
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
@@ -58,7 +60,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           text1: `${item.dessert.name} added to cart`,
           text2: `${item.loyaltyPointsUsed} points has been used`,
           position: "bottom",
-          visibilityTime: 2000,
+          visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
         })
@@ -67,7 +69,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           type: "success",
           text1: `${item.dessert.name} added to cart`,
           position: "bottom",
-          visibilityTime: 2000,
+          visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
         })
@@ -388,4 +390,21 @@ export const useCartStore = create<CartState>((set, get) => ({
       (acc, item) => acc + item.quantity * item.itemPriceInCents,
       0
     ),
+  getEarnablePoints: () => {
+    const { usersMembership } = useAuth()
+
+    if (usersMembership?.isActive) {
+      return get().items.reduce(
+        (acc, item) =>
+          acc + Math.floor((item.itemPriceInCents / 10) * item.quantity * 2.2),
+        0
+      )
+    }
+
+    return get().items.reduce(
+      (acc, item) =>
+        acc + Math.floor((item.itemPriceInCents / 10) * item.quantity * 1.1),
+      0
+    )
+  },
 }))

@@ -5,7 +5,11 @@ import type React from "react"
 import PageHeader from "@/_components/pageheader"
 import BouncingLoader from "@/_components/loader"
 import { useRouter } from "expo-router"
-import { MaterialIcons, Feather } from "@expo/vector-icons"
+import {
+  MaterialIcons,
+  Feather,
+  MaterialCommunityIcons,
+} from "@expo/vector-icons"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 
@@ -44,7 +48,13 @@ export default function Profile() {
       }`}
     >
       <View className="flex-row items-center">
-        <View className="w-8 h-8 items-center justify-center mr-3">{icon}</View>
+        <View
+          className={`w-8 h-8  justify-center mr-3 ${
+            title === "Membership" ? "items-start" : "items-center"
+          }`}
+        >
+          {icon}
+        </View>
         <Text className="text-lg">{title}</Text>
       </View>
       <MaterialIcons name="chevron-right" size={24} color="#9CA3AF" />
@@ -108,6 +118,17 @@ export default function Profile() {
 
         {/* Profile Options */}
         <View className="mx-4 mt-6 bg-white rounded-xl shadow-md overflow-hidden">
+          <ProfileMenuItem
+            icon={
+              <MaterialCommunityIcons
+                name="account-star-outline"
+                size={24}
+                color="#6B7280"
+              />
+            }
+            title="Membership"
+            onPress={() => navigateTo("/membership")}
+          />
           <ProfileMenuItem
             icon={<Feather name="user" size={24} color="#6B7280" />}
             title="Account Details"

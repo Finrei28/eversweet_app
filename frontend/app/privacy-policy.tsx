@@ -10,7 +10,7 @@ export default function PrivacyPolicy() {
     <View className="flex-1 bg-background">
       <CustomHeader />
       <ScrollView className="flex-1 px-4">
-        <View className="mt-6 mb-4">
+        <View className="mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Privacy Policy</Text>
           <Text className="text-gray-500 mt-1">Last updated: 18 Sep, 2025</Text>
         </View>
@@ -130,11 +130,10 @@ export default function PrivacyPolicy() {
           </Text>
           <View className="ml-4 mb-4">
             <Text className="text-gray-700 mb-2">
-              Email: privacy@eversweet.com
+              Email: eversweet@eversweet.co.nz
             </Text>
-            <Text className="text-gray-700 mb-2">Phone: 1-800-EVERSWEET</Text>
             <Text className="text-gray-700 mb-2">
-              Address: 123 Coffee Lane, Suite 100, Seattle, WA 98101
+              Address: 5D/119 Meadowland Drive, Somerville
             </Text>
           </View>
         </View>

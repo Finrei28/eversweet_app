@@ -26,6 +26,14 @@ export type Customisations = {
   quantity: number
 }[]
 
+export type Ingredients = {
+  name: string
+  id: string
+  priceInCents: number
+  chineseName: string
+  isAvailableForPurchase: boolean
+}[]
+
 export type Dessert = {
   id: string
   name: string
@@ -34,7 +42,7 @@ export type Dessert = {
   priceInCents: number
   priceInLoyaltyPoints: number
   imagePath: string
-  ingredients: string[]
+  ingredients: Ingredients
 }
 
 export type DessertCategory = {
@@ -116,6 +124,7 @@ export type CartItem = {
   itemPriceInCents: number
   quantity: number
   loyaltyPointsUsed: number | null
+  offerId: string | null
 }
 
 export type AddCartItem = {
@@ -124,4 +133,50 @@ export type AddCartItem = {
   itemPriceInCents: number
   quantity: number
   loyaltyPointsUsed: number | null
+  offerId: string | null
 }
+
+export type MembershipDetails = {
+  id: string
+  price: number | null
+  stripePriceId: string
+}
+
+export type UsersMembership = {
+  id: string
+  createdAt: Date
+  startDate: Date
+  endDate: Date
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED"
+  stripeSubscriptionId: string | null
+  planId: string
+  isActive: boolean
+}
+
+export type MembershipStatus = {
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED"
+  isActive: boolean
+}
+
+// A single redemption record
+export type Offer = {
+  id: string
+  name: string
+  dessertId: string | null
+  categoryId: string | null
+  itemPriceInCents: number | null
+  discountAmount: number | null
+  limit: number
+  dessert: Dessert | null
+  category: DessertCategory | null
+  redemptions: {
+    id: string
+    membershipId: string
+    offerId: string
+    redeemedAt: Date
+    used: number
+  }[]
+}
+
+// The offers array type
+export type Offers = Offer[]

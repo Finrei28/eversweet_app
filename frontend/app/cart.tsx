@@ -8,11 +8,10 @@ import {
 } from "@react-navigation/native"
 import { useCallback, useState } from "react"
 import { Customisations, Dessert } from "@/utils/types"
-import CustomModal from "@/app/_components/modal"
+import CustomModal from "@/_components/modal"
 import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
-import { getEarnablePoints } from "@/lib/formatters"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -23,6 +22,7 @@ export default function CartPage() {
   const incrementItem = useCartStore((state) => state.incrementItem)
   const decrementItem = useCartStore((state) => state.decrementItem)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
+  const getEarnablePoints = useCartStore((state) => state.getEarnablePoints)
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [selectedDessertCustomisations, setSelectedDessertCustomisations] =
     useState<Customisations | null>(null)
@@ -66,7 +66,8 @@ export default function CartPage() {
                   <View className="flex-row justify-between py-3">
                     <View>
                       <Text className="text-lg font-semibold">
-                        {item.dessert.name}
+                        {item.dessert.name}{" "}
+                        {item.offerId ? "(Members Offer)" : ""}
                       </Text>
                       {item.customisations.map((customisation) => {
                         return (
@@ -153,7 +154,7 @@ export default function CartPage() {
                     Total: ${(total / 100).toFixed(2)}
                   </Text>
                   {total > 0 && (
-                    <Text>Earnable points: {getEarnablePoints(total)}</Text>
+                    <Text>Earnable points: {getEarnablePoints()}</Text>
                   )}
                 </View>
               </View>

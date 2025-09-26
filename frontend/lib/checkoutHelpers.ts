@@ -13,6 +13,7 @@ export function getEstimatedPickUpTime(numOfItems: number) {
 }
 
 export function convertToTime(base: Date, timeStr: string): Date {
+  if (!timeStr) return null
   const [time, modifier] = timeStr.split(" ")
   const [hours, minutes] = time.split(":").map(Number)
 
@@ -25,28 +26,58 @@ export function convertToTime(base: Date, timeStr: string): Date {
   // const localBase = new Date(base.getTime() - localOffset) // Convert to local time zone
 
   const date = new Date(base)
-  date.setHours(hrs)
-  date.setMinutes(minutes)
-  date.setSeconds(0)
-  date.setMilliseconds(0)
+  date.setHours(hrs, minutes, 0, 0)
 
   return date
 }
 
 export function getOpenCloseTime(date: Date) {
   const dayName = date.toLocaleDateString("en-NZ", { weekday: "long" })
-  const [openStr, closeStr] = storeHours[dayName]
+  const [openStr, closeStr] = storeHours[dayName] ?? [null, null]
   const openTime = convertToTime(date, openStr)
   const closeTime = convertToTime(date, closeStr)
   return { openTime, closeTime, dayName }
 }
 
+export function getNextOpenDay(date: Date) {
+  const daysOfWeek = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ]
+  let nextDate = new Date(date)
+
+  for (let i = 0; i < 7; i++) {
+    const dayName = daysOfWeek[nextDate.getDay()]
+    const hours = storeHours[dayName]
+
+    if (hours && hours[0] && hours[1]) {
+      // Found a day with valid hours
+      const [openStr] = hours
+      return convertToTime(nextDate, openStr)
+    }
+
+    // Move to next day
+    nextDate.setDate(nextDate.getDate() + 1)
+  }
+
+  // If no days have valid hours, just return null
+  return null
+}
+
 export function getNextValidPickupTime(selected: Date, totalItems: number) {
   const minTime = getEstimatedPickUpTime(totalItems)
-  const now = new Date()
+
   const date = new Date(selected)
   const { openTime, closeTime } = getOpenCloseTime(date)
-  const lastPickup = new Date(closeTime.getTime() - 10 * 60 * 1000) // 10 min before close
+
+  if (!openTime || !closeTime) {
+    return getNextOpenDay(date)
+  }
 
   if (date >= openTime && date <= closeTime) {
     if (date < minTime) return minTime > openTime ? minTime : openTime

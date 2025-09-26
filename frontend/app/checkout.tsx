@@ -36,6 +36,7 @@ import {
   getOpenCloseTime,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
+import { formatDate, formatShortDate } from "@/lib/formatters"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -352,6 +353,11 @@ function CheckoutContent() {
     return getTotalCost() / 100
   }
 
+  const calculateMembershipDiscount = () => {
+    const originalPrice = Math.round(getTotalCost() / 0.85)
+    return (originalPrice - getTotalCost()) / 100
+  }
+
   const handlePlaceOrder = async () => {
     const totalAmount = Math.round(getTotalCost())
     const totalItems = getTotalItems()
@@ -517,7 +523,7 @@ function CheckoutContent() {
                 className={`${
                   index < cartItems.length - 1
                     ? "border-b border-gray-100 py-4"
-                    : ""
+                    : "pt-4"
                 }`}
               >
                 <View key={index} className={`flex-row justify-between py-2`}>
@@ -530,7 +536,9 @@ function CheckoutContent() {
 
                   <Text className="font-medium">
                     $
-                    {((item.itemPriceInCents * item.quantity) / 100).toFixed(2)}
+                    {(
+                      Math.round(item.itemPriceInCents * item.quantity) / 100
+                    ).toFixed(2)}
                   </Text>
                 </View>
                 {item.customisations.map((customisation) => (
@@ -547,6 +555,14 @@ function CheckoutContent() {
 
             <View className="mt-4 pt-3 border-t border-gray-200">
               <View className="flex-row justify-between mb-1">
+                <Text className="text-gray-500">
+                  Membership Discount Included (15%)
+                </Text>
+                <Text className="font-medium">
+                  - ${calculateMembershipDiscount().toFixed(2)}
+                </Text>
+              </View>
+              <View className="flex-row justify-between mt-2 pt-2 border-t border-gray-200">
                 <Text className="text-gray-500">GST Included (15%)</Text>
                 <Text className="font-medium">
                   ${calculateGST().toFixed(2)}
@@ -563,7 +579,10 @@ function CheckoutContent() {
 
           {/* Pickup Time */}
           <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <Text className="text-lg font-medium mb-3">Pickup Time</Text>
+            <View className=" mb-3 justify-between flex-row items-center">
+              <Text className="text-lg font-medium">Pickup Time</Text>
+              {pickupNow && <Text>{formatShortDate(nextValidTime)}</Text>}
+            </View>
 
             <View className="flex-row items-center justify-between mb-4">
               <Text>Pickup as soon as possible</Text>

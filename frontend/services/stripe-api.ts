@@ -1,4 +1,9 @@
 // This file contains the API calls to your backend for Stripe operations
+import {
+  MembershipDetails,
+  MembershipStatus,
+  UsersMembership,
+} from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 /**
  * Fetches saved cards from the server
@@ -161,5 +166,158 @@ export const checkPaymentStatus = async (paymentIntentId: string) => {
   } catch (error) {
     console.error("Error checking payment status:", error)
     throw error
+  }
+}
+
+export const getMembershipDetails = async (): Promise<MembershipDetails> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/getMembershipDetails`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const getUsersMembership = async (): Promise<UsersMembership> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/getUsersMembership`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 404) {
+      return null
+    }
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const createMembership = async (
+  paymentMethodId: string,
+  stripePriceId: string
+) => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/createMembership`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ paymentMethodId, stripePriceId }),
+    })
+
+    const data = await res.json()
+
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const cancelMembership = async () => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/cancelMembership`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 404) {
+      return null
+    }
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/pollMembershipStatus`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 404) {
+      return null
+    }
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
   }
 }

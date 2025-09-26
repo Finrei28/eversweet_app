@@ -16,10 +16,11 @@ import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
-import CustomModal from "@/app/_components/modal"
+import CustomModal from "@/_components/modal"
 import Toast from "react-native-toast-message"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
+import { formatCurrency } from "@/lib/formatters"
 
 export default function Menu() {
   const [selectedCategory, setSelectedCategory] =
@@ -28,7 +29,8 @@ export default function Menu() {
   const { categoryParam } = useLocalSearchParams()
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
-  const { token } = useAuth()
+  const [previousIndex, setPreviousIndex] = useState(0)
+  const { token, usersMembership } = useAuth()
 
   const router = useRouter()
   const cartItems = useCartStore((state) => state.items)
@@ -38,7 +40,7 @@ export default function Menu() {
   useFocusEffect(
     useCallback(() => {
       const fetchData = async () => {
-        if (!menu) return
+        if (!menu || activeCategory) return
 
         const selected = categoryParam
           ? menu.find((cat) => cat.name === categoryParam)
@@ -66,12 +68,34 @@ export default function Menu() {
 
   const scrollToCategory = (id: string) => {
     if (!menu) return
+
     const index = menu.findIndex((cat) => cat.id === id)
     if (scrollViewRef.current) {
+      const newIndex =
+        index >= previousIndex
+          ? index < 6
+            ? index * 130
+            : index < 7
+            ? index * 145
+            : index * 160
+          : index < 3
+          ? index
+          : index < 4
+          ? index * 50
+          : index < 5
+          ? index * 70
+          : index < 6
+          ? index * 100
+          : index < 7
+          ? index * 120
+          : index < 8
+          ? index * 135
+          : index * 140
       scrollViewRef.current.scrollTo({
-        x: index < 7 ? index * 130 : index * 150,
+        x: newIndex,
         animated: true,
       })
+      setPreviousIndex(index)
     }
   }
 
@@ -171,9 +195,49 @@ export default function Menu() {
                             <Text
                               style={{ color: "#FFFFFF", fontWeight: "bold" }}
                             >
-                              {token
-                                ? `Add ${Number(dessert.priceInCents) / 100}`
-                                : "Sign In"}
+                              {token ? (
+                                <View className="flex-col items-center justify-center">
+                                  {/* Regular Price */}
+                                  {usersMembership.isActive ? (
+                                    <>
+                                      <View className="flex-row items-center gap-1">
+                                        <Text className="text-red-600 line-through text-sm">
+                                          {formatCurrency(
+                                            Number(dessert.priceInCents) / 100
+                                          )}
+                                        </Text>
+                                        {/* Discounted Member Price */}
+                                        <Text className="text-white font-bold text-lg">
+                                          {formatCurrency(
+                                            (Number(dessert.priceInCents) *
+                                              0.85) /
+                                              100
+                                          )}{" "}
+                                        </Text>
+                                      </View>
+
+                                      <Text className="text-xs text-yellow-300">
+                                        Member Price
+                                      </Text>
+                                    </>
+                                  ) : (
+                                    <Text className="text-white font-bold text-lg">
+                                      {formatCurrency(
+                                        Number(dessert.priceInCents) / 100
+                                      )}{" "}
+                                    </Text>
+                                  )}
+                                </View>
+                              ) : (
+                                <Text
+                                  style={{
+                                    color: "#FFFFFF",
+                                    fontWeight: "bold",
+                                  }}
+                                >
+                                  Sign In
+                                </Text>
+                              )}
                             </Text>
                           </TouchableOpacity>
                         </View>

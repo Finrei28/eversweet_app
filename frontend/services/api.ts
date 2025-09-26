@@ -2,10 +2,11 @@ import {
   createAccountData,
   Customisation,
   AccountData,
-  OrderData,
   OrderStatus,
   AddCartItem,
   CartItem,
+  DessertCategory,
+  Offers,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -25,7 +26,7 @@ export async function fetchCategoriesWithDesserts(): Promise<Menu> {
 
   // Optionally filter if needed
   const filteredCategories = data.menu.filter(
-    (category) => category.desserts.length > 0
+    (category: DessertCategory) => category.desserts.length > 0
   )
   return filteredCategories
 }
@@ -503,6 +504,7 @@ export const addItemToCart = async (item: AddCartItem) => {
     itemPriceInCents,
     customisations,
     loyaltyPointsUsed,
+    offerId,
   } = item
   const cartItem = {
     dessertId: dessert.id,
@@ -510,6 +512,7 @@ export const addItemToCart = async (item: AddCartItem) => {
     itemPriceInCents,
     customisations,
     loyaltyPointsUsed,
+    offerId,
   }
 
   try {
@@ -694,6 +697,33 @@ export const decrementCartItem = async (
     return { cartItems: data.cartItems }
   } catch (error) {
     console.error("Error decrementing cart item:", error)
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const showOffers = async (): Promise<Offers> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/auth/showOffers`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+    return data.offers
+  } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
   }
 }

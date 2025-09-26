@@ -82,7 +82,7 @@ export default function OrderHistory() {
           />
         }
       >
-        <View className="mt-6 mb-4">
+        <View className="mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Order History</Text>
         </View>
 

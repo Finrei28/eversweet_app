@@ -14,6 +14,15 @@ export function formatNumber(amount: number) {
   return Number_Formatter.format(amount)
 }
 
+export const formatShortDate = (date: Date) => {
+  const newDate = new Date(date)
+  return new Intl.DateTimeFormat("en-NZ", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(newDate)
+}
+
 export const formatDate = (dateString: string) => {
   const date = new Date(dateString)
   return new Intl.DateTimeFormat("en-NZ", {
@@ -34,8 +43,4 @@ export const getCollectionTime = (date: Date) => {
     hour: "numeric",
     minute: "numeric",
   }).format(date)
-}
-
-export const getEarnablePoints = (total: number) => {
-  return Math.round(((total / 5) * 5) / 5)
 }

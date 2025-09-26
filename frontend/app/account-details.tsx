@@ -34,6 +34,12 @@ export default function AccountDetails() {
   } = useFetch(getUserProfile)
 
   useEffect(() => {
+    if (!loadingToken && !token) {
+      router.push("/signin")
+    }
+  }, [token, loadingToken])
+
+  useEffect(() => {
     if (userProfile) {
       setFormData({
         firstName: userProfile.firstName || "",
@@ -109,7 +115,7 @@ export default function AccountDetails() {
     <View className="flex-1 bg-background">
       <CustomHeader />
       <ScrollView className="flex-1 px-4">
-        <View className="flex-row justify-between items-center mt-6 mb-4">
+        <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Account Details</Text>
           {!isEditing ? (
             <TouchableOpacity
