@@ -80,8 +80,8 @@ export default function signin() {
           keyboardShouldPersistTaps="handled"
           className="bg-background"
         >
-          <View className="mt-5">
-            <Text className="text-4xl font-bold text-primary text-center mb-2">
+          <View className="mt-10">
+            <Text className="text-4xl font-bold text-primary text-center">
               Sign In
             </Text>
           </View>
@@ -120,6 +120,18 @@ export default function signin() {
                   {isLoading ? "Signing in..." : "Sign in"}
                 </Text>
               </TouchableOpacity>
+              <View className="flex-row items-center justify-center mb-3">
+                <Text className="text-gray-500 mr-2">
+                  Forgot your password?
+                </Text>
+                <TouchableOpacity
+                  onPress={() => router.push("/routers/forgotPassword")}
+                >
+                  <Text className="text-primary text-base font-semibold">
+                    Reset Password
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               <View className="flex-row items-center justify-center">
                 <Text className="text-gray-500 mr-2">

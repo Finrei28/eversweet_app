@@ -60,6 +60,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const refetchUsersMembership = async () => {
+    if (!token) return
     const membership = await getUsersMembership()
     setUsersMembership(membership)
   }

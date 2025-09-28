@@ -18,6 +18,7 @@ console.log("API URL:", url)
 
 export async function fetchCategoriesWithDesserts(): Promise<Menu> {
   const res = await fetch(`${url}/api/getMenu`)
+
   if (!res.ok) {
     throw new Error("Failed to fetch menu")
   }
@@ -527,7 +528,7 @@ export const addItemToCart = async (item: AddCartItem) => {
 
     const data = await res.json()
 
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       throw new Error("Please sign in to add items to cart")
     }
 

@@ -151,6 +151,7 @@ export type UsersMembership = {
   stripeSubscriptionId: string | null
   planId: string
   isActive: boolean
+  cancel: boolean
 }
 
 export type MembershipStatus = {

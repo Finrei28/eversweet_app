@@ -25,7 +25,6 @@ import { formatCurrency } from "@/lib/formatters"
 export default function Menu() {
   const [selectedCategory, setSelectedCategory] =
     useState<DessertCategory | null>(null)
-  const [activeCategory, setActiveCategory] = useState<string>("")
   const { categoryParam } = useLocalSearchParams()
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
@@ -40,7 +39,7 @@ export default function Menu() {
   useFocusEffect(
     useCallback(() => {
       const fetchData = async () => {
-        if (!menu || activeCategory) return
+        if (!menu) return
 
         const selected = categoryParam
           ? menu.find((cat) => cat.name === categoryParam)
@@ -56,13 +55,24 @@ export default function Menu() {
     }, [categoryParam, menu])
   )
 
-  useEffect(() => {
-    if (menu && menu.length > 0) {
-      const selectedCategory = menu.find((cat) => cat.id === activeCategory)
-      scrollToCategory(activeCategory)
-      setSelectedCategory(selectedCategory || null)
-    }
-  }, [activeCategory])
+  const changeCategory = (newCategory: string) => {
+    router.replace({
+      pathname: "/menu",
+      params: { categoryParam: newCategory },
+    })
+  }
+
+  // useEffect(() => {
+  //   if (menu && menu.length > 0) {
+  //     const selectedCategory = menu.find((cat) => cat.id === activeCategory)
+  //     scrollToCategory(activeCategory)
+  //     setSelectedCategory(selectedCategory || null)
+  //   }
+  // }, [activeCategory])
+
+  const handleCategoryChange = (category: DessertCategory) => {
+    changeCategory(category.name)
+  }
 
   const scrollViewRef = useRef<ScrollView>(null)
 
@@ -135,7 +145,7 @@ export default function Menu() {
                           ? "bg-secondary text-primary"
                           : ""
                       }`}
-                      onPress={() => setActiveCategory(category.id)}
+                      onPress={() => handleCategoryChange(category)}
                     >
                       <Text className="font-bold text-lg">{category.name}</Text>
                     </TouchableOpacity>
@@ -198,7 +208,7 @@ export default function Menu() {
                               {token ? (
                                 <View className="flex-col items-center justify-center">
                                   {/* Regular Price */}
-                                  {usersMembership.isActive ? (
+                                  {usersMembership?.isActive ? (
                                     <>
                                       <View className="flex-row items-center gap-1">
                                         <Text className="text-red-600 line-through text-sm">

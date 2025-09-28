@@ -23,7 +23,7 @@ export default function Index() {
   return (
     <View className="flex-1 bg-background">
       <PageHeader />
-      {cartItems.length > 0 && <ViewCart />}
+      {cartItems?.length > 0 && <ViewCart />}
       <FlatList
         data={homepageCards}
         renderItem={({ item }) => (
@@ -32,7 +32,7 @@ export default function Index() {
               return (
                 <View
                   key={index}
-                  className="flex justify-center bg-background mx-10 py-5 my-4 gap-5 rounded-2xl shadow-sm"
+                  className="flex justify-center bg-white mx-10 py-5 my-4 gap-5 rounded-2xl shadow-sm"
                 >
                   <Text className="text-primary font-bold text-2xl text-center">
                     {category.title}
@@ -40,7 +40,7 @@ export default function Index() {
                   <Image
                     source={{ uri: category.image }}
                     className="w-full bg-white h-80 mx-auto object-cover rounded-lg mt-2"
-                    resizeMode="cover"
+                    resizeMode="contain"
                     alt={category.title}
                     accessibilityLabel={category.title}
                     accessibilityHint={`This is the ${category.title} image`}

@@ -23,8 +23,9 @@ import {
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
 import { MembershipDetails } from "@/utils/types"
-import { formatCurrency } from "@/lib/formatters"
+import { formatCurrency, formatShortDate } from "@/lib/formatters"
 import ShowOffers from "@/_components/showOffersToMembers"
+import CancelMembershipModal from "@/_components/cancelMembershipModal"
 
 export default function MembershipContent() {
   const router = useRouter()
@@ -41,6 +42,7 @@ export default function MembershipContent() {
   const [submitted, setSubmitted] = useState(false)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [cancelMembership, setCancelMembership] = useState(false)
   const [loadingMembershipDetails, setLoadingMembershipDetails] =
     useState<boolean>(true)
   const [membershipDetails, setMembershipDetails] =
@@ -188,7 +190,20 @@ export default function MembershipContent() {
               <Text className="text-gray-500">
                 {formatCurrency(membershipDetails.price / 100)} / month
               </Text>
+              {usersMembership?.isActive && usersMembership?.cancel && (
+                <Text className="text-gray-500">
+                  Expires on {formatShortDate(usersMembership.endDate)}
+                </Text>
+              )}
             </View>
+            {!usersMembership?.cancel && (
+              <TouchableOpacity
+                onPress={() => setCancelMembership(true)}
+                className="bg-red-500 px-2 py-1 rounded-lg"
+              >
+                <Text className="text-white">Cancel</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Benefits list */}
@@ -397,6 +412,12 @@ export default function MembershipContent() {
           </View>
         )}
       </ScrollView>
+      {cancelMembership && (
+        <CancelMembershipModal
+          modalVisible={cancelMembership}
+          setModalVisible={setCancelMembership}
+        />
+      )}
     </View>
   )
 }

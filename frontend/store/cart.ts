@@ -1,18 +1,13 @@
 import { create } from "zustand"
-import { persist, StorageValue } from "zustand/middleware"
-import AsyncStorage from "@react-native-async-storage/async-storage"
-import { AddCartItem, CartItem, Customisations, Dessert } from "@/utils/types"
-import { getUserIdFromToken } from "@/services/authToken"
-import { isEqual } from "lodash"
+import { AddCartItem, CartItem, UsersMembership } from "@/utils/types"
+
 import {
   addItemToCart,
   clearCart,
   decrementCartItem,
   getCartItems,
   incrementCartItem,
-  orderWithLoyaltyPoints,
   removeItemFromCart,
-  restoreLoyaltyPoints,
   updateCartItem,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
@@ -47,11 +42,21 @@ export const useCartStore = create<CartState>((set, get) => ({
       console.error("Failed to fetch cart items", error)
     }
   },
-  addItem: async (item) => {
+  addItem: async (item, usersMembership?: UsersMembership) => {
     try {
       await addItemToCart(item)
       const { cartItems } = await getCartItems()
       set({ items: cartItems })
+      if (item?.offerId && !usersMembership?.isActive) {
+        Toast.show({
+          type: "error",
+          text1: "Join our membership to redeem this awesome offer!",
+          position: "bottom",
+          visibilityTime: 5000,
+          autoHide: true,
+          bottomOffset: 60,
+        })
+      }
       if (item?.loyaltyPointsUsed) {
         const fetchPoints = useLoyaltyStore.getState().fetchPoints
         fetchPoints()

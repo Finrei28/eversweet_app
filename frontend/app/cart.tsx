@@ -12,6 +12,7 @@ import CustomModal from "@/_components/modal"
 import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
+import { Ionicons } from "@expo/vector-icons"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -86,7 +87,12 @@ export default function CartPage() {
                     </Text>
                   </View>
                   <View className="flex-row justify-between items-center">
-                    <View className="flex-row items-center gap-10">
+                    <View className="flex-row items-center ml-2 gap-10">
+                      <TouchableOpacity
+                        onPress={async () => await removeItem(item.id)}
+                      >
+                        <Ionicons name="trash" size={24} color="red" />
+                      </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => {
                           setSelectedDessert(item.dessert)
@@ -101,12 +107,6 @@ export default function CartPage() {
                           Edit
                         </Text>
                       </TouchableOpacity>
-
-                      <TouchableOpacity
-                        onPress={async () => await removeItem(item.id)}
-                      >
-                        <AntDesign name="delete" size={24} color="red" />
-                      </TouchableOpacity>
                     </View>
                     <View className="flex-row items-center gap-4">
                       <TouchableOpacity
@@ -117,7 +117,9 @@ export default function CartPage() {
                             : "bg-secondary"
                         }`}
                         disabled={
-                          !!item.loyaltyPointsUsed || item.quantity <= 1
+                          !!item.loyaltyPointsUsed ||
+                          item.quantity <= 1 ||
+                          !!item.offerId
                         }
                       >
                         <Text className="text-xl font-bold">-</Text>
@@ -134,7 +136,7 @@ export default function CartPage() {
                             ? "bg-gray-300"
                             : "bg-secondary"
                         }`}
-                        disabled={!!item.loyaltyPointsUsed}
+                        disabled={!!item.loyaltyPointsUsed || !!item.offerId}
                       >
                         <Text className="text-xl font-bold">+</Text>
                       </TouchableOpacity>

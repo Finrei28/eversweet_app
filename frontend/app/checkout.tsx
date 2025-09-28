@@ -28,7 +28,6 @@ import DateTimePicker from "@react-native-community/datetimepicker"
 import { createOrder, checkOrderStatus } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
 import { isOutsideBusinessHours } from "@/lib/businessHours"
-import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "@/store/points"
 import {
   getEstimatedPickUpTime,
@@ -36,7 +35,7 @@ import {
   getOpenCloseTime,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
-import { formatDate, formatShortDate } from "@/lib/formatters"
+import { formatShortDate } from "@/lib/formatters"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -46,7 +45,7 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment } = useStripe()
-  const { token, loading: loadingToken } = useAuth()
+  const { token, loading: loadingToken, usersMembership } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
@@ -82,6 +81,7 @@ function CheckoutContent() {
   useFocusEffect(
     useCallback(() => {
       if (token) {
+        useCartStore.getState().fetchCart()
         fetchSavedCards()
       }
     }, [token])
@@ -537,7 +537,10 @@ function CheckoutContent() {
                   <Text className="font-medium">
                     $
                     {(
-                      Math.round(item.itemPriceInCents * item.quantity) / 100
+                      Math.round(
+                        (item.itemPriceInCents * item.quantity) /
+                          (usersMembership?.isActive ? 0.85 : 1)
+                      ) / 100
                     ).toFixed(2)}
                   </Text>
                 </View>
@@ -554,15 +557,23 @@ function CheckoutContent() {
             ))}
 
             <View className="mt-4 pt-3 border-t border-gray-200">
-              <View className="flex-row justify-between mb-1">
-                <Text className="text-gray-500">
-                  Membership Discount Included (15%)
-                </Text>
-                <Text className="font-medium">
-                  - ${calculateMembershipDiscount().toFixed(2)}
-                </Text>
-              </View>
-              <View className="flex-row justify-between mt-2 pt-2 border-t border-gray-200">
+              {usersMembership?.isActive && (
+                <View className="flex-row justify-between mb-1">
+                  <Text className="text-gray-500">
+                    Membership Discount Included (15%)
+                  </Text>
+                  <Text className="font-medium">
+                    - ${calculateMembershipDiscount().toFixed(2)}
+                  </Text>
+                </View>
+              )}
+              <View
+                className={`flex-row justify-between ${
+                  usersMembership?.isActive
+                    ? "mt-2 pt-2 border-t border-gray-200"
+                    : ""
+                }`}
+              >
                 <Text className="text-gray-500">GST Included (15%)</Text>
                 <Text className="font-medium">
                   ${calculateGST().toFixed(2)}

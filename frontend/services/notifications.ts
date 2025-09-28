@@ -2,7 +2,8 @@ import * as Notifications from "expo-notifications"
 import * as Device from "expo-device"
 import { Alert, Platform } from "react-native"
 import { getToken } from "./authToken"
-import { useRouter } from "expo-router"
+import * as SecureStore from "expo-secure-store"
+import { getUsersMembership } from "./stripe-api"
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -19,7 +20,6 @@ Notifications.setNotificationHandler({
  */
 
 const url = process.env.EXPO_PUBLIC_URL!
-const router = useRouter()
 
 export async function registerForPushNotificationsAsync() {
   let token
@@ -131,15 +131,49 @@ export function setupNotificationListeners(
 /**
  * Handle a received notification
  */
-export function handleNotification(notification: Notifications.Notification) {
+export function handleNotification(
+  notification: Notifications.Notification,
+  onNavigate: (path: string) => void
+) {
   const data = notification.request.content.data
 
   // You can handle different notification types here
   if (data.type === "ORDER_STATUS_CHANGED") {
     // Navigate to the order details screen or update UI
-    router.replace("/orders")
+    onNavigate("/orders")
 
     // You could use a navigation ref or event emitter to navigate
     // Example: navigationRef.current?.navigate('OrderDetails', { orderId: data.orderId })
+  }
+}
+
+export const setMembershipPopupExpiration = async () => {
+  const expiration = new Date()
+  expiration.setMonth(expiration.getMonth() + 1) // 1 month later
+
+  await SecureStore.setItemAsync(
+    "showMembershipPopup",
+    `${expiration.getTime()}`
+  )
+}
+
+// Read the flag and check if it has expired
+export const hasMembershipPopupExpired = async (): Promise<boolean> => {
+  try {
+    const usersMembership = await getUsersMembership()
+    if (usersMembership?.isActive) {
+      return false
+    } // don't show if user is already a member
+
+    const dataStr = await SecureStore.getItemAsync("showMembershipPopup")
+    if (!dataStr) return true // default: show popup if nothing stored
+    if (Date.now() > Number(dataStr)) {
+      // expired, remove it
+      await SecureStore.deleteItemAsync("showMembershipPopup")
+      return true // show popup again
+    }
+    return false
+  } catch {
+    return true // fallback in case of corrupted data
   }
 }

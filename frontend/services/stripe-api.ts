@@ -198,9 +198,11 @@ export const getMembershipDetails = async (): Promise<MembershipDetails> => {
 
 export const getUsersMembership = async (): Promise<UsersMembership> => {
   const token = await SecureStore.getItemAsync("token")
+
   if (!token) {
     throw new Error("Unauthenticated")
   }
+
   try {
     const res = await fetch(`${url}/api/stripe/getUsersMembership`, {
       method: "GET",
@@ -285,7 +287,7 @@ export const cancelMembership = async () => {
       throw new Error(`Error: ${data.message}`)
     }
 
-    return data
+    return data.endDate
   } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
   }

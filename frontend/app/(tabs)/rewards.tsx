@@ -240,11 +240,7 @@ export default function Loyalty() {
                                       fontWeight: "bold",
                                     }}
                                   >
-                                    Add{" "}
-                                    {Math.round(
-                                      Number(dessert.priceInCents) / 5
-                                    ) * 5}{" "}
-                                    points
+                                    Add {dessert.priceInLoyaltyPoints} points
                                   </Text>
                                 </TouchableOpacity>
                               </View>

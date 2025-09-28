@@ -14,7 +14,7 @@ export const homepageCards = [
       },
       drinks: {
         title: "Drinks series",
-        image: process.env.EXPO_PUBLIC_FILLER_IMAGE_URL,
+        image: process.env.EXPO_PUBLIC_DRINK_SERIES_URL,
         category: "Drink Series",
       },
       mochi: {
@@ -25,13 +25,13 @@ export const homepageCards = [
 
       steamedPudding: {
         title: "Steamed Pudding series",
-        image: process.env.EXPO_PUBLIC_FILLER_IMAGE_URL,
+        image: process.env.EXPO_PUBLIC_STEAMED_MILK_PUDDING_URL,
         category: "Steamed Milk pudding",
       },
 
       snacks: {
-        title: "Snacks series",
-        image: process.env.EXPO_PUBLIC_FILLER_IMAGE_URL,
+        title: "Snack series",
+        image: process.env.EXPO_PUBLIC_SNACK_SERIES_URL,
         category: "Snack Series",
       },
     },

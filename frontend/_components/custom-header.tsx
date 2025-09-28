@@ -10,7 +10,11 @@ export default function CustomHeader() {
   const pathname = usePathname()
 
   const handleBack = () => {
-    router.back()
+    if (router.canGoBack()) {
+      router.back()
+    } else {
+      router.replace("/") // fallback to home if can't go back
+    }
   }
 
   return (

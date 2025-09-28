@@ -77,7 +77,7 @@ export default function CustomModal({
   const [customisationQuantity, setCustomisationQuantity] =
     useState<Customisations>([])
 
-  const points = Math.round(price / 5) * 5
+  const points = selectedDessert.priceInLoyaltyPoints
 
   useEffect(() => {
     if (state === "edit" && customisations) {
@@ -163,12 +163,24 @@ export default function CustomModal({
               (ingredient) => ingredient.id === ingredientId
             )
             if (!included) {
-              setPrice((prev) => prev + customisation.priceInCents * 0.85)
+              setPrice(
+                (prev) =>
+                  prev +
+                  (usersMembership?.isActive
+                    ? customisation.priceInCents * 0.85
+                    : customisation.priceInCents)
+              )
             }
 
             // Increase price only if crossing 1 → 2 //
             else if (item.quantity >= 1) {
-              setPrice((prev) => prev + customisation.priceInCents * 0.85)
+              setPrice(
+                (prev) =>
+                  prev +
+                  (usersMembership?.isActive
+                    ? customisation.priceInCents * 0.85
+                    : customisation.priceInCents)
+              )
             }
 
             return { ...item, quantity: newQuantity }
@@ -185,7 +197,13 @@ export default function CustomModal({
         }
 
         // Increase price if this is the first customization
-        setPrice((prev) => prev + customisation.priceInCents * 0.85)
+        setPrice(
+          (prev) =>
+            prev +
+            (usersMembership?.isActive
+              ? customisation.priceInCents * 0.85
+              : customisation.priceInCents)
+        )
 
         return [...prev, newCustomization] // Add new customization to the state
       }
@@ -211,13 +229,25 @@ export default function CustomModal({
           const newQuantity = existingItem.quantity - 1
           if (existingItem.quantity === 1) {
             setPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents * 0.85)
+              Math.max(
+                0,
+                prev -
+                  (usersMembership?.isActive
+                    ? customisation.priceInCents * 0.85
+                    : customisation.priceInCents)
+              )
             )
             return prev.filter((item) => item.id !== ingredientId)
           }
           if (!included) {
             setPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents * 0.85)
+              Math.max(
+                0,
+                prev -
+                  (usersMembership?.isActive
+                    ? customisation.priceInCents * 0.85
+                    : customisation.priceInCents)
+              )
             )
             if (newQuantity === 0)
               return prev.filter((item) => item.id !== ingredientId)
@@ -226,7 +256,13 @@ export default function CustomModal({
           // Decrease price only if crossing 2 → 1
           else if (existingItem.quantity > 1) {
             setPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents * 0.85)
+              Math.max(
+                0,
+                prev -
+                  (usersMembership?.isActive
+                    ? customisation.priceInCents * 0.85
+                    : customisation.priceInCents)
+              )
             )
           }
 
@@ -363,7 +399,7 @@ export default function CustomModal({
                               disabled={quantity === 0}
                             >
                               <AntDesign
-                                name="minuscircleo"
+                                name="minus-circle"
                                 size={30}
                                 color={
                                   type === "points" && quantity === 0
@@ -383,7 +419,7 @@ export default function CustomModal({
                               onPress={() => handleIncrease(ingredient.id)}
                             >
                               <AntDesign
-                                name="pluscircleo"
+                                name="plus-circle"
                                 size={30}
                                 color={
                                   type === "points" && quantity === 1
@@ -431,7 +467,7 @@ export default function CustomModal({
                                 disabled={quantity === 0}
                               >
                                 <AntDesign
-                                  name="minuscircleo"
+                                  name="minus-circle"
                                   size={30}
                                   color={"#e6aa6b"}
                                 />
@@ -446,7 +482,7 @@ export default function CustomModal({
                                 onPress={() => handleIncrease(c.id)}
                               >
                                 <AntDesign
-                                  name="pluscircleo"
+                                  name="plus-circle"
                                   size={30}
                                   color={"#e6aa6b"}
                                 />
