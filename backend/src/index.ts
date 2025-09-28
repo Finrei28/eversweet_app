@@ -4,6 +4,7 @@ import dotenv from "dotenv"
 import authRoutes from "./routes/auth.routes"
 import clientRoutes from "./routes/client.routes"
 import stripeRoutes from "./routes/stripe.routes"
+import cartRoutes from "./routes/cart.routes"
 import notificationRoutes from "./routes/notification.routes"
 import adminRoutes from "./routes/admin.routes"
 import { Server, Socket } from "socket.io"
@@ -11,6 +12,8 @@ import http from "http"
 import cron from "node-cron"
 import { getFutureOrders } from "./controllers/admin.controller"
 import jwt from "jsonwebtoken"
+import bodyParser from "body-parser"
+import { stripeWebhook } from "./controllers/stripe.controller"
 
 // Extend Socket type to include userId
 declare module "socket.io" {
@@ -112,6 +115,12 @@ const corsOptions: CorsOptions = {
   credentials: false, // do not allow cookies
 }
 
+app.post(
+  "/api/stripe/webhook",
+  bodyParser.raw({ type: "application/json" }),
+  stripeWebhook
+)
+
 app.use(cors(corsOptions))
 app.use(express.json())
 
@@ -125,8 +134,15 @@ app.use("/api", clientRoutes)
 app.use("/api/stripe", stripeRoutes)
 app.use("/api/notification", notificationRoutes)
 app.use("/api/admin", adminRoutes)
+app.use("/api/cart", cartRoutes)
 
-cron.schedule("* * * * *", getFutureOrders)
+try {
+  cron.schedule("* * * * *", getFutureOrders, {
+    timezone: "Pacific/Auckland", // or remove this if you don’t need it
+  })
+} catch (err) {
+  console.error("Failed to schedule task:", err)
+}
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id)

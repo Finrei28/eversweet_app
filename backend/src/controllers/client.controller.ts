@@ -3,7 +3,7 @@ import { db } from "../lib/db"
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
-    const menu = await db.category.findMany({
+    const rawMenu = await db.category.findMany({
       include: {
         desserts: {
           where: { isAvailableForPurchase: true },
@@ -13,17 +13,26 @@ export const getMenu = async (req: Request, res: Response) => {
             name: true,
             chineseName: true,
             priceInCents: true,
+            priceInLoyaltyPoints: true,
             imagePath: true,
-            ingredients: true,
+            ingredients: { include: { ingredient: true } },
             description: true,
           },
         },
       },
     })
-    if (!menu) {
+
+    if (!rawMenu) {
       res.status(404).json({ message: "No products found" })
       return
     }
+    const menu = rawMenu.map((category) => ({
+      ...category,
+      desserts: category.desserts.map((dessert) => ({
+        ...dessert,
+        ingredients: dessert.ingredients.map((i) => i.ingredient),
+      })),
+    }))
     res.status(200).json({ menu })
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch menu" })
@@ -36,7 +45,7 @@ export const getAvailableCustomisations = async (
   res: Response
 ) => {
   try {
-    const customisations = await db.dessertCustomisation.findMany({
+    const customisations = await db.ingredient.findMany({
       where: { isAvailableForPurchase: true },
       orderBy: { priceInCents: "asc" },
       select: {

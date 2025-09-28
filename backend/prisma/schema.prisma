@@ -51,12 +51,66 @@ model User {
   phone                String?
   stripeCustomerId     String?
   pushToken            String?
+  createdAt            DateTime        @default(now())
   accounts             Account[]
   Authenticator        Authenticator[]
+  cart                 Cart?
   Loyalty              Loyalty?
+  membership           Membership?
   appOrders            Order[]         @relation("UserOrders")
   sessions             Session[]
-  cart                 CartItem[]
+}
+
+model Membership {
+  id                    String            @id @default(cuid())
+  userId                String            @unique
+  planId                String
+  startDate             DateTime          @default(now())
+  endDate               DateTime
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  isActive              Boolean           @default(false)
+  cancel                Boolean           @default(false)
+  stripePaymentMethodId String?
+  stripeSubscriptionId  String?           @unique
+  paymentStatus         PaymentStatus     @default(PENDING)
+  totalMonths           Int               @default(0)
+  plan                  MembershipPlan    @relation(fields: [planId], references: [id])
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redemptions           OfferRedemption[]
+}
+
+model Offer {
+  id               String            @id @default(cuid())
+  name             String
+  dessertId        String?
+  categoryId       String?
+  itemPriceInCents Int?
+  discountAmount   Decimal?
+  limit            Int               @default(1)
+  cartItems        CartItem[]
+  category         Category?         @relation(fields: [categoryId], references: [id])
+  dessert          Dessert?          @relation(fields: [dessertId], references: [id])
+  redemptions      OfferRedemption[]
+}
+
+model OfferRedemption {
+  id           String     @id @default(cuid())
+  offerId      String
+  membershipId String
+  redeemedAt   DateTime   @default(now())
+  used         Int        @default(0)
+  membership   Membership @relation(fields: [membershipId], references: [id])
+  offer        Offer      @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, membershipId])
+}
+
+model MembershipPlan {
+  id            String       @id @default(cuid())
+  name          String
+  stripePriceId String       @unique
+  memberships   Membership[]
 }
 
 model Authenticator {
@@ -82,21 +136,22 @@ model VerificationToken {
 }
 
 model Dessert {
-  id                     String                          @id @default(cuid())
+  id                     String              @id @default(cuid())
   name                   String
   chineseName            String
   description            String?
   priceInCents           Int
-  priceInLoyaltyPoints   Int                             @default(500)
   imagePath              String
   imagePublicId          String
-  ingredients            String[]
-  isAvailableForPurchase Boolean                         @default(false)
-  createdAt              DateTime                        @default(now())
-  updatedAt              DateTime                        @updatedAt
+  isAvailableForPurchase Boolean             @default(false)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
   categoryId             String
-  category               Category                        @relation(fields: [categoryId], references: [id])
-  customisations         DessertCustomisationOnDessert[]
+  priceInLoyaltyPoints   Int                 @default(500)
+  cartItems              CartItem[]
+  category               Category            @relation(fields: [categoryId], references: [id])
+  ingredients            DessertIngredient[]
+  offers                 Offer[]
   orders                 OrderDessert[]
 }
 
@@ -104,42 +159,45 @@ model Category {
   id             String                  @id @default(cuid())
   name           String
   chineseName    String
+  sortOrder      Int?
   customisations CategoryCustomisation[]
   desserts       Dessert[]
+  offers         Offer[]
 }
 
-model DessertCustomisation {
-  id                     String                          @id @default(cuid())
-  name                   String
-  chineseName            String
-  priceInCents           Int
-  isAvailableForPurchase Boolean                         @default(false)
-  categories             CategoryCustomisation[]
-  desserts               DessertCustomisationOnDessert[]
-  orderCustomisations    OrderDessertCustomisation[]
+model Ingredient {
+  id                      String                      @id @default(cuid())
+  name                    String
+  chineseName             String
+  priceInCents            Int
+  isAvailableForPurchase  Boolean                     @default(false)
+  categories              CategoryCustomisation[]
+  customisationInCartItem CustomisationInCartItem[]
+  DessertIngredient       DessertIngredient[]
+  orderCustomisations     OrderDessertCustomisation[]
+}
+
+model DessertIngredient {
+  dessertId    String
+  ingredientId String
+  dessert      Dessert    @relation(fields: [dessertId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([dessertId, ingredientId])
 }
 
 model CategoryCustomisation {
-  id              String               @id @default(cuid())
+  id              String     @id @default(cuid())
   categoryId      String
   customisationId String
-  category        Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  category        Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  customisation   Ingredient @relation(fields: [customisationId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, customisationId])
 }
 
-model DessertCustomisationOnDessert {
-  dessertId       String
-  customisationId String
-  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
-  dessert         Dessert              @relation(fields: [dessertId], references: [id], onDelete: Cascade)
-
-  @@id([dessertId, customisationId])
-}
-
 model TempOrderCounter {
-  id      String      @id @default(cuid())
+  id      String   @id @default(cuid())
   date    DateTime @unique
   counter Int
 }
@@ -157,38 +215,40 @@ model Order {
   completedAt         DateTime?
   pickedUpAt          DateTime?
   status              Status
+  dineIn              Boolean        @default(false)
   pickUpTime          DateTime       @default(now())
   GST                 Int
   appUserId           String?
   source              OrderSource    @default(WEBSITE)
-  appUser             User?          @relation("UserOrders", fields: [appUserId], references: [id])
-  desserts            OrderDessert[]
   paymentIntentId     String?
   paymentMethodId     String?
   notified            Boolean        @default(false)
-  
+  appUser             User?          @relation("UserOrders", fields: [appUserId], references: [id])
+  desserts            OrderDessert[]
+
   @@index([status])
 }
 
 model OrderDessertCustomisation {
-  id              String               @id @default(cuid())
+  id              String       @id @default(cuid())
   orderDessertId  String
   customisationId String
-  quantity        Int                  @default(1)
-  customisation   DessertCustomisation @relation(fields: [customisationId], references: [id], onDelete: Cascade)
-  orderDessert    OrderDessert         @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
+  quantity        Int          @default(1)
+  customisation   Ingredient   @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  orderDessert    OrderDessert @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
 }
 
 model OrderDessert {
-  id             String                      @id @default(cuid())
-  orderId        String
-  dessertId      String
-  quantity       Int
-  dessert        Dessert                     @relation(fields: [dessertId], references: [id])
-  order          Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  customisations OrderDessertCustomisation[]
-  priceInCents   Int                         @default(0)
+  id                String                      @id @default(cuid())
+  orderId           String
+  dessertId         String
+  quantity          Int
+  priceInCents      Int                         @default(0)
   loyaltyPointsUsed Int?
+  dessert           Dessert                     @relation(fields: [dessertId], references: [id])
+  order             Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customisations    OrderDessertCustomisation[]
+
   @@unique([orderId, dessertId, id])
 }
 
@@ -206,6 +266,48 @@ model Loyalty {
   points Int
   userId String @unique
   User   User   @relation(fields: [userId], references: [id])
+}
+
+model Cart {
+  id                     String     @id @default(cuid())
+  userId                 String     @unique
+  createdAt              DateTime   @default(now())
+  expiresAt              DateTime?
+  totalLoyaltyPointsUsed Int        @default(0)
+  totalPriceInCents      Int        @default(0)
+  user                   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cartItems              CartItem[]
+}
+
+model CartItem {
+  id                String                    @id @default(cuid())
+  dessertId         String
+  itemPriceInCents  Int
+  quantity          Int
+  loyaltyPointsUsed Int?
+  cartId            String
+  offerId           String?
+  cart              Cart                      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  dessert           Dessert                   @relation(fields: [dessertId], references: [id])
+  offer             Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  customisations    CustomisationInCartItem[]
+}
+
+model CustomisationInCartItem {
+  id              String     @id @default(cuid())
+  cartItemId      String
+  customisationId String
+  quantity        Int        @default(1)
+  cartItem        CartItem   @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  customisation   Ingredient @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+
+  @@unique([cartItemId, customisationId])
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
 }
 
 enum Role {
@@ -226,36 +328,33 @@ enum Status {
   PICKED_UP
 }
 
-
-model CartItem {
-  id                String          @id @default(uuid())
-  user              User            @relation(fields: [userId], references: [id])
-  userId            String
-  dessert           DessertInCart         @relation(fields: [dessertId], references: [id])
-  dessertId         String
-  itemPriceInCents  Int
-  quantity          Int
-  loyaltyPointsUsed Int?
-  customisations    CustomisationInCart[]
-}
-
-model CustomisationInCart {
-  id            String   @id @default(uuid())
-  cartItem      CartItem @relation(fields: [cartItemId], references: [id])
-  cartItemId    String
-  chineseName   String
-  name          String
-  quantity      Int
-}
-
-model DessertInCart {
-  id                  String   @id @default(uuid())
-  name                String
-  chineseName         String
-  description         String?
-  priceInCents        Int
-  priceInLoyaltyPoints Int
-  imagePath           String
-  ingredients         String[] // Stored as string[] (PostgreSQL/SQLite)
-  cartItems           CartItem[]
+enum IngredientType {
+  MOCHI
+  GLUTINOUS_BALLS
+  OSMANTHUS
+  TARO
+  MANGO
+  PURPLE_RICE
+  GRAPES
+  BOBA
+  RED_BEANS
+  SAGO
+  COCONUT_JELLY
+  GRASS_JELLY
+  TARO_CREAM
+  SNOW_SWALLOW
+  PEACH_GUM
+  COCONUT_MILK
+  MILK_PUDDING
+  BLACK_SESAME
+  PEANUT
+  MUNG_BEAN
+  PISTACHIO
+  PUMPKIN
+  TARO_BALLS
+  SWEET_POTATO
+  NOODLES
+  BROWN_SUGAR
+  TOFU
+  DURIAN
 }

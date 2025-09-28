@@ -68,8 +68,10 @@ export const signUp = async (req: Request, res: Response) => {
       data: {
         email,
         password: hashed,
-        firstName,
-        lastName,
+        firstName:
+          firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
+        lastName:
+          lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase(),
         role: "USER",
         otp,
         otpExpiresAt,
@@ -212,8 +214,10 @@ export const updateUser = async (req: Request, res: Response) => {
       where: { id: userId },
       data: {
         email,
-        firstName,
-        lastName,
+        firstName:
+          firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
+        lastName:
+          lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase(),
         phone,
         // exclude sensitive fields like password
       },
@@ -371,8 +375,10 @@ export const addLoyaltyPoints = async (req: Request, res: Response) => {
       },
     })
     res.status(201).json({ loyaltyPoints: data.points })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -441,6 +447,23 @@ export const createOrder = async (req: Request, res: Response) => {
       pickUpTime: new Date(req.body.pickUpTime),
     })
 
+    const cart = await db.cart.findUnique({
+      where: { userId },
+      include: {
+        cartItems: {
+          include: {
+            dessert: true,
+            customisations: { include: { customisation: true } },
+          },
+        },
+      },
+    })
+
+    if (!cart || cart.cartItems.length === 0) {
+      res.status(400).json({ message: "Cart is empty" })
+      return
+    }
+
     const user = await db.user.findUnique({
       where: { id: userId },
     })
@@ -484,14 +507,14 @@ export const createOrder = async (req: Request, res: Response) => {
           },
         },
         source: "APP",
-        priceInCents: parsedBody.totalPriceInCents,
-        GST: parsedBody.GST * 100, // GST in cents
+        priceInCents: cart.totalPriceInCents,
+        GST: cart.totalPriceInCents * 0.15 * 100, // GST in cents
         pickUpTime: parsedBody.pickUpTime,
         status: "PENDING",
         paymentIntentId: parsedBody.paymentIntentId,
         paymentMethodId: parsedBody.paymentMethodId,
         desserts: {
-          create: parsedBody.items.map((dessertItem) => ({
+          create: cart.cartItems.map((dessertItem) => ({
             dessert: {
               connect: {
                 id: dessertItem.dessertId, // Ensure dessert exists before connecting
@@ -563,10 +586,25 @@ export const createOrder = async (req: Request, res: Response) => {
       },
     })
 
-    if (parsedBody.totalPriceInCents > 0) {
-      const earnablePoints = Math.round(
-        ((parsedBody.totalPriceInCents / 5) * 5) / 5
-      )
+    const membership = await db.membership.findUnique({ where: { userId } })
+
+    if (cart.totalPriceInCents > 0) {
+      let earnablePoints = 0
+      if (membership?.isActive) {
+        earnablePoints = cart.cartItems.reduce(
+          (acc, item) =>
+            acc +
+            Math.floor((item.itemPriceInCents / 10) * item.quantity * 2.2),
+          0
+        )
+      } else {
+        earnablePoints = cart.cartItems.reduce(
+          (acc, item) =>
+            acc +
+            Math.floor((item.itemPriceInCents / 10) * item.quantity * 1.1),
+          0
+        )
+      }
       await incrementLoyaltyPoints(userId, earnablePoints)
     }
 
@@ -660,5 +698,83 @@ export const orderStatus = async (req: Request, res: Response) => {
       error: (error as Error).message,
     })
     return
+  }
+}
+
+export const showOffers = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorised" })
+      return
+    }
+    const membership = await db.membership.findUnique({ where: { userId } })
+    if (!membership) {
+      res.status(403).json({ message: "Not a member" })
+      return
+    }
+
+    const offers = await db.offer.findMany({
+      include: {
+        dessert: {
+          select: {
+            id: true,
+            name: true,
+            priceInCents: true,
+            chineseName: true,
+            description: true,
+            priceInLoyaltyPoints: true,
+            imagePath: true,
+            ingredients: { include: { ingredient: true } },
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            chineseName: true,
+            desserts: {
+              select: {
+                id: true,
+                name: true,
+                priceInCents: true,
+                chineseName: true,
+                description: true,
+                priceInLoyaltyPoints: true,
+                imagePath: true,
+                ingredients: { include: { ingredient: true } },
+              },
+            },
+          },
+        },
+        redemptions: {
+          where: { membershipId: membership.id },
+        },
+      },
+    })
+
+    const serializedOffers = offers.map((o) => ({
+      ...o,
+      discountAmount: o.discountAmount ? o.discountAmount.toNumber() : null,
+      dessert: o.dessert
+        ? {
+            ...o.dessert,
+            ingredients: o.dessert.ingredients.map((i) => i.ingredient),
+          }
+        : null,
+      category: o.category
+        ? {
+            ...o.category,
+            desserts: o.category.desserts.map((d) => ({
+              ...d,
+              ingredients: d.ingredients.map((i) => i.ingredient),
+            })),
+          }
+        : null,
+    }))
+
+    res.status(200).json({ offers: serializedOffers })
+  } catch (error) {
+    res.status(500).json({ message: error })
   }
 }

@@ -114,7 +114,7 @@ export const getPendingOrders = async (req: Request, res: Response) => {
     res.status(200).json({ orders })
     return
   } catch (error) {
-    res.status(200).json({
+    res.status(500).json({
       message: "Error fetching current orders",
       error: (error as Error).message,
     })
@@ -183,7 +183,7 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
     res.status(200).json({ orders })
     return
   } catch (error) {
-    res.status(200).json({
+    res.status(500).json({
       message: "Error fetching current orders",
       error: (error as Error).message,
     })
@@ -272,7 +272,7 @@ export const getPastOrders = async (req: Request, res: Response) => {
     res.status(200).json({ orders })
     return
   } catch (error) {
-    res.status(200).json({
+    res.status(500).json({
       message: "Error fetching past orders",
       error: (error as Error).message,
     })
@@ -475,7 +475,7 @@ export const getOverview = async (req: Request, res: Response) => {
     res.status(200).json({ overview, today, week, month, todaySales })
     return
   } catch (error) {
-    res.status(200).json({
+    res.status(500).json({
       message: "Error fetching overview",
       error: (error as Error).message,
     })
@@ -542,6 +542,7 @@ export const getFutureOrders = async () => {
         },
       },
     })
+
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()

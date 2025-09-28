@@ -9,6 +9,7 @@ import {
   getUserOrders,
   orderStatus,
   orderWithLoyaltyPoints,
+  showOffers,
   signIn,
   signUp,
   updateUser,
@@ -33,5 +34,6 @@ router.get("/getOrder", authenticateToken, getOrder)
 router.post("/getUserOrders", authenticateToken, getUserOrders)
 router.post("/createOrder", authenticateToken, createOrder)
 router.get("/orderStatus/:id", authenticateToken, orderStatus)
+router.get("/showOffers", authenticateToken, showOffers)
 
 export default router
