@@ -347,7 +347,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   processOrder: async () => {
-    set({ items: [], error: null })
+    const { cartItems } = await getCartItems()
+    set({ items: cartItems })
 
     Toast.show({
       type: "success",
