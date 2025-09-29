@@ -20,6 +20,7 @@ export const CreateOrderSchema = z.object({
   paymentMethodId: z.string().nullable().optional(),
   paymentIntentId: z.string().nullable().optional(),
   pickUpTime: z.date(),
+  dineIn: z.boolean(),
 })
 
 export const cartItemSchema = dessertSchema.extend({

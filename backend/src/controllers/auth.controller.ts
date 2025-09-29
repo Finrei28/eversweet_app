@@ -137,6 +137,7 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
 
     if (verificationCode !== user.otp?.toString()) {
       res.status(401).json({ message: "Invalid verification code." })
+      return
     }
 
     if (!user.otpExpiresAt) {
@@ -149,6 +150,7 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
 
     if (currentTime > expirationTime) {
       res.status(400).json("Verification code has expired.")
+      return
     }
     const token = jwt.sign(
       {
@@ -510,6 +512,7 @@ export const createOrder = async (req: Request, res: Response) => {
         priceInCents: cart.totalPriceInCents,
         GST: cart.totalPriceInCents * 0.15 * 100, // GST in cents
         pickUpTime: parsedBody.pickUpTime,
+        dineIn: parsedBody.dineIn,
         status: "PENDING",
         paymentIntentId: parsedBody.paymentIntentId,
         paymentMethodId: parsedBody.paymentMethodId,
@@ -548,6 +551,7 @@ export const createOrder = async (req: Request, res: Response) => {
         customerPhoneNumber: true,
         priceInCents: true,
         pickUpTime: true,
+        dineIn: true,
         pickedUpAt: true,
         GST: true,
         appUserId: true,
@@ -588,6 +592,7 @@ export const createOrder = async (req: Request, res: Response) => {
 
     const membership = await db.membership.findUnique({ where: { userId } })
 
+    // add points members and non members
     if (cart.totalPriceInCents > 0) {
       let earnablePoints = 0
       if (membership?.isActive) {
@@ -607,6 +612,8 @@ export const createOrder = async (req: Request, res: Response) => {
       }
       await incrementLoyaltyPoints(userId, earnablePoints)
     }
+
+    await db.cart.delete({ where: { userId } })
 
     await resend.emails.send({
       from: '"Eversweet" <eversweet@eversweet.co.nz>',
