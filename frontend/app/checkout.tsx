@@ -35,7 +35,8 @@ import {
   getOpenCloseTime,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
-import { formatShortDate } from "@/lib/formatters"
+import { formatShortDate, roundToNearest5 } from "@/lib/formatters"
+import Toast from "react-native-toast-message"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -63,18 +64,21 @@ function CheckoutContent() {
   const processOrder = useCartStore((state) => state.processOrder)
 
   // Pickup time state
+
+  const [dineIn, setDineIn] = useState(false)
+  const [pickupNow, setPickupNow] = useState(true)
+  const [pickupDate, setPickupDate] = useState(
+    getNextValidPickupTime(new Date(), getTotalItems())
+  )
   const nextValidTime = useMemo(
     () => getNextValidPickupTime(new Date(), getTotalItems()),
-    []
+    [pickupDate]
   )
-  const [pickupNow, setPickupNow] = useState(true)
-  const [pickupDate, setPickupDate] = useState(nextValidTime)
-
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [showDoneButton, setShowDoneButton] = useState(false)
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
-  const { openTime, closeTime } = getOpenCloseTime(pickupDate)
+  const { closeTime } = getOpenCloseTime(pickupDate)
 
   // Fetch saved cards when component mounts
 
@@ -86,6 +90,18 @@ function CheckoutContent() {
       }
     }, [token])
   )
+
+  const totalItems = getTotalItems()
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (getEstimatedPickUpTime(totalItems).getTime() > pickupDate.getTime()) {
+        setPickupDate(getNextValidPickupTime(new Date(), totalItems))
+      }
+    }, 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [pickupDate, totalItems])
 
   useEffect(() => {
     const subscription = AppState.addEventListener(
@@ -254,6 +270,10 @@ function CheckoutContent() {
     return brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase()
   }
 
+  if (pickupDate > nextValidTime) {
+    setPickupDate(roundToNearest5(nextValidTime))
+  }
+
   const formatPickupTime = () => {
     if (pickupNow) {
       return "As soon as possible"
@@ -293,12 +313,6 @@ function CheckoutContent() {
     }
 
     setShowDatePicker(false)
-  }
-
-  const handleIOSDateChange = (event: any, selectedDate?: Date) => {
-    if (selectedDate) {
-      setPickupDate(selectedDate)
-    }
   }
 
   const onAndroidChangeDate = (event, selectedDate?: Date) => {
@@ -421,6 +435,7 @@ function CheckoutContent() {
         const orderResponse = await createOrder(
           paymentMethodId,
           pickUpTime,
+          dineIn,
           paymentIntent.id
         )
         // Try to extract the order ID if it exists in the error response
@@ -430,7 +445,7 @@ function CheckoutContent() {
         setOrderInProgress(orderResponse.id)
       } else {
         // handle orders paid with points
-        const orderResponse = await createOrder(null, pickUpTime, null)
+        const orderResponse = await createOrder(null, pickUpTime, dineIn, null)
         if (!orderResponse) {
           throw new Error("Failed to create order")
         }
@@ -464,6 +479,14 @@ function CheckoutContent() {
         )
       } else {
         console.error(error)
+        Toast.show({
+          type: "error",
+          text1: `${error.message}`,
+          position: "bottom",
+          visibilityTime: undefined,
+          autoHide: false,
+          bottomOffset: 60,
+        })
       }
     } finally {
       setIsProcessingPayment(false)
@@ -590,13 +613,33 @@ function CheckoutContent() {
 
           {/* Pickup Time */}
           <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <View className=" mb-3 justify-between flex-row items-center">
-              <Text className="text-lg font-medium">Pickup Time</Text>
+            <View className=" mb-3 flex-row items-center gap-3">
+              <TouchableOpacity
+                onPress={() => setDineIn(false)}
+                className={`px-5 py-3 rounded-lg ${
+                  dineIn ? "bg-gray-300" : "bg-primary"
+                }`}
+              >
+                <Text>Pick up</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setDineIn(true)}
+                className={`px-5 py-3 rounded-lg  ${
+                  dineIn ? "bg-primary" : "bg-gray-300"
+                }`}
+              >
+                <Text>Eat in</Text>
+              </TouchableOpacity>
+            </View>
+            <View className="mb-3 justify-between flex-row items-center">
+              <Text className="text-lg font-medium">
+                {dineIn ? "Eat In Date" : "Pick Up Date"}
+              </Text>
               {pickupNow && <Text>{formatShortDate(nextValidTime)}</Text>}
             </View>
 
             <View className="flex-row items-center justify-between mb-4">
-              <Text>Pickup as soon as possible</Text>
+              <Text>{dineIn ? "Eat in" : "Pickup"} as soon as possible</Text>
               <Switch value={pickupNow} onValueChange={setPickupNow} />
             </View>
 
@@ -614,11 +657,11 @@ function CheckoutContent() {
                   <DateTimePickerModal
                     isVisible={showDatePicker}
                     mode="datetime"
-                    date={nextValidTime}
+                    date={roundToNearest5(nextValidTime)}
                     minuteInterval={5}
                     onConfirm={handleConfirm}
                     onCancel={() => setShowDatePicker(false)}
-                    minimumDate={nextValidTime}
+                    minimumDate={roundToNearest5(nextValidTime)}
                     maximumDate={(() => {
                       const date = new Date() // Create a new Date object
                       date.setMonth(date.getMonth() + 1)

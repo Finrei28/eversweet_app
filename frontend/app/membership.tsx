@@ -196,7 +196,7 @@ export default function MembershipContent() {
                 </Text>
               )}
             </View>
-            {!usersMembership?.cancel && (
+            {usersMembership?.isActive && !usersMembership?.cancel && (
               <TouchableOpacity
                 onPress={() => setCancelMembership(true)}
                 className="bg-red-500 px-2 py-1 rounded-lg"
@@ -397,7 +397,7 @@ export default function MembershipContent() {
             )}
 
             {/* Stripe Information */}
-            <View className="my-6">
+            <View className="mt-6 mb-10">
               <View className="flex-row items-center justify-center mb-2">
                 <Feather name="lock" size={14} color="#6B7280" />
                 <Text className="text-gray-500 text-sm ml-1">

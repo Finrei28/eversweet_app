@@ -348,7 +348,6 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
   processOrder: async () => {
     set({ items: [], error: null })
-    await clearCart()
 
     Toast.show({
       type: "success",

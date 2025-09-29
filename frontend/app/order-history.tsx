@@ -261,10 +261,10 @@ export default function OrderHistory() {
               No orders yet
             </Text>
             <TouchableOpacity
-              onPress={() => router.push("/menu")}
+              onPress={() => router.replace("/menu")}
               className="mt-4 bg-primary py-2 px-4 rounded-lg"
             >
-              <Text className="text-white font-medium">Start Shopping</Text>
+              <Text className="text-white font-medium">Start Ordering</Text>
             </TouchableOpacity>
           </View>
         )}

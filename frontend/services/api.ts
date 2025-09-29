@@ -349,6 +349,7 @@ export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
 export async function createOrder(
   paymentMethodId: string | null,
   pickUpTime: Date,
+  dineIn: boolean,
   paymentIntentId: string | null
 ) {
   const token = await SecureStore.getItemAsync("token")
@@ -366,6 +367,7 @@ export async function createOrder(
       body: JSON.stringify({
         paymentMethodId,
         pickUpTime,
+        dineIn,
         paymentIntentId,
       }),
     })
@@ -724,6 +726,93 @@ export const showOffers = async (): Promise<Offers> => {
       throw new Error(`Error: ${data.message}`)
     }
     return data.offers
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const getResetPasswordCode = async (email: string) => {
+  if (!email) {
+    throw new Error("Email is required")
+  }
+  try {
+    const res = await fetch(`${url}/api/getResetPasswordCode`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email }),
+    })
+
+    const data = await res.json()
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const verifyResetPasswordCode = async (
+  email: string,
+  verificationCode: string
+) => {
+  if (!email) {
+    throw new Error("Email is required")
+  }
+  if (!verificationCode) {
+    throw new Error("Verification code is required")
+  }
+  try {
+    const res = await fetch(`${url}/api/verifyResetPasswordCode`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, verificationCode }),
+    })
+
+    const data = await res.json()
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const resetPassword = async (email: string, newPassword: string) => {
+  if (!email) {
+    throw new Error("Email is required")
+  }
+  if (!newPassword) {
+    throw new Error("New password is required")
+  }
+  try {
+    const res = await fetch(`${url}/api/resetPassword`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, newPassword }),
+    })
+
+    const data = await res.json()
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+    return data
   } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
   }
