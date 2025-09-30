@@ -13,10 +13,12 @@ import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
+import { useAuth } from "@/store/authProvider"
 
 export default function CartPage() {
   const navigation = useNavigation()
   const route = useRoute()
+  const { usersMembership } = useAuth()
   const cartItems = useCartStore((state) => state.items)
   const clearCart = useCartStore((state) => state.clearCart)
   const removeItem = useCartStore((state) => state.removeItem)
@@ -156,7 +158,9 @@ export default function CartPage() {
                     Total: ${(total / 100).toFixed(2)}
                   </Text>
                   {total > 0 && (
-                    <Text>Earnable points: {getEarnablePoints()}</Text>
+                    <Text>
+                      Earnable points: {getEarnablePoints(usersMembership)}
+                    </Text>
                   )}
                 </View>
               </View>

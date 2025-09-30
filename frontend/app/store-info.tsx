@@ -11,9 +11,10 @@ import {
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import { parse, isAfter, isBefore } from "date-fns"
-import { storeHours } from "@/lib/businessHours"
+import { StoreHours } from "@/lib/businessHours"
+import { useAuth } from "@/store/authProvider"
 
-export const isStoreOpenNow = (): boolean => {
+export const isStoreOpenNow = (storeHours: StoreHours): boolean => {
   const now = new Date()
   const dayName = now.toLocaleDateString("en-NZ", { weekday: "long" })
   const hours = storeHours[dayName as keyof typeof storeHours]
@@ -30,17 +31,19 @@ export const isStoreOpenNow = (): boolean => {
   return isAfter(now, start) && isBefore(now, end)
 }
 
-const store = {
-  name: "Eversweet",
-  isOpen: isStoreOpenNow(),
-  address: "5D/119 Meadowland Drive, Somerville",
-  city: "Auckland",
-  state: "Auckland",
-  postal: "2014",
-  phone: "09 949 1050",
-}
-
 export default function StoreInfo() {
+  const { storeHours } = useAuth()
+
+  const store = {
+    name: "Eversweet",
+    isOpen: isStoreOpenNow(storeHours),
+    address: "5D/119 Meadowland Drive, Somerville",
+    city: "Auckland",
+    state: "Auckland",
+    postal: "2014",
+    phone: "09 949 1050",
+  }
+
   const openMaps = (address: string) => {
     const url = Platform.select({
       ios: `maps:0,0?q=${address}`,

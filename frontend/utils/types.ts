@@ -125,6 +125,7 @@ export type CartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
+  pending?: Boolean
 }
 
 export type AddCartItem = {

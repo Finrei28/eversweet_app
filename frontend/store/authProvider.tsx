@@ -10,6 +10,8 @@ import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
 import { UsersMembership } from "@/utils/types"
 import { getUsersMembership } from "@/services/stripe-api"
+import { fallbackStoreHours, StoreHours } from "@/lib/businessHours"
+import { getStoreHours } from "@/services/api"
 
 interface DecodedToken {
   userId: string
@@ -27,6 +29,7 @@ interface AuthContextType {
   signInProvider: (token: string) => Promise<void>
   signOutProvider: () => Promise<void>
   loading: boolean
+  storeHours: StoreHours
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -36,10 +39,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
+  const [storeHours, setStoreHours] = useState<StoreHours>(fallbackStoreHours)
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
     const getStoredToken = async () => {
+      const data = await getStoreHours()
+      setStoreHours({ ...fallbackStoreHours, ...data })
       const storedToken = await SecureStore.getItemAsync("token")
       if (storedToken) {
         const decoded: DecodedToken = jwtDecode(storedToken)
@@ -87,6 +93,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signInProvider,
         signOutProvider,
         loading,
+        storeHours,
       }}
     >
       {children}

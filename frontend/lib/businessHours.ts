@@ -1,4 +1,12 @@
-export const storeHours = {
+"use client"
+import { getStoreHours } from "@/services/api"
+import { useEffect, useState } from "react"
+
+export type StoreHours = {
+  [key: string]: [string, string] | null
+}
+
+export const fallbackStoreHours: StoreHours = {
   Monday: ["12:30 PM", "9:30 PM"],
   Tuesday: ["12:30 PM", "9:30 PM"],
   Wednesday: null,
@@ -8,7 +16,7 @@ export const storeHours = {
   Sunday: ["12:00 PM", "10:00 PM"],
 }
 
-export function isOutsideBusinessHours(date: Date) {
+export function isOutsideBusinessHours(date: Date, storeHours: StoreHours) {
   const dayName = date.toLocaleDateString("en-NZ", { weekday: "long" }) // e.g., "Monday"
   const [openStr, closeStr] = storeHours[dayName]
 
@@ -22,7 +30,7 @@ export function isOutsideBusinessHours(date: Date) {
   return current < open || current > close
 }
 
-function parseTime(timeStr) {
+function parseTime(timeStr: string) {
   const [time, period] = timeStr.split(" ")
   const [hour, minute] = time.split(":").map(Number)
   return [hour, minute, period]

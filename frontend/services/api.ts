@@ -797,3 +797,24 @@ export const resetPassword = async (email: string, newPassword: string) => {
     throw new Error(error?.message || "Something went wrong.")
   }
 }
+
+export const getStoreHours = async () => {
+  try {
+    const res = await fetch(`${url}/api/getStoreHours`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}

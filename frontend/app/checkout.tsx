@@ -46,7 +46,12 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment } = useStripe()
-  const { token, loading: loadingToken, usersMembership } = useAuth()
+  const {
+    token,
+    loading: loadingToken,
+    usersMembership,
+    storeHours,
+  } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
@@ -68,17 +73,20 @@ function CheckoutContent() {
   const [dineIn, setDineIn] = useState(false)
   const [pickupNow, setPickupNow] = useState(true)
   const [pickupDate, setPickupDate] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems())
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
   )
-  const nextValidTime = useMemo(
-    () => getNextValidPickupTime(new Date(), getTotalItems()),
-    [pickupDate]
+  // const nextValidTime = useMemo(
+  //   () => getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
+  //   [pickupDate]
+  // )
+  const [nextValidTime, setNextValidTime] = useState(
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
   )
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [showDoneButton, setShowDoneButton] = useState(false)
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
-  const { closeTime } = getOpenCloseTime(pickupDate)
+  const { closeTime } = getOpenCloseTime(pickupDate, storeHours)
 
   // Fetch saved cards when component mounts
 
@@ -95,8 +103,13 @@ function CheckoutContent() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      setNextValidTime(
+        getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+      )
       if (getEstimatedPickUpTime(totalItems).getTime() > pickupDate.getTime()) {
-        setPickupDate(getNextValidPickupTime(new Date(), totalItems))
+        setPickupDate(
+          getNextValidPickupTime(new Date(), totalItems, storeHours)
+        )
       }
     }, 60 * 1000)
 
@@ -270,10 +283,6 @@ function CheckoutContent() {
     return brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase()
   }
 
-  if (pickupDate > nextValidTime) {
-    setPickupDate(roundToNearest5(nextValidTime))
-  }
-
   const formatPickupTime = () => {
     if (pickupNow) {
       return "As soon as possible"
@@ -291,8 +300,8 @@ function CheckoutContent() {
   }
 
   const handleConfirm = (date: Date) => {
-    const validTime = getNextValidPickupTime(date, getTotalItems())
-    const { openTime, closeTime, dayName } = getOpenCloseTime(date)
+    const validTime = getNextValidPickupTime(date, getTotalItems(), storeHours)
+    const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
     if (validTime.getTime() !== date.getTime()) {
       Alert.alert(
         "Sorry, we are closed at that time",
@@ -378,8 +387,8 @@ function CheckoutContent() {
 
     const pickUpNowTime = getEstimatedPickUpTime(totalItems)
     const notOpenYet =
-      isOutsideBusinessHours(pickUpNowTime) ||
-      isOutsideBusinessHours(pickupDate)
+      isOutsideBusinessHours(pickUpNowTime, storeHours) ||
+      isOutsideBusinessHours(pickupDate, storeHours)
     if (notOpenYet && pickupNow) {
       Alert.alert(
         "We're closed or are not open yet. Please pick a suitable pick up time."
@@ -641,7 +650,7 @@ function CheckoutContent() {
               <Text className="text-lg font-medium">
                 {dineIn ? "Eat In Date" : "Pick Up Date"}
               </Text>
-              {pickupNow && <Text>{formatShortDate(nextValidTime)}</Text>}
+              {pickupNow && <Text>{formatShortDate(pickupDate)}</Text>}
             </View>
 
             <View className="flex-row items-center justify-between mb-4">
@@ -663,14 +672,14 @@ function CheckoutContent() {
                   <DateTimePickerModal
                     isVisible={showDatePicker}
                     mode="datetime"
-                    date={roundToNearest5(nextValidTime)}
+                    date={roundToNearest5(pickupDate)}
                     minuteInterval={5}
                     onConfirm={handleConfirm}
                     onCancel={() => setShowDatePicker(false)}
                     minimumDate={roundToNearest5(nextValidTime)}
                     maximumDate={
                       dineIn
-                        ? closeTime
+                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
                         : (() => {
                             const date = new Date() // Create a new Date object
                             date.setMonth(date.getMonth() + 1)

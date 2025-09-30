@@ -16,6 +16,7 @@ import { useAuth } from "./authProvider"
 
 interface CartState {
   items: CartItem[]
+  cartProcessing: Boolean
   error: string | null
   fetchCart: () => Promise<void>
   addItem: (item: AddCartItem) => Promise<void>
@@ -28,12 +29,13 @@ interface CartState {
   setError: (error: string | null) => void
   getTotalItems: () => number
   getTotalCost: () => number
-  getEarnablePoints: () => number
+  getEarnablePoints: (usersMembership: UsersMembership) => number
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
   error: null,
+  cartProcessing: false,
   fetchCart: async () => {
     try {
       const { cartItems } = await getCartItems()
@@ -46,7 +48,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     try {
       await addItemToCart(item)
       const { cartItems } = await getCartItems()
+
       set({ items: cartItems })
+
       if (item?.offerId && !usersMembership?.isActive) {
         Toast.show({
           type: "error",
@@ -146,7 +150,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         items: get().items.filter((i) => i.id !== id),
         error: null, // Clear error on successful removal
       })
-      const { cartItems } = await removeItemFromCart(id)
+      await removeItemFromCart(id)
       // set({ items: cartItems })
       if (item.loyaltyPointsUsed) {
         useLoyaltyStore.getState().fetchPoints()
@@ -258,11 +262,18 @@ export const useCartStore = create<CartState>((set, get) => ({
     try {
       set({
         items: get().items.map((i) =>
-          i.id === id ? { ...i, quantity: i.quantity + 1 } : i
+          i.id === id ? { ...i, quantity: i.quantity + 1, pending: true } : i
         ),
       })
       await incrementCartItem(id)
-      // set({ items: cartItems })
+      set({
+        items: get().items.map((i) =>
+          i.id === id ? { ...i, pending: false } : i
+        ),
+      })
+
+      const cartProcessing = get().items.some((i) => i.pending)
+      set({ cartProcessing })
     } catch (error) {
       console.error("Failed to increment cart item:", error)
     }
@@ -271,11 +282,20 @@ export const useCartStore = create<CartState>((set, get) => ({
     try {
       set({
         items: get().items.map((i) =>
-          i.id === id ? { ...i, quantity: i.quantity - 1 } : i
+          i.id === id ? { ...i, quantity: i.quantity - 1, pending: true } : i
         ),
       })
+
       await decrementCartItem(id)
-      // set({ items: cartItems })
+
+      set({
+        items: get().items.map((i) =>
+          i.id === id ? { ...i, pending: false } : i
+        ),
+      })
+
+      const cartProcessing = get().items.some((i) => i.pending)
+      set({ cartProcessing })
     } catch (error) {
       console.error("Failed to decrement cart item:", error)
     }
@@ -289,9 +309,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       (acc, item) => acc + item.quantity * item.itemPriceInCents,
       0
     ),
-  getEarnablePoints: () => {
-    const { usersMembership } = useAuth()
-
+  getEarnablePoints: (usersMembership: UsersMembership) => {
     if (usersMembership?.isActive) {
       return get().items.reduce(
         (acc, item) =>

@@ -1,4 +1,4 @@
-import { storeHours } from "./businessHours"
+import { StoreHours } from "./businessHours"
 
 export function getEstimatedPickUpTime(numOfItems: number) {
   const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
@@ -30,15 +30,19 @@ export function convertToTime(base: Date, timeStr: string): Date {
   return date
 }
 
-export function getOpenCloseTime(date: Date) {
+export function getOpenCloseTime(date: Date, storeHours: StoreHours) {
+  if (!date) {
+    return { openTime: null, closeTime: null, dayName: null }
+  }
   const dayName = date.toLocaleDateString("en-NZ", { weekday: "long" })
+
   const [openStr, closeStr] = storeHours[dayName] ?? [null, null]
   const openTime = convertToTime(date, openStr)
   const closeTime = convertToTime(date, closeStr)
   return { openTime, closeTime, dayName }
 }
 
-export function getNextOpenDay(date: Date) {
+export function getNextOpenDay(date: Date, storeHours: StoreHours) {
   const daysOfWeek = [
     "Sunday",
     "Monday",
@@ -53,7 +57,6 @@ export function getNextOpenDay(date: Date) {
   for (let i = 0; i < 7; i++) {
     const dayName = daysOfWeek[nextDate.getDay()]
     const hours = storeHours[dayName]
-
     if (hours && hours[0] && hours[1]) {
       // Found a day with valid hours
       const [openStr] = hours
@@ -68,31 +71,43 @@ export function getNextOpenDay(date: Date) {
   return null
 }
 
-export function getNextValidPickupTime(selected: Date, totalItems: number) {
+export function getNextValidPickupTime(
+  selected: Date,
+  totalItems: number,
+  storeHours: StoreHours
+) {
   const minTime = getEstimatedPickUpTime(totalItems)
 
   const date = new Date(selected)
-  const { openTime, closeTime } = getOpenCloseTime(date)
+  const { openTime, closeTime } = getOpenCloseTime(date, storeHours)
 
   if (!openTime || !closeTime) {
-    return getNextOpenDay(date)
+    return getNextOpenDay(date, storeHours)
   }
 
   if (date >= openTime && date <= closeTime) {
+    //between business hours
     if (date < minTime) return minTime > openTime ? minTime : openTime
 
     return date
   }
 
   if (date >= closeTime) {
-    const tomorrow = new Date()
+    // before 12 am
+    const tomorrow = new Date(date)
 
     tomorrow.setDate(tomorrow.getDate() + 1)
-    const openTimeForTomorrow = getOpenCloseTime(tomorrow).openTime
-    return openTimeForTomorrow
+    const nextOpenDay = getNextOpenDay(tomorrow, storeHours)
+    const nextOpenTime = getOpenCloseTime(nextOpenDay, storeHours).openTime
+    return nextOpenTime
   }
 
-  if (date < openTime) return openTime > minTime ? openTime : minTime
+  if (date < openTime) {
+    // after 12 am
+    const nextOpenDay = getNextOpenDay(date, storeHours)
+    const nextOpenTime = getOpenCloseTime(nextOpenDay, storeHours).openTime
+    return nextOpenTime > minTime ? nextOpenTime : minTime
+  }
   if (date < minTime) return minTime > openTime ? minTime : openTime
 
   return openTime

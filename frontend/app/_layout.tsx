@@ -17,6 +17,7 @@ import {
 import { AuthProvider } from "@/store/authProvider"
 import { useCartStore } from "@/store/cart"
 import MembershipPopup from "@/_components/membershipAd"
+import { getStoreHours } from "@/services/api"
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -37,6 +38,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const fetchInitialData = async () => {
+      getStoreHours()
       const token = await getToken()
 
       if (token) {
