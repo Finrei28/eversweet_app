@@ -391,7 +391,7 @@ function CheckoutContent() {
       return
     }
 
-    if (cartItems.length === 0) {
+    if (cartItems?.length === 0) {
       Alert.alert("Your cart is empty")
       return
     }
@@ -509,7 +509,7 @@ function CheckoutContent() {
     return null
   }
 
-  if (cartItems.length === 0) {
+  if (cartItems?.length === 0) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />

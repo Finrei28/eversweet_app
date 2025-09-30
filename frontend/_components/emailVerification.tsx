@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import {
   View,
   TextInput,
@@ -16,7 +16,11 @@ import {
 } from "react-native"
 import * as Clipboard from "expo-clipboard"
 import PageHeader from "./pageheader"
-import { checkVerificationCode, verifyResetPasswordCode } from "@/services/api"
+import {
+  checkVerificationCode,
+  getResetPasswordCode,
+  verifyResetPasswordCode,
+} from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useRouter } from "expo-router"
 
@@ -36,6 +40,18 @@ const OTPInput = ({
   const [code, setCode] = useState<string[]>(Array(6).fill(""))
   const inputsRef = useRef<Array<TextInput | null>>([])
   const router = useRouter()
+  const [counter, setCounter] = useState(0)
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval>
+    if (counter > 0) {
+      timer = setInterval(() => {
+        setCounter((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [counter])
+
   const handleChange = (value: string, index: number) => {
     if (!/^\d?$/.test(value)) return
     const newCode = [...code]
@@ -80,6 +96,7 @@ const OTPInput = ({
     try {
       setIsLoading(true)
       if (setIsResettingPassword) {
+        // reset password verification
         const data = await verifyResetPasswordCode(email, code.join(""))
         if (data?.success) {
           setIsResettingPassword(true)
@@ -96,6 +113,7 @@ const OTPInput = ({
           })
         }
       } else {
+        // sign up verification
         const name = await checkVerificationCode({
           email,
           verificationCode: code.join(""),
@@ -116,6 +134,35 @@ const OTPInput = ({
       Alert.alert(`${(error as Error).message}`)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    // getResetPasswordCode() sends a new otp code to the users email so it works for both reset password and sign up verification
+    try {
+      const data = await getResetPasswordCode(email)
+      if (data?.success) {
+        setCounter(60)
+        Toast.show({
+          type: "success",
+          text1: "A new code has been sent to your email",
+          position: "bottom",
+          visibilityTime: 4000,
+          autoHide: true,
+          bottomOffset: 60,
+        })
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "A new code could not be sent to your email",
+          position: "bottom",
+          visibilityTime: 5000,
+          autoHide: true,
+          bottomOffset: 60,
+        })
+      }
+    } catch (error) {
+      Alert.alert(`${(error as Error).message}`)
     }
   }
 
@@ -146,9 +193,17 @@ const OTPInput = ({
               />
             ))}
           </View>
-          <TouchableOpacity onPress={handleCodeCheck} className="mt-6">
-            <Text className="text-primary text-base font-semibold text-center">
-              Resend Code
+          <TouchableOpacity
+            onPress={handleResendCode}
+            disabled={counter > 0}
+            className="mt-6"
+          >
+            <Text
+              className={`text-base font-semibold text-center ${
+                counter > 0 ? "text-gray-400" : "text-primary"
+              }`}
+            >
+              {counter > 0 ? `Resend in ${counter}s` : "Resend Code"}
             </Text>
           </TouchableOpacity>
         </View>

@@ -745,9 +745,7 @@ export const getResetPasswordCode = async (email: string) => {
     })
 
     const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
+
     if (!res.ok) {
       throw new Error(`Error: ${data.message}`)
     }
@@ -777,9 +775,6 @@ export const verifyResetPasswordCode = async (
     })
 
     const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
     if (!res.ok) {
       throw new Error(`Error: ${data.message}`)
     }
@@ -806,9 +801,7 @@ export const resetPassword = async (email: string, newPassword: string) => {
     })
 
     const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
+
     if (!res.ok) {
       throw new Error(`Error: ${data.message}`)
     }

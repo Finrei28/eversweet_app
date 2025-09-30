@@ -113,7 +113,7 @@ export default function Menu() {
     <SafeAreaProvider>
       <View className="flex-1 bg-background">
         <PageHeader />
-        {cartItems.length > 0 && <ViewCart />}
+        {cartItems?.length > 0 && <ViewCart />}
         {loading ? (
           <View
             className={`flex-1 items-center justify-center ${

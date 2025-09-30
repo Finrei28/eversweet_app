@@ -51,7 +51,7 @@ export default function CartPage() {
       <View className="flex-1 bg-background pt-5 px-5 pb-10">
         <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
 
-        {cartItems.length === 0 ? (
+        {cartItems?.length === 0 ? (
           <View className="flex-1 justify-center items-center mb-24">
             <Text className="text-base text-center text-gray-500">
               Your cart is empty.

@@ -109,7 +109,7 @@ export default function Loyalty() {
     <>
       <View className="flex-1 bg-background">
         <PageHeader />
-        {cartItems.length > 0 && <ViewCart />}
+        {cartItems?.length > 0 && <ViewCart />}
         {categoriesLoading || loadingToken ? (
           <View
             className={`flex-1 items-center justify-center ${
