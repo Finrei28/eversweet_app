@@ -1,10 +1,9 @@
-import { useCartStore } from "@/store/cart"
 import { storeHours } from "./businessHours"
 
 export function getEstimatedPickUpTime(numOfItems: number) {
-  const fiveMinutes = new Date(Date.now() + 5 * 60 * 1000)
-  const tenMinutes = new Date(Date.now() + 10 * 60 * 1000)
-  const fifteenMinutes = new Date(Date.now() + 15 * 60 * 1000)
+  const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
+  const tenMinutes = new Date(Date.now() + 11 * 60 * 1000)
+  const fifteenMinutes = new Date(Date.now() + 16 * 60 * 1000)
 
   const minTime =
     numOfItems < 3 ? fiveMinutes : numOfItems < 6 ? tenMinutes : fifteenMinutes

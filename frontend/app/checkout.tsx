@@ -631,6 +631,12 @@ function CheckoutContent() {
                 <Text>Eat in</Text>
               </TouchableOpacity>
             </View>
+            {dineIn && (
+              <Text className="text-sm text-gray-500 mb-2">
+                Eat ins are only available on the same day of purchase.{" "}
+              </Text>
+            )}
+
             <View className="mb-3 justify-between flex-row items-center">
               <Text className="text-lg font-medium">
                 {dineIn ? "Eat In Date" : "Pick Up Date"}
@@ -662,11 +668,15 @@ function CheckoutContent() {
                     onConfirm={handleConfirm}
                     onCancel={() => setShowDatePicker(false)}
                     minimumDate={roundToNearest5(nextValidTime)}
-                    maximumDate={(() => {
-                      const date = new Date() // Create a new Date object
-                      date.setMonth(date.getMonth() + 1)
-                      return date
-                    })()}
+                    maximumDate={
+                      dineIn
+                        ? closeTime
+                        : (() => {
+                            const date = new Date() // Create a new Date object
+                            date.setMonth(date.getMonth() + 1)
+                            return date
+                          })()
+                    }
                   />
                 )}
 
