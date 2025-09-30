@@ -4,7 +4,7 @@
     "slug": "eversweet_app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/eversweet_bowl_1024.png",
+    "icon": "./assets/images/ios-light.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,11 +20,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message."
       },
-      "icon": {
-        "dark": "./assets/images/ios-dark.png",
-        "light": "./assets/images/ios-light.png",
-        "tinted": "./assets/images/ios-tinted.png"
-      }
+      "icon": "./assets/images/ios-light.png"
     },
     "android": {
       "adaptiveIcon": {
