@@ -304,6 +304,11 @@ model CustomisationInCartItem {
   @@unique([cartItemId, customisationId])
 }
 
+model RestaurantStatus {
+  id                  String    @id @default(cuid())
+  dineInAvailability  Boolean
+}
+
 enum PaymentStatus {
   PENDING
   SUCCESS
