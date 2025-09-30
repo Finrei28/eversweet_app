@@ -49,11 +49,6 @@ export default function OrderHistory() {
     }
   }
 
-  // const handleReorder = (orderId: string) => {
-  //   // Implement reorder functionality
-  //   console.log(`Reordering items from order ${orderId}`)
-  // }
-
   if (loadingToken || ordersLoading) {
     return (
       <View className="flex-1 bg-background">

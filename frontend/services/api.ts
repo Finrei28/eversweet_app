@@ -14,7 +14,6 @@ import { format } from "date-fns"
 import { getToken } from "./authToken"
 
 const url = process.env.EXPO_PUBLIC_URL!
-console.log("API URL:", url)
 
 export async function fetchCategoriesWithDesserts(): Promise<Menu> {
   const res = await fetch(`${url}/api/getMenu`)

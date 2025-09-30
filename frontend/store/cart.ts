@@ -58,8 +58,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       }
       if (item?.loyaltyPointsUsed) {
-        const fetchPoints = useLoyaltyStore.getState().fetchPoints
-        fetchPoints()
+        useLoyaltyStore.getState().fetchPoints()
         Toast.show({
           type: "success",
           text1: `${item.dessert.name} added to cart`,
@@ -104,76 +103,6 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       }
     }
-
-    // if (item?.loyaltyPointsUsed) {
-    //   try {
-    //     // Example: restore points via backend API
-    //     await orderWithLoyaltyPoints(item.loyaltyPointsUsed)
-    //     Toast.show({
-    //       type: "success",
-    //       text1: `${item.dessert.name} added to cart`,
-    //       text2: `${item.loyaltyPointsUsed} points has been used`,
-    //       position: "bottom",
-    //       visibilityTime: 2000,
-    //       autoHide: true,
-    //       bottomOffset: 60,
-    //     })
-    //     const fetchPoints = useLoyaltyStore.getState().fetchPoints
-    //     fetchPoints()
-    //   } catch (error) {
-    //     console.error("Failed to order with loyalty points", error)
-    //     Toast.show({
-    //       type: "error",
-    //       text1: "Failed to order with loyalty points",
-    //       text2: `${error.message}`,
-    //       position: "bottom",
-    //       visibilityTime: 3000,
-    //       autoHide: true,
-    //       bottomOffset: 60,
-    //     })
-    //     return
-    //   }
-    // }
-    // const now = Date.now()
-
-    // const areListsEqual = (
-    //   list1: Customisations,
-    //   list2: Customisations
-    // ) => {
-    //   if (list1.length !== list2.length) return false
-
-    //   const sortedList1 = [...list1].sort((a, b) =>
-    //     a.id.localeCompare(b.id)
-    //   )
-    //   const sortedList2 = [...list2].sort((a, b) =>
-    //     a.id.localeCompare(b.id)
-    //   )
-
-    //   return sortedList1.every((item, index) =>
-    //     isEqual(item, sortedList2[index])
-    //   )
-    // }
-
-    // const existing = get().items.find(
-    //   (i) =>
-    //     i.dessert.id === item.dessert.id &&
-    //     i.loyaltyPointsUsed === item.loyaltyPointsUsed &&
-    //     areListsEqual(i.customisations, item.customisations)
-    // )
-
-    // if (existing) {
-    //   set({
-    //     items: get().items.map((i) =>
-    //       i === existing ? { ...i, quantity: i.quantity + 1 } : i
-    //     ),
-    //     lastUpdated: now,
-    //   })
-    // } else {
-    //   set({
-    //     items: [...get().items, { ...item }],
-    //     lastUpdated: now,
-    //   })
-    // }
   },
   editItem: async (item) => {
     try {
@@ -220,8 +149,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       const { cartItems } = await removeItemFromCart(id)
       // set({ items: cartItems })
       if (item.loyaltyPointsUsed) {
-        const fetchPoints = useLoyaltyStore.getState().fetchPoints
-        fetchPoints()
+        useLoyaltyStore.getState().fetchPoints()
+
         Toast.show({
           type: "success",
           text1: `Item removed from cart`,
@@ -244,8 +173,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     } catch (error) {
       console.error("Failed to remove item from cart", error)
       if (item.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
-        const fetchPoints = useLoyaltyStore.getState().fetchPoints
-        fetchPoints()
+        useLoyaltyStore.getState().fetchPoints()
         console.error("Failed to restore points", error)
         Toast.show({
           type: "error",
@@ -268,40 +196,6 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       }
     }
-    // const userId = await getUserIdFromToken()
-    // // if (!userId) {
-    // //   set({ error: "User not authenticated" })
-    // //   return
-    // // }
-
-    // if (item?.loyaltyPointsUsed) {
-    //   try {
-    //     // Example: restore points via backend API
-    //     await restoreLoyaltyPoints(item.loyaltyPointsUsed)
-    //     Toast.show({
-    //       type: "success",
-    //       text1: `${item.loyaltyPointsUsed} points refunded`,
-    //       position: "bottom",
-    //       visibilityTime: 3000,
-    //       autoHide: true,
-    //       bottomOffset: 60,
-    //     })
-    //     const fetchPoints = useLoyaltyStore.getState().fetchPoints
-    //     fetchPoints()
-    //   } catch (error) {
-    //     console.error("Failed to restore points", error)
-    //     Toast.show({
-    //       type: "error",
-    //       text1: "Failed to restore loyalty points",
-    //       text2: "Please contact eversweet@eversweet.co.nz",
-    //       position: "bottom",
-    //       visibilityTime: 4000,
-    //       autoHide: true,
-    //       bottomOffset: 60,
-    //     })
-    //     return
-    //   }
-    // }
   },
   clearCart: async () => {
     const totalLoyaltyPointsUsed = get().items.reduce((total, item) => {
@@ -312,8 +206,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       set({ items: [], error: null })
       await clearCart()
       if (totalLoyaltyPointsUsed > 0) {
-        const fetchPoints = useLoyaltyStore.getState().fetchPoints
-        fetchPoints()
+        useLoyaltyStore.getState().fetchPoints()
+
         Toast.show({
           type: "success",
           text1: `Cart has been cleared`,
