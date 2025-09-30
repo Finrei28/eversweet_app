@@ -23,6 +23,7 @@ import {
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useRouter } from "expo-router"
+import { useAuth } from "@/store/authProvider"
 
 const OTPInput = ({
   onChange,
@@ -40,6 +41,7 @@ const OTPInput = ({
   const [code, setCode] = useState<string[]>(Array(6).fill(""))
   const inputsRef = useRef<Array<TextInput | null>>([])
   const router = useRouter()
+  const { signInProvider } = useAuth()
   const [counter, setCounter] = useState(0)
 
   useEffect(() => {
@@ -117,6 +119,7 @@ const OTPInput = ({
         const name = await checkVerificationCode({
           email,
           verificationCode: code.join(""),
+          signInProvider,
         })
         Toast.show({
           type: "success",

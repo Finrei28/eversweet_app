@@ -109,9 +109,11 @@ export async function signIn(
 export async function checkVerificationCode({
   email,
   verificationCode,
+  signInProvider,
 }: {
   email: string
   verificationCode: string
+  signInProvider: (token: string) => Promise<void>
 }) {
   try {
     const res = await fetch(`${url}/api/auth/checkVerificationCode`, {
@@ -122,27 +124,13 @@ export async function checkVerificationCode({
       },
     })
     const data = await res.json()
-    switch (res.status) {
-      case 200:
-        // ✅ Code is valid
-        await SecureStore.setItemAsync("token", data.token)
-        return data.name
 
-      case 400:
-        // ❌ User not found / expired / invalid format
-        throw new Error(data.message || "Bad request")
-
-      case 401:
-        // ❌ Invalid OTP
-        throw new Error(data.message || "Unauthorized")
-
-      case 500:
-        // ❌ Server error
-        throw new Error("Something went wrong. Please try again later.")
-
-      default:
-        throw new Error("Unexpected error occurred.")
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
     }
+
+    await signInProvider(data.token)
+    return data.name
   } catch (error: any) {
     // 🌐 Network error or custom error
     throw new Error(error.message || "Network error occurred.")
