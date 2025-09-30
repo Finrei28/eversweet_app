@@ -94,6 +94,7 @@ export const signUp = async (req: Request, res: Response) => {
     return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -122,6 +123,7 @@ export const signIn = async (req: Request, res: Response) => {
     }
   )
   res.status(200).json({ token, name: user.firstName ?? "" })
+  return
 }
 
 export const checkVerificationCode = async (req: Request, res: Response) => {
@@ -170,8 +172,10 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
       token,
       name: user.firstName,
     })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -198,9 +202,11 @@ export const getUser = async (req: Request, res: Response) => {
       return
     }
     res.status(200).json({ user })
+    return
   } catch (error) {
     console.error("Error fetching user:", error)
     res.status(500).json({ message: "Internal server error" })
+    return
   }
 }
 
@@ -236,9 +242,11 @@ export const updateUser = async (req: Request, res: Response) => {
       return
     }
     res.status(200).json({ user })
+    return
   } catch (error) {
     console.error("Error fetching user:", error)
     res.status(500).json({ message: "Internal server error" })
+    return
   }
 }
 
@@ -248,9 +256,11 @@ export const getOrder = async (req: Request, res: Response) => {
     const userId = (req as any).userId
     if (!userId) {
       res.status(401).json({ message: "Unauthenticated" })
+      return
     }
     if (!orderId) {
-      res.status(400).json({ message: "No order Id" })
+      res.status(400).json({ message: "No such order was found" })
+      return
     }
     const order = await db.order.findUnique({
       where: { id: orderId },
@@ -264,12 +274,15 @@ export const getOrder = async (req: Request, res: Response) => {
       },
     })
     if (!order) {
-      res.status(404).json({ message: "No order found" })
+      res.status(404).json({ message: "No such order was found" })
+      return
     }
 
     res.status(200).json({ order })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -317,8 +330,10 @@ export const getUserOrders = async (req: Request, res: Response) => {
       },
     })
     res.status(200).json({ orders: orders?.appOrders })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -337,8 +352,10 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
       },
     })
     res.status(200).json({ loyaltyPoints })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -430,8 +447,10 @@ export const orderWithLoyaltyPoints = async (req: Request, res: Response) => {
       },
     })
     res.status(201).json({ loyaltyPoints: updatedPointed.points })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
@@ -633,6 +652,7 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     res.status(201).json({ order: newOrder })
+    return
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({
@@ -650,6 +670,7 @@ export const createOrder = async (req: Request, res: Response) => {
     }
     // Handle other types of errors (e.g., DB errors)
     res.status(500).json({ message: "Internal server error" })
+    return
   }
 }
 
@@ -781,7 +802,9 @@ export const showOffers = async (req: Request, res: Response) => {
     }))
 
     res.status(200).json({ offers: serializedOffers })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }

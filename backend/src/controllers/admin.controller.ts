@@ -47,6 +47,7 @@ export const adminSignIn = async (req: Request, res: Response) => {
     }
   )
   res.status(200).json({ token })
+  return
 }
 
 export const getPendingOrders = async (req: Request, res: Response) => {
@@ -118,6 +119,7 @@ export const getPendingOrders = async (req: Request, res: Response) => {
       message: "Error fetching current orders",
       error: (error as Error).message,
     })
+    return
   }
 }
 
@@ -187,6 +189,7 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
       message: "Error fetching current orders",
       error: (error as Error).message,
     })
+    return
   }
 }
 
@@ -276,6 +279,7 @@ export const getPastOrders = async (req: Request, res: Response) => {
       message: "Error fetching past orders",
       error: (error as Error).message,
     })
+    return
   }
 }
 
@@ -479,6 +483,7 @@ export const getOverview = async (req: Request, res: Response) => {
       message: "Error fetching overview",
       error: (error as Error).message,
     })
+    return
   }
 }
 

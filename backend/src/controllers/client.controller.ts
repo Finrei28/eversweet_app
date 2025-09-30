@@ -86,7 +86,7 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString()
   const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000)
   try {
-    const newUser = await db.user.update({
+    await db.user.update({
       where: { id: existUser.id },
       data: {
         otp,
@@ -118,6 +118,7 @@ export const verifyResetPasswordCode = async (req: Request, res: Response) => {
 
     if (verificationCode !== user.otp?.toString()) {
       res.status(401).json({ message: "Invalid verification code." })
+      return
     }
 
     if (!user.otpExpiresAt) {
@@ -141,8 +142,10 @@ export const verifyResetPasswordCode = async (req: Request, res: Response) => {
       success: true,
       message: "Verification code is valid.",
     })
+    return
   } catch (error) {
     res.status(500).json({ message: error })
+    return
   }
 }
 
