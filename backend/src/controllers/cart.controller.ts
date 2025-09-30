@@ -255,7 +255,13 @@ export const getCartItems = async (req: Request, res: Response) => {
 
     const cart = await db.cart.findUnique({
       where: { userId },
-      select: { id: true, expiresAt: true, cartItems: true },
+      select: {
+        id: true,
+        expiresAt: true,
+        cartItems: {
+          select: { id: true, offerId: true, loyaltyPointsUsed: true },
+        },
+      },
     })
 
     const membership = await db.membership.findUnique({ where: { userId } })
@@ -272,14 +278,14 @@ export const getCartItems = async (req: Request, res: Response) => {
         })
       }
 
-      const cartItemsWithOffer = await db.cartItem.findMany({
-        where: { cartId: cart.id, offerId: { not: null } },
-      })
+      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
 
       for (const item of cartItemsWithOffer) {
         if (item.offerId) {
           if (!membership) {
-            res.status(403).json({ message: "User is not a member" })
+            res
+              .status(403)
+              .json({ message: "Could not find users membership record" })
             return
           }
           await db.offerRedemption.updateMany({
@@ -302,14 +308,14 @@ export const getCartItems = async (req: Request, res: Response) => {
 
     // if user is not a member, remove all offers from cart and restore redemptions
     if (!membership?.isActive && cart) {
-      const cartItemsWithOffer = await db.cartItem.findMany({
-        where: { cartId: cart.id, offerId: { not: null } },
-      })
+      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
       if (cartItemsWithOffer.length > 0) {
         for (const item of cartItemsWithOffer) {
           if (item.offerId) {
             if (!membership) {
-              res.status(403).json({ message: "User is not a member" })
+              res
+                .status(403)
+                .json({ message: "Could not find users membership record" })
               return
             }
             await db.offerRedemption.updateMany({
@@ -406,14 +412,11 @@ export const clearCart = async (req: Request, res: Response) => {
       })
     }
 
-    const cartItemsWithOffer = await db.cartItem.findMany({
-      where: { cartId: cart.id },
-    })
-
-    const membership = await db.membership.findUnique({ where: { userId } })
+    const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
 
     for (const item of cartItemsWithOffer) {
       if (item.offerId) {
+        const membership = await db.membership.findUnique({ where: { userId } })
         if (!membership) {
           res.status(403).json({ message: "User is not a member" })
           return
@@ -461,11 +464,16 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         offerId: true,
       },
     })
+
+    if (!cartItem) {
+      res.status(404).json({ message: "cart item not found" })
+      return
+    }
     const membership = await db.membership.findUnique({ where: { userId } })
 
     if (cartItem?.offerId) {
       if (!membership) {
-        res.status(403).json({ message: "User is not a member" })
+        res.status(403).json({ message: "No membership record found" })
         return
       }
       await db.offerRedemption.updateMany({
@@ -521,7 +529,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         },
       })
     }
-    // delete cart is empty
+    // delete cart if empty
     if (updatedCart && updatedCart.cartItems.length === 0) {
       await db.cart.delete({ where: { id: updatedCart.id } })
     }
