@@ -3,6 +3,7 @@ import { db } from "../lib/db"
 import { Resend } from "resend"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
+import { storeHours } from "../lib/storeHours"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -192,4 +193,9 @@ export const resetPassword = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({ message: "Failed to reset password" })
   }
+}
+
+export const getStoreHours = (req: Request, res: Response) => {
+  res.status(200).json(storeHours)
+  return
 }

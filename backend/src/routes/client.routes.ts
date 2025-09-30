@@ -5,6 +5,7 @@ import {
   getResetPasswordCode,
   verifyResetPasswordCode,
   resetPassword,
+  getStoreHours,
 } from "../controllers/client.controller"
 
 const router = Router()
@@ -14,5 +15,6 @@ router.get("/getAvailableCustomisations", getAvailableCustomisations)
 router.post("/getResetPasswordCode", getResetPasswordCode)
 router.post("/verifyResetPasswordCode", verifyResetPasswordCode)
 router.post("/resetPassword", resetPassword)
+router.get("/getStoreHours", getStoreHours)
 
 export default router
