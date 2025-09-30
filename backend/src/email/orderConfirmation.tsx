@@ -64,7 +64,7 @@ export default function EmailOrderConfirmation({
 
           {/* Order Details Card */}
 
-          <Section className="overflow-hidden rounded-xl border-solid bg-white lg:border-2 lg:bg-orange-50 lg:p-6">
+          <Section className="overflow-hidden p-4 rounded-xl border-solid bg-white lg:border-2 lg:bg-orange-50 lg:p-6">
             <Section className="rounded-xl bg-white md:p-6">
               <Row>
                 <Heading as="h2">Order #{order.tempOrderId}</Heading>
@@ -274,7 +274,7 @@ export default function EmailOrderConfirmation({
             </Column>
             <Column>
               <Button
-                href={`${process.env.NEXT_PUBLIC_SERVER_URL}/menu`}
+                href={`https://eversweet.co.nz/menu`}
                 className="ml-2 flex h-9 items-center rounded-xl bg-[hsl(28,66%,70%)] px-4 py-2 text-white shadow hover:bg-secondary"
               >
                 <Text className="ml-2">Have a look at our menu</Text>
