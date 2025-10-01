@@ -236,7 +236,38 @@ export const addItemToCart = async (req: Request, res: Response) => {
       }
     }
 
-    res.status(201).json({ success: true })
+    const rawCartItems = await db.cartItem.findMany({
+      where: { cart: { userId } },
+      include: {
+        dessert: {
+          select: {
+            id: true,
+            name: true,
+            chineseName: true,
+            description: true,
+            priceInCents: true,
+            priceInLoyaltyPoints: true,
+            imagePath: true,
+            ingredients: { include: { ingredient: true } },
+          },
+        },
+        customisations: { include: { customisation: true } },
+      },
+    })
+
+    const cartItems = rawCartItems.map((item) => ({
+      ...item,
+      dessert: {
+        ...item.dessert,
+        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+      },
+      customisations: item.customisations.map((c) => ({
+        ...c.customisation,
+        quantity: c.quantity,
+      })),
+    }))
+
+    res.status(201).json({ success: true, cartItems })
     return
   } catch (error) {
     console.error(error)
