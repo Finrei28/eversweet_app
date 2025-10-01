@@ -11,7 +11,7 @@ import {
 const router = Router()
 
 router.get("/getMenu", getMenu)
-router.get("/getAvailableCustomisations", getAvailableCustomisations)
+router.get("/getAvailableCustomisations/:id", getAvailableCustomisations)
 router.post("/getResetPasswordCode", getResetPasswordCode)
 router.post("/verifyResetPasswordCode", verifyResetPasswordCode)
 router.post("/resetPassword", resetPassword)

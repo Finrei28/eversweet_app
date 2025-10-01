@@ -52,15 +52,25 @@ export const getAvailableCustomisations = async (
   res: Response
 ) => {
   try {
+    const { id } = req.params
+
+    if (!id) {
+      res
+        .status(400)
+        .json({ message: "Dessert id is required to view customisations" })
+      return
+    }
     const customisations = await db.ingredient.findMany({
-      where: { isAvailableForPurchase: true },
+      where: {
+        isAvailableForPurchase: true,
+        categories: { some: { categoryId: id } },
+      },
       orderBy: { priceInCents: "asc" },
       select: {
         id: true,
         chineseName: true,
         name: true,
         priceInCents: true,
-        categories: { select: { id: true } },
       },
     })
     if (!customisations) {
