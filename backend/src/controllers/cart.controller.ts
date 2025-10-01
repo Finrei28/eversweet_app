@@ -59,7 +59,6 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     const cartItem = parsedBody.data
-    const cart = await db.cart.findUnique({ where: { userId } })
 
     if (cartItem.offerId) {
       const membership = await db.membership.findUnique({ where: { userId } })
@@ -94,6 +93,20 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
     }
 
+    let cart = await db.cart.findUnique({
+      where: { userId },
+      select: {
+        cartItems: {
+          include: {
+            dessert: {
+              include: { ingredients: { select: { ingredient: true } } },
+            },
+            customisations: { select: { customisation: true, quantity: true } },
+          },
+        },
+      },
+    })
+
     if (!cart) {
       const cartItemData: any = {
         dessert: {
@@ -120,7 +133,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
         cartItemData.offer = { connect: { id: cartItem.offerId } }
       }
 
-      await db.cart.create({
+      cart = await db.cart.create({
         data: {
           user: { connect: { id: userId } },
           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
@@ -130,132 +143,68 @@ export const addItemToCart = async (req: Request, res: Response) => {
             create: cartItemData,
           },
         },
+        select: {
+          cartItems: {
+            include: {
+              dessert: {
+                include: { ingredients: { select: { ingredient: true } } },
+              },
+              customisations: {
+                select: { customisation: true, quantity: true },
+              },
+            },
+          },
+        },
       })
     } else {
-      // Check if the same dessert with identical customisations already exists in the cart
-      const whereClause: any = {
-        cartId: cart.id,
-        dessertId: cartItem.dessertId,
+      // create new cart item
+      const cartItemData: any = {
+        dessert: { connect: { id: cartItem.dessertId } },
+        quantity: cartItem.quantity,
         itemPriceInCents: cartItem.itemPriceInCents,
+        loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
+        customisations: {
+          create: cartItem.customisations.map((cartItemCustomisation) => ({
+            customisation: {
+              connect: { id: cartItemCustomisation.id },
+            },
+            quantity: cartItemCustomisation.quantity,
+          })),
+        },
       }
 
-      // Only filter by offerId if it's set
       if (cartItem.offerId) {
-        whereClause.offerId = cartItem.offerId
+        cartItemData.offer = { connect: { id: cartItem.offerId } }
       }
 
-      const candidates = await db.cartItem.findMany({
-        where: whereClause,
-        include: {
-          customisations: {
-            select: {
-              customisationId: true,
-              quantity: true,
+      cart = await db.cart.update({
+        where: { userId },
+        data: {
+          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+          totalLoyaltyPointsUsed: {
+            increment: cartItem.loyaltyPointsUsed ?? 0,
+          },
+          totalPriceInCents: { increment: cartItem.itemPriceInCents },
+          cartItems: {
+            create: cartItemData,
+          },
+        },
+        select: {
+          cartItems: {
+            include: {
+              dessert: {
+                include: { ingredients: { select: { ingredient: true } } },
+              },
+              customisations: {
+                select: { customisation: true, quantity: true },
+              },
             },
           },
         },
       })
-
-      // Function to compare customisations with quantities
-      function compareCustomisations(
-        a: { customisationId: string; quantity: number }[],
-        b: { id: string; quantity: number }[]
-      ) {
-        if (a.length !== b.length) return false
-
-        const mapA = new Map(a.map((c) => [c.customisationId, c.quantity]))
-        for (const { id, quantity } of b) {
-          if (mapA.get(id) !== quantity) return false
-        }
-        return true
-      }
-
-      // Find exact match
-      const existingItem = candidates.find((c) =>
-        compareCustomisations(
-          c.customisations,
-          cartItem.customisations.map((c) => ({
-            id: c.id,
-            quantity: c.quantity,
-          }))
-        )
-      )
-
-      // Update quantity if found
-      if (existingItem) {
-        await db.cart.update({
-          where: { id: cart.id },
-          data: {
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-            totalLoyaltyPointsUsed: {
-              increment: cartItem.loyaltyPointsUsed ?? 0,
-            },
-            totalPriceInCents: { increment: cartItem.itemPriceInCents },
-            cartItems: {
-              update: {
-                where: { id: existingItem.id },
-                data: { quantity: { increment: cartItem.quantity } },
-              },
-            },
-          },
-        })
-      } else {
-        //otherwise, create new cart item
-        const cartItemData: any = {
-          dessert: { connect: { id: cartItem.dessertId } },
-          quantity: cartItem.quantity,
-          itemPriceInCents: cartItem.itemPriceInCents,
-          loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
-          customisations: {
-            create: cartItem.customisations.map((cartItemCustomisation) => ({
-              customisation: {
-                connect: { id: cartItemCustomisation.id },
-              },
-              quantity: cartItemCustomisation.quantity,
-            })),
-          },
-        }
-
-        if (cartItem.offerId) {
-          cartItemData.offer = { connect: { id: cartItem.offerId } }
-        }
-
-        await db.cart.update({
-          where: { id: cart.id },
-          data: {
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-            totalLoyaltyPointsUsed: {
-              increment: cartItem.loyaltyPointsUsed ?? 0,
-            },
-            totalPriceInCents: { increment: cartItem.itemPriceInCents },
-            cartItems: {
-              create: cartItemData,
-            },
-          },
-        })
-      }
     }
 
-    const rawCartItems = await db.cartItem.findMany({
-      where: { cart: { userId } },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-          },
-        },
-        customisations: { include: { customisation: true } },
-      },
-    })
-
-    const cartItems = rawCartItems.map((item) => ({
+    const cartItems = cart.cartItems.map((item) => ({
       ...item,
       dessert: {
         ...item.dessert,
@@ -314,10 +263,7 @@ export const getCartItems = async (req: Request, res: Response) => {
       for (const item of cartItemsWithOffer) {
         if (item.offerId) {
           if (!membership) {
-            res
-              .status(403)
-              .json({ message: "Could not find users membership record" })
-            return
+            break
           }
           await db.offerRedemption.updateMany({
             where: {
@@ -344,10 +290,7 @@ export const getCartItems = async (req: Request, res: Response) => {
         for (const item of cartItemsWithOffer) {
           if (item.offerId) {
             if (!membership) {
-              res
-                .status(403)
-                .json({ message: "Could not find users membership record" })
-              return
+              break
             }
             await db.offerRedemption.updateMany({
               where: {
@@ -386,10 +329,10 @@ export const getCartItems = async (req: Request, res: Response) => {
             priceInCents: true,
             priceInLoyaltyPoints: true,
             imagePath: true,
-            ingredients: { include: { ingredient: true } },
+            ingredients: { select: { ingredient: true } },
           },
         },
-        customisations: { include: { customisation: true } },
+        customisations: { select: { customisation: true, quantity: true } },
       },
     })
 
@@ -449,8 +392,7 @@ export const clearCart = async (req: Request, res: Response) => {
       if (item.offerId) {
         const membership = await db.membership.findUnique({ where: { userId } })
         if (!membership) {
-          res.status(403).json({ message: "User is not a member" })
-          return
+          break
         }
         await db.offerRedemption.updateMany({
           where: {
