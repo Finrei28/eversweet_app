@@ -23,7 +23,6 @@ export const getMenu = async (req: Request, res: Response) => {
             imagePath: true,
             ingredients: { include: { ingredient: true } },
             description: true,
-            category: { select: { id: true } },
           },
         },
       },
