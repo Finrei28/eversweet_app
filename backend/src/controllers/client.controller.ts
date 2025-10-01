@@ -59,10 +59,11 @@ export const getAvailableCustomisations = async (
         .json({ message: "Dessert id is required to view customisations" })
       return
     }
+    const dessert = await db.dessert.findFirst({ where: { id } })
     const customisations = await db.ingredient.findMany({
       where: {
         isAvailableForPurchase: true,
-        categories: { some: { categoryId: id } },
+        categories: { some: { categoryId: dessert?.categoryId } },
       },
       orderBy: { priceInCents: "asc" },
       select: {
