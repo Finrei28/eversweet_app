@@ -187,16 +187,7 @@ export default function EmailOrderConfirmation({
               </Heading>
 
               {order.desserts.map((item) => {
-                const pricePerItem =
-                  (item.dessert.priceInCents +
-                    item.customisations.reduce((total, customisation) => {
-                      return (
-                        total +
-                        customisation.customisation.priceInCents *
-                          customisation.quantity
-                      )
-                    }, 0)) /
-                  100
+                const pricePerItem = item.priceInCents / 100
                 return (
                   <Row key={item.id}>
                     <Column className="h-20 w-20 py-4 align-top">

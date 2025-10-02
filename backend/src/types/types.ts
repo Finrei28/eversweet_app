@@ -2,6 +2,7 @@ export type FullOrderType = {
   id: string
   tempOrderId: string
   priceInCents: number
+  discountedAmountInCents: number
   GST: number
   createdAt: Date
   customerFirstName: string
@@ -16,12 +17,13 @@ export type FullOrderType = {
     dessertId: string
     orderId: string
     quantity: number
+    priceInCents: number
+    discountedAmountInCents: number
     dessert: {
       id: string
       name: string
       chineseName: string
       imagePath: string
-      priceInCents: number
     }
     customisations: {
       id: string
@@ -30,7 +32,7 @@ export type FullOrderType = {
       customisation: {
         id: string
         name: string
-        priceInCents: number
+        chineseName: string
       }
     }[]
   }[]

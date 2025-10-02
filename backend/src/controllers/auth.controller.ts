@@ -267,8 +267,21 @@ export const getOrder = async (req: Request, res: Response) => {
       include: {
         desserts: {
           include: {
-            dessert: true,
-            customisations: { include: { customisation: true } },
+            dessert: {
+              select: {
+                id: true,
+                name: true,
+                chineseName: true,
+                imagePath: true,
+              },
+            },
+            customisations: {
+              include: {
+                customisation: {
+                  select: { id: true, name: true, chineseName: true },
+                },
+              },
+            },
           },
         },
       },
@@ -317,10 +330,19 @@ export const getUserOrders = async (req: Request, res: Response) => {
           include: {
             desserts: {
               include: {
-                dessert: true,
+                dessert: {
+                  select: {
+                    id: true,
+                    name: true,
+                    chineseName: true,
+                    imagePath: true,
+                  },
+                },
                 customisations: {
                   include: {
-                    customisation: true,
+                    customisation: {
+                      select: { id: true, name: true, chineseName: true },
+                    },
                   },
                 },
               },
@@ -551,6 +573,7 @@ export const createOrder = async (req: Request, res: Response) => {
 
             quantity: dessertItem.quantity,
             priceInCents: dessertItem.itemPriceInCents, // get price from order item
+            discountedAmountInCents: dessertItem.discountedAmountInCents,
             loyaltyPointsUsed: dessertItem.loyaltyPointsUsed ?? null,
             customisations: {
               create: dessertItem.customisations.map((customisationsItem) => ({
@@ -575,6 +598,7 @@ export const createOrder = async (req: Request, res: Response) => {
         customerEmail: true,
         customerPhoneNumber: true,
         priceInCents: true,
+        discountedAmountInCents: true,
         pickUpTime: true,
         dineIn: true,
         pickedUpAt: true,
@@ -586,12 +610,13 @@ export const createOrder = async (req: Request, res: Response) => {
             id: true,
             quantity: true,
             dessertId: true,
+            priceInCents: true,
+            discountedAmountInCents: true,
             dessert: {
               select: {
                 id: true,
                 name: true,
                 chineseName: true,
-                priceInCents: true,
                 imagePath: true,
               },
             },
@@ -605,7 +630,6 @@ export const createOrder = async (req: Request, res: Response) => {
                     id: true,
                     name: true,
                     chineseName: true,
-                    priceInCents: true,
                   },
                 },
               },
