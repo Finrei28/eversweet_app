@@ -213,9 +213,11 @@ export const getStoreHours = (req: Request, res: Response) => {
 }
 
 export const restaurantStatus = async (req: Request, res: Response) => {
-  const restaurantStatus = await db.restaurantStatus.findFirst()
-  res
-    .status(200)
-    .json({ restaurantStatus: restaurantStatus?.dineInAvailability })
+  const restaurant = await db.restaurantStatus.findFirst()
+  const restaurantStatus = {
+    dineInAvailability: restaurant?.dineInAvailability,
+    unavailableUntil: restaurant?.unavailableUntil,
+  }
+  res.status(200).json({ restaurantStatus })
   return
 }

@@ -307,6 +307,7 @@ model CustomisationInCartItem {
 model RestaurantStatus {
   id                  String    @id @default(cuid())
   dineInAvailability  Boolean
+  unavailableUntil    DateTime?
 }
 
 enum PaymentStatus {
