@@ -107,31 +107,34 @@ export const addItemToCart = async (req: Request, res: Response) => {
       },
     })
 
-    if (!cart) {
-      const cartItemData: any = {
-        dessert: {
-          connect: {
-            id: cartItem.dessertId, // Ensure dessert exists before connecting
-          },
+    const cartItemData: any = {
+      dessert: {
+        connect: {
+          id: cartItem.dessertId, // Ensure dessert exists before connecting
         },
-        quantity: cartItem.quantity,
-        itemPriceInCents: cartItem.itemPriceInCents, // get price from order item
-        loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
-        customisations: {
-          create: cartItem.customisations.map((cartItemCustomisation) => ({
-            customisation: {
-              connect: {
-                id: cartItemCustomisation.id, // Ensure customisation exists before connecting
-              },
+      },
+      quantity: cartItem.quantity,
+      itemPriceInCents: cartItem.itemPriceInCents, // get price from order item
+      loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
+      discountedAmountInCents: cartItem.discountedAmountInCents,
+      customisations: {
+        create: cartItem.customisations.map((cartItemCustomisation) => ({
+          customisation: {
+            connect: {
+              id: cartItemCustomisation.id, // Ensure customisation exists before connecting
             },
-            quantity: cartItemCustomisation.quantity,
-          })),
-        },
-      }
+          },
+          quantity: cartItemCustomisation.quantity,
+        })),
+      },
+    }
 
-      if (cartItem.offerId) {
-        cartItemData.offer = { connect: { id: cartItem.offerId } }
-      }
+    if (cartItem.offerId) {
+      cartItemData.offer = { connect: { id: cartItem.offerId } }
+    }
+
+    if (!cart) {
+      // create a new cart if no cart
 
       cart = await db.cart.create({
         data: {
@@ -158,24 +161,6 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
     } else {
       // create new cart item
-      const cartItemData: any = {
-        dessert: { connect: { id: cartItem.dessertId } },
-        quantity: cartItem.quantity,
-        itemPriceInCents: cartItem.itemPriceInCents,
-        loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
-        customisations: {
-          create: cartItem.customisations.map((cartItemCustomisation) => ({
-            customisation: {
-              connect: { id: cartItemCustomisation.id },
-            },
-            quantity: cartItemCustomisation.quantity,
-          })),
-        },
-      }
-
-      if (cartItem.offerId) {
-        cartItemData.offer = { connect: { id: cartItem.offerId } }
-      }
 
       cart = await db.cart.update({
         where: { userId },
@@ -576,6 +561,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
           update: {
             where: { id: cartItem.id },
             data: {
+              discountedAmountInCents: cartItem.discountedAmountInCents,
               itemPriceInCents: cartItem.itemPriceInCents,
               loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
               // quantity: cartItem.quantity,

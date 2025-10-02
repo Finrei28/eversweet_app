@@ -92,6 +92,7 @@ model Offer {
   category         Category?         @relation(fields: [categoryId], references: [id])
   dessert          Dessert?          @relation(fields: [dessertId], references: [id])
   redemptions      OfferRedemption[]
+  orderDessert     OrderDessert[]
 }
 
 model OfferRedemption {
@@ -206,6 +207,7 @@ model Order {
   id                  String         @id @default(cuid())
   tempOrderId         String
   priceInCents        Int
+  discountedAmountInCents  Int       @default(0)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   customerFirstName   String
@@ -242,11 +244,14 @@ model OrderDessert {
   id                String                      @id @default(cuid())
   orderId           String
   dessertId         String
+  offerId           String?
   quantity          Int
   priceInCents      Int                         @default(0)
+  discountedAmountInCents  Int                  @default(0)
   loyaltyPointsUsed Int?
   dessert           Dessert                     @relation(fields: [dessertId], references: [id])
   order             Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  offer             Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
   customisations    OrderDessertCustomisation[]
 
   @@unique([orderId, dessertId, id])
@@ -280,17 +285,18 @@ model Cart {
 }
 
 model CartItem {
-  id                String                    @id @default(cuid())
-  dessertId         String
-  itemPriceInCents  Int
-  quantity          Int
-  loyaltyPointsUsed Int?
-  cartId            String
-  offerId           String?
-  cart              Cart                      @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  dessert           Dessert                   @relation(fields: [dessertId], references: [id])
-  offer             Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  customisations    CustomisationInCartItem[]
+  id                          String                    @id @default(cuid())
+  dessertId                   String
+  itemPriceInCents            Int
+  discountedAmountInCents     Int                       @default(0)
+  quantity                    Int
+  loyaltyPointsUsed           Int?
+  cartId                      String
+  offerId                     String?
+  cart                        Cart                      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  dessert                     Dessert                   @relation(fields: [dessertId], references: [id])
+  offer                       Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  customisations              CustomisationInCartItem[]
 }
 
 model CustomisationInCartItem {

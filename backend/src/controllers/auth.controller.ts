@@ -515,6 +515,11 @@ export const createOrder = async (req: Request, res: Response) => {
       })
     }
 
+    const discountedAmountInCents = cart.cartItems.reduce(
+      (total, item) => total + item.discountedAmountInCents,
+      0
+    )
+
     newOrder = await db.order.create({
       data: {
         tempOrderId: counter.counter.toString(),
@@ -529,6 +534,7 @@ export const createOrder = async (req: Request, res: Response) => {
         },
         source: "APP",
         priceInCents: cart.totalPriceInCents,
+        discountedAmountInCents: discountedAmountInCents,
         GST: cart.totalPriceInCents * 0.15 * 100, // GST in cents
         pickUpTime: parsedBody.pickUpTime,
         dineIn: parsedBody.dineIn,
