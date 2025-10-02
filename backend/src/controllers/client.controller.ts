@@ -211,3 +211,11 @@ export const getStoreHours = (req: Request, res: Response) => {
   res.status(200).json(storeHours)
   return
 }
+
+export const restaurantStatus = async (req: Request, res: Response) => {
+  const restaurantStatus = await db.restaurantStatus.findFirst()
+  res
+    .status(200)
+    .json({ restaurantStatus: restaurantStatus?.dineInAvailability })
+  return
+}
