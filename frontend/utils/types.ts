@@ -72,6 +72,7 @@ export type Order = {
   id: string
   tempOrderId: string
   priceInCents: number
+  discountedAmountInCents: number
   GST: number
   createdAt: Date
   updatedAt: Date
@@ -88,12 +89,14 @@ export type Order = {
     dessertId: string
     orderId: string
     quantity: number
+    priceInCents: number
+    discountedAmountInCents: number
+    offerId: string
     dessert: {
       id: string
       name: string
       chineseName: string
       imagePath: string
-      priceInCents: number
     }
     customisations: {
       id: string
@@ -102,8 +105,6 @@ export type Order = {
       customisation: {
         id: string
         name: string
-        priceInCents: number
-        isAvailableForPurchase: boolean
         chineseName: string
       }
     }[]
@@ -125,7 +126,7 @@ export type CartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
-  pending?: Boolean
+  discountedAmountInCents: number
 }
 
 export type AddCartItem = {
@@ -135,6 +136,7 @@ export type AddCartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
+  discountedAmountInCents: number
 }
 
 export type MembershipDetails = {
@@ -182,3 +184,8 @@ export type Offer = {
 
 // The offers array type
 export type Offers = Offer[]
+
+export type restaurantStatus = {
+  dineInAvailability: boolean | undefined
+  unavailableUntil: Date | null | undefined
+}

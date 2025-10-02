@@ -39,7 +39,7 @@ export default function OrderHistory() {
   }
 
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
+    switch (status.toUpperCase()) {
       case "PICKED_UP":
         return "bg-green-100 text-green-800"
       case "CANCELLED":
@@ -162,50 +162,57 @@ export default function OrderHistory() {
                     </Text>
                     {/* Order Items */}
                     <Text className="font-medium mb-3">Items</Text>
-                    {order.desserts.map((item, index) => (
-                      <View
-                        key={index}
-                        className={`flex-row items-center py-2 ${
-                          index < order.desserts.length - 1
-                            ? "border-b border-gray-100"
-                            : ""
-                        }`}
-                      >
-                        <Image
-                          source={{
-                            uri:
-                              item.dessert.imagePath ||
-                              "https://via.placeholder.com/50",
-                          }}
-                          className="w-12 h-12 rounded-md mr-3"
-                        />
-                        <View className="flex-1 gap-1">
+                    {order.desserts.map((item, index) => {
+                      const originalPrice =
+                        (item.discountedAmountInCents + item.priceInCents) / 100
+                      const finalPrice = item.priceInCents / 100
+                      return (
+                        <View
+                          key={index}
+                          className={`flex-row items-center py-2 ${
+                            index < order.desserts.length - 1
+                              ? "border-b border-gray-100"
+                              : ""
+                          }`}
+                        >
+                          <Image
+                            source={{
+                              uri:
+                                item.dessert.imagePath ||
+                                process.env.EXPO_PUBLIC_FILLER_IMAGE_URL,
+                            }}
+                            className="w-12 h-12 rounded-md mr-3"
+                          />
+                          <View className="flex-1 gap-1">
+                            <Text className="font-medium">
+                              {item.dessert.name}{" "}
+                              {item.offerId && `(Members Offer)`}
+                            </Text>
+                            {item.customisations.map((customisation) => (
+                              <Text key={customisation.id}>{`${
+                                customisation.quantity === 0 ? `- ` : `+ `
+                              } ${customisation.customisation.name} ${
+                                customisation.quantity > 1
+                                  ? `x${customisation.quantity}`
+                                  : ``
+                              }`}</Text>
+                            ))}
+                            <Text className="text-gray-500 text-sm">
+                              Qty: {item.quantity} × $
+                              {item.discountedAmountInCents > 0 && (
+                                <Text className="text-gray-400 text-sm line-through">
+                                  {originalPrice.toFixed(2)}{" "}
+                                </Text>
+                              )}
+                              {finalPrice.toFixed(2)}
+                            </Text>
+                          </View>
                           <Text className="font-medium">
-                            {item.dessert.name}
-                          </Text>
-                          {item.customisations.map((customisation) => (
-                            <Text key={customisation.id}>{`${
-                              customisation.quantity === 0 ? `- ` : `+ `
-                            } ${customisation.customisation.name} ${
-                              customisation.quantity > 1
-                                ? `x${customisation.quantity}`
-                                : ``
-                            }`}</Text>
-                          ))}
-                          <Text className="text-gray-500 text-sm">
-                            Qty: {item.quantity} × $
-                            {(item.dessert.priceInCents / 100).toFixed(2)}
+                            ${(item.quantity * finalPrice).toFixed(2)}
                           </Text>
                         </View>
-                        <Text className="font-medium">
-                          $
-                          {(
-                            (item.quantity * item.dessert.priceInCents) /
-                            100
-                          ).toFixed(2)}
-                        </Text>
-                      </View>
-                    ))}
+                      )
+                    })}
 
                     {/* Payment Method */}
                     {/* <View className="mt-4">
@@ -253,7 +260,7 @@ export default function OrderHistory() {
           <View className="bg-white rounded-xl shadow-sm p-6 items-center mb-6">
             <Feather name="shopping-bag" size={48} color="#D1D5DB" />
             <Text className="mt-2 text-gray-500 text-center">
-              No orders yet
+              No past orders yet
             </Text>
             <TouchableOpacity
               onPress={() => router.replace("/menu")}

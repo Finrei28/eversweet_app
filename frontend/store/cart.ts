@@ -1,5 +1,10 @@
 import { create } from "zustand"
-import { AddCartItem, CartItem, UsersMembership } from "@/utils/types"
+import {
+  AddCartItem,
+  CartItem,
+  Customisations,
+  UsersMembership,
+} from "@/utils/types"
 
 import {
   addItemToCart,
@@ -12,13 +17,15 @@ import {
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
-import { useAuth } from "./authProvider"
+import { isEqual } from "lodash"
+import * as Crypto from "expo-crypto"
 
 interface CartState {
   items: CartItem[]
-  cartProcessing: Boolean
+  cartOperations: number
   error: string | null
   fetchCart: () => Promise<void>
+  getTotalMembershipDiscount: () => number
   addItem: (item: AddCartItem) => Promise<void>
   editItem: (item: CartItem) => Promise<void>
   removeItem: (id: string) => Promise<void>
@@ -35,21 +42,64 @@ interface CartState {
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
   error: null,
-  cartProcessing: false,
+  cartOperations: 0,
   fetchCart: async () => {
     try {
-      const { cartItems } = await getCartItems()
+      const cartItems = (await getCartItems()) ?? []
       set({ items: cartItems })
     } catch (error) {
       console.error("Failed to fetch cart items", error)
     }
   },
+  getTotalMembershipDiscount: () => {
+    return get().items.reduce(
+      (total, item) => total + item.discountedAmountInCents * item.quantity,
+      0
+    )
+  },
   addItem: async (item, usersMembership?: UsersMembership) => {
-    try {
-      await addItemToCart(item)
-      const { cartItems } = await getCartItems()
+    const areListsEqual = (list1: Customisations, list2: Customisations) => {
+      if (list1.length !== list2.length) return false
 
-      set({ items: cartItems })
+      const sortedList1 = [...list1].sort((a, b) => a.id.localeCompare(b.id))
+      const sortedList2 = [...list2].sort((a, b) => a.id.localeCompare(b.id))
+
+      return sortedList1.every((item, index) =>
+        isEqual(item, sortedList2[index])
+      )
+    }
+
+    const existing = get().items.find((i) => {
+      return (
+        i.dessert.id === item.dessert.id &&
+        i.loyaltyPointsUsed === item.loyaltyPointsUsed &&
+        i.offerId === item.offerId &&
+        Math.round(i.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
+        areListsEqual(i.customisations, item.customisations)
+      )
+    })
+
+    // if (existing) {
+    //   set({
+    //     items: get().items.map((i) =>
+    //       i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
+    //     ),
+    //     cartOperations: get().cartOperations + 1,
+    //   })
+    // } else {
+    //   set({
+    //     items: [...get().items, { ...item, id: tempId }],
+    //     cartOperations: get().cartOperations + 1,
+    //   })
+    // }
+    try {
+      if (existing) {
+        const updatedCart = await incrementCartItem(existing.id)
+        set({ items: updatedCart })
+      } else {
+        const updatedCart = await addItemToCart(item)
+        set({ items: updatedCart })
+      }
 
       if (item?.offerId && !usersMembership?.isActive) {
         Toast.show({
@@ -83,6 +133,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       }
     } catch (error) {
+      set({ cartOperations: get().cartOperations - 1 })
       if (item?.loyaltyPointsUsed) {
         console.error("Failed to order with loyalty points", error)
         Toast.show({
@@ -145,12 +196,17 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
   removeItem: async (id) => {
     const item = get().items.find((i) => i.id === id)
+    set({
+      items: get().items.filter((i) => i.id !== id),
+      error: null, // Clear error on successful removal
+    })
+    set({ cartOperations: get().cartOperations + 1 })
     try {
-      set({
-        items: get().items.filter((i) => i.id !== id),
-        error: null, // Clear error on successful removal
-      })
-      await removeItemFromCart(id)
+      const updatedCart = await removeItemFromCart(id)
+      set({ cartOperations: get().cartOperations - 1 })
+      if (get().cartOperations === 0) {
+        set({ items: updatedCart })
+      }
       // set({ items: cartItems })
       if (item.loyaltyPointsUsed) {
         useLoyaltyStore.getState().fetchPoints()
@@ -245,7 +301,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   processOrder: async () => {
-    const { cartItems } = await getCartItems()
+    const cartItems = await getCartItems()
     set({ items: cartItems })
 
     Toast.show({
@@ -259,45 +315,50 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   incrementItem: async (id) => {
+    set({
+      items: get().items.map((i) =>
+        i.id === id ? { ...i, quantity: i.quantity + 1 } : i
+      ),
+      cartOperations: get().cartOperations + 1,
+    })
+
     try {
+      const updatedCart = await incrementCartItem(id)
       set({
-        items: get().items.map((i) =>
-          i.id === id ? { ...i, quantity: i.quantity + 1, pending: true } : i
-        ),
-      })
-      await incrementCartItem(id)
-      set({
-        items: get().items.map((i) =>
-          i.id === id ? { ...i, pending: false } : i
-        ),
+        cartOperations: get().cartOperations - 1,
       })
 
-      const cartProcessing = get().items.some((i) => i.pending)
-      set({ cartProcessing })
+      if (get().cartOperations === 0) {
+        set({ items: updatedCart })
+      }
     } catch (error) {
       console.error("Failed to increment cart item:", error)
+      set({
+        cartOperations: get().cartOperations - 1,
+      })
     }
   },
   decrementItem: async (id) => {
+    set({
+      items: get().items.map((i) =>
+        i.id === id ? { ...i, quantity: i.quantity - 1 } : i
+      ),
+      cartOperations: get().cartOperations + 1,
+    })
     try {
+      const updatedCart = await decrementCartItem(id)
       set({
-        items: get().items.map((i) =>
-          i.id === id ? { ...i, quantity: i.quantity - 1, pending: true } : i
-        ),
+        cartOperations: get().cartOperations - 1,
       })
 
-      await decrementCartItem(id)
-
-      set({
-        items: get().items.map((i) =>
-          i.id === id ? { ...i, pending: false } : i
-        ),
-      })
-
-      const cartProcessing = get().items.some((i) => i.pending)
-      set({ cartProcessing })
+      if (get().cartOperations === 0) {
+        set({ items: updatedCart })
+      }
     } catch (error) {
       console.error("Failed to decrement cart item:", error)
+      set({
+        cartOperations: get().cartOperations - 1,
+      })
     }
   },
 

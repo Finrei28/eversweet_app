@@ -58,11 +58,14 @@ export default function CustomModal({
   const { usersMembership } = useAuth()
   const addItem = useCartStore((state) => state.addItem)
   const editItem = useCartStore((state) => state.editItem)
+  const getTotalMembershipDiscount = useCartStore(
+    (state) => state.getTotalMembershipDiscount
+  )
   const {
     data: availableCustomisations,
     error,
     loading: availableCustomisationsLoading,
-  } = useFetch(() => getAvailableCustomisations())
+  } = useFetch(() => getAvailableCustomisations(selectedDessert.id))
   const [quantity, setQuantity] = useState(1)
   const [price, setPrice] = useState(
     editItemPrice !== undefined && editItemPrice !== null
@@ -109,6 +112,12 @@ export default function CustomModal({
       if (setSelectedDessert) {
         setSelectedDessert(null)
       }
+      if (setOfferModal) {
+        setOfferModal(false)
+      }
+      if (refetchOffers) {
+        refetchOffers()
+      }
       // Reset AFTER modal fully closes/unmounts
       setTimeout(() => {
         translateY.setValue(0)
@@ -141,7 +150,7 @@ export default function CustomModal({
   // --------------------------------------------------------------------
 
   const handleIncrease = (ingredientId: string) => {
-    const customisation = availableCustomisations.find(
+    const customisation = availableCustomisations?.find(
       (c) => c.id === ingredientId
     )
 
@@ -162,18 +171,10 @@ export default function CustomModal({
             const included = selectedDessert.ingredients.some(
               (ingredient) => ingredient.id === ingredientId
             )
-            if (!included) {
-              setPrice(
-                (prev) =>
-                  prev +
-                  (usersMembership?.isActive
-                    ? customisation.priceInCents * 0.85
-                    : customisation.priceInCents)
-              )
-            }
 
-            // Increase price only if crossing 1 → 2 //
-            else if (item.quantity >= 1) {
+            if (!included || item.quantity >= 1) {
+              // not inclided or Increase price only if crossing 1 → 2 //
+
               setPrice(
                 (prev) =>
                   prev +
@@ -211,7 +212,7 @@ export default function CustomModal({
   }
 
   const handleDecrease = (ingredientId: string) => {
-    const customisation = availableCustomisations.find(
+    const customisation = availableCustomisations?.find(
       (c) => c.id === ingredientId
     )
     if (!customisation) return
@@ -359,7 +360,7 @@ export default function CustomModal({
                 >
                   {selectedDessert.ingredients
                     .filter((ingredient) =>
-                      availableCustomisations.some(
+                      availableCustomisations?.some(
                         (c) => c.id === ingredient.id
                       )
                     )
@@ -507,6 +508,10 @@ export default function CustomModal({
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
                           offerId: offerId ? offerId : null,
+                          discountedAmountInCents:
+                            usersMembership?.isActive && !offerId && price > 0
+                              ? Math.round(price / 0.85 - price)
+                              : 0,
                         })
                       } else {
                         await editItem({
@@ -517,19 +522,14 @@ export default function CustomModal({
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
                           offerId: offerId ? offerId : null,
+                          discountedAmountInCents:
+                            usersMembership?.isActive && !offerId && price > 0
+                              ? Math.round(price / 0.85 - price)
+                              : 0,
                         })
                       }
                       setButtonLoading(false)
-                      setModalVisible(false)
-                      if (setOfferModal) {
-                        setOfferModal(false)
-                      }
-                      if (setSelectedDessert) {
-                        setSelectedDessert(null)
-                      }
-                      if (refetchOffers) {
-                        refetchOffers()
-                      }
+                      closeWithAnimation()
                     }}
                     className="bg-primary p-3 mt-3 items-center rounded-lg"
                   >
@@ -545,6 +545,7 @@ export default function CustomModal({
                   <TouchableOpacity
                     onPress={() => closeWithAnimation()}
                     className="p-3 items-center"
+                    disabled={buttonLoading}
                   >
                     <Text className="text-gray-500">Cancel</Text>
                   </TouchableOpacity>

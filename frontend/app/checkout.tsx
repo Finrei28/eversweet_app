@@ -25,7 +25,11 @@ import {
 } from "@/services/stripe-api"
 import { useCartStore } from "@/store/cart"
 import DateTimePicker from "@react-native-community/datetimepicker"
-import { createOrder, checkOrderStatus } from "@/services/api"
+import {
+  createOrder,
+  checkOrderStatus,
+  getRestaurantStatus,
+} from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
 import { isOutsideBusinessHours } from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
@@ -35,8 +39,14 @@ import {
   getOpenCloseTime,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
-import { formatShortDate, roundToNearest5 } from "@/lib/formatters"
+import {
+  formatCurrency,
+  formatShortDate,
+  roundToNearest5,
+} from "@/lib/formatters"
 import Toast from "react-native-toast-message"
+import useFetch from "@/services/use_fetch"
+import { CartItem } from "@/utils/types"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -52,29 +62,44 @@ function CheckoutContent() {
     usersMembership,
     storeHours,
   } = useAuth()
+  const { data: restaurantStatus, loading } = useFetch(() =>
+    getRestaurantStatus()
+  )
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [showAddCard, setShowAddCard] = useState(false)
-  const getTotalItems = useCartStore((state) => state.getTotalItems)
+
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null)
   const [orderInProgress, setOrderInProgress] = useState<string | null>(null)
   const [isCheckingStatus, setIsCheckingStatus] = useState(false)
   const appState = useRef(AppState.currentState)
+  const [showEatInError, setShowEatInError] = useState(false)
 
   // Cart items and total
+  const cartOperations = useCartStore((state) => state.cartOperations)
   const cartItems = useCartStore((state) => state.items)
+  const getTotalMembershipDiscount = useCartStore(
+    (state) => state.getTotalMembershipDiscount
+  )
+  const getTotalItems = useCartStore((state) => state.getTotalItems)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
   const processOrder = useCartStore((state) => state.processOrder)
+  const totalItems = getTotalItems()
+  const totalPrice = getTotalCost()
 
   // Pickup time state
 
-  const [dineIn, setDineIn] = useState(false)
+  const [eatIn, setEatIn] = useState(false)
+  const [eatInDate, setEatInDate] = useState(
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+  )
   const [pickupNow, setPickupNow] = useState(true)
   const [pickupDate, setPickupDate] = useState(
     getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
   )
+
   // const nextValidTime = useMemo(
   //   () => getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
   //   [pickupDate]
@@ -93,13 +118,21 @@ function CheckoutContent() {
   useFocusEffect(
     useCallback(() => {
       if (token) {
-        useCartStore.getState().fetchCart()
+        // useCartStore.getState().fetchCart()
         fetchSavedCards()
       }
     }, [token])
   )
 
-  const totalItems = getTotalItems()
+  useEffect(() => {
+    if (cartOperations === 0) {
+      const getNewItems = async () => {
+        await useCartStore.getState().fetchCart()
+        // useCartStore.getState().getTotalItems()
+      }
+      getNewItems()
+    }
+  }, [cartOperations])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -287,10 +320,10 @@ function CheckoutContent() {
     if (pickupNow) {
       return "As soon as possible"
     } else {
-      const day = pickupDate.getDate()
-      const month = pickupDate.getMonth() + 1
-      const hours = pickupDate.getHours()
-      const minutes = pickupDate.getMinutes()
+      const day = eatIn ? eatInDate.getDate() : pickupDate.getDate()
+      const month = eatIn ? eatInDate.getMonth() + 1 : pickupDate.getMonth() + 1
+      const hours = eatIn ? eatInDate.getHours() : pickupDate.getHours()
+      const minutes = eatIn ? eatInDate.getMinutes() : pickupDate.getMinutes()
       const ampm = hours >= 12 ? "PM" : "AM"
       const formattedHours = hours % 12 || 12
       const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes
@@ -299,26 +332,31 @@ function CheckoutContent() {
     }
   }
 
-  const handleConfirm = (date: Date) => {
-    const validTime = getNextValidPickupTime(date, getTotalItems(), storeHours)
+  const alertTimeChange = (date: Date, validTime: Date) => {
     const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
-    if (validTime.getTime() !== date.getTime()) {
-      Alert.alert(
-        "Sorry, we are closed at that time",
-        `Please choose a time during store hours. We are open ${openTime.toLocaleTimeString(
-          "en-NZ",
-          {
-            hour: "2-digit",
-            minute: "2-digit",
-          }
-        )} to ${closeTime.toLocaleTimeString("en-NZ", {
+
+    Alert.alert(
+      "Sorry, we are closed at that time",
+      `Please choose a time during store hours. We are open ${openTime.toLocaleTimeString(
+        "en-NZ",
+        {
           hour: "2-digit",
           minute: "2-digit",
-        })} on a ${dayName}.`
-      )
-      setPickupDate(validTime)
+        }
+      )} to ${closeTime.toLocaleTimeString("en-NZ", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })} on a ${dayName}.`
+    )
+  }
+
+  const handleConfirm = (date: Date) => {
+    const validTime = getNextValidPickupTime(date, getTotalItems(), storeHours)
+    if (validTime.getTime() !== date.getTime()) {
+      alertTimeChange(date, validTime)
+      eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
     } else {
-      setPickupDate(date)
+      eatIn ? setEatInDate(date) : setPickupDate(date)
     }
 
     setShowDatePicker(false)
@@ -329,8 +367,18 @@ function CheckoutContent() {
       setShowDate(false)
       return
     }
+    const validTime = getNextValidPickupTime(
+      selectedDate,
+      getTotalItems(),
+      storeHours
+    )
     if (selectedDate) {
-      setPickupDate(selectedDate)
+      if (validTime.getTime() !== selectedDate.getTime()) {
+        alertTimeChange(selectedDate, validTime)
+        eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
+      } else {
+        eatIn ? setEatInDate(selectedDate) : setPickupDate(selectedDate)
+      }
     }
     if (event.type === "set") {
       setShowDate(false)
@@ -345,11 +393,21 @@ function CheckoutContent() {
       setShowTime(false)
       return
     }
+    const validTime = getNextValidPickupTime(
+      selectedTime,
+      getTotalItems(),
+      storeHours
+    )
     if (selectedTime) {
-      const newDate = new Date(pickupDate)
-      newDate.setHours(selectedTime.getHours())
-      newDate.setMinutes(selectedTime.getMinutes())
-      setPickupDate(newDate)
+      if (validTime.getTime() !== selectedTime.getTime()) {
+        alertTimeChange(selectedTime, validTime)
+        eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
+      } else {
+        const newDate = new Date(pickupDate)
+        newDate.setHours(selectedTime.getHours())
+        newDate.setMinutes(selectedTime.getMinutes())
+        eatIn ? setEatInDate(newDate) : setPickupDate(newDate)
+      }
     }
     if (event.type === "set") {
       setShowTime(false)
@@ -376,9 +434,15 @@ function CheckoutContent() {
     return getTotalCost() / 100
   }
 
+  const getOriginalPrice = (item: CartItem) => {
+    return (
+      ((item.itemPriceInCents + item.discountedAmountInCents) * item.quantity) /
+      100
+    )
+  }
+
   const calculateMembershipDiscount = () => {
-    const originalPrice = Math.round(getTotalCost() / 0.85)
-    return (originalPrice - getTotalCost()) / 100
+    return getTotalMembershipDiscount() / 100
   }
 
   const handlePlaceOrder = async () => {
@@ -411,7 +475,11 @@ function CheckoutContent() {
       // Create order object
 
       const paymentMethodId = totalAmount > 0 ? selectedCardId : null
-      const pickUpTime = pickupNow ? pickUpNowTime : pickupDate
+      const pickUpTime = pickupNow
+        ? pickUpNowTime
+        : eatIn
+        ? eatInDate
+        : pickupDate
 
       // Get payment intent client secret from your server
 
@@ -444,7 +512,7 @@ function CheckoutContent() {
         const orderResponse = await createOrder(
           paymentMethodId,
           pickUpTime,
-          dineIn,
+          eatIn,
           paymentIntent.id
         )
         // Try to extract the order ID if it exists in the error response
@@ -454,7 +522,7 @@ function CheckoutContent() {
         setOrderInProgress(orderResponse.id)
       } else {
         // handle orders paid with points
-        const orderResponse = await createOrder(null, pickUpTime, dineIn, null)
+        const orderResponse = await createOrder(null, pickUpTime, eatIn, null)
         if (!orderResponse) {
           throw new Error("Failed to create order")
         }
@@ -502,12 +570,44 @@ function CheckoutContent() {
     }
   }
 
-  if (loadingToken || loadingCards) {
+  const handleEatIn = () => {
+    if (
+      !restaurantStatus?.dineInAvailability &&
+      !restaurantStatus?.unavailableUntil
+    ) {
+      setShowEatInError(true)
+      setTimeout(() => setShowEatInError(false), 3000) // hide after 3s
+      return
+    } else if (
+      !restaurantStatus?.dineInAvailability &&
+      restaurantStatus?.unavailableUntil
+    ) {
+      console.log("true")
+      setEatInDate(new Date(restaurantStatus?.unavailableUntil))
+    }
+    setEatIn(true)
+  }
+
+  const getMinTime = () => {
+    return eatIn &&
+      !restaurantStatus?.dineInAvailability &&
+      restaurantStatus?.unavailableUntil &&
+      new Date(restaurantStatus?.unavailableUntil) > nextValidTime
+      ? roundToNearest5(new Date(restaurantStatus?.unavailableUntil))
+      : roundToNearest5(nextValidTime)
+  }
+
+  if (loadingToken || loadingCards || cartOperations > 0 || loading) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />
         <View className="flex-1 items-center justify-center">
-          <BouncingLoader />
+          <View className="flex-row items-center justify-center gap-2">
+            <Text className="text-primary font-semibold">
+              Sorting your items
+            </Text>
+            <BouncingLoader />
+          </View>
         </View>
       </View>
     )
@@ -528,10 +628,10 @@ function CheckoutContent() {
             Your cart is empty
           </Text>
           <TouchableOpacity
-            onPress={() => router.push("/")}
+            onPress={() => router.replace("/(tabs)/menu")}
             className="mt-6 bg-primary py-3 px-6 rounded-lg"
           >
-            <Text className="text-white font-medium">Start Shopping</Text>
+            <Text className="text-white font-medium">Start Ordering</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -558,23 +658,40 @@ function CheckoutContent() {
                     : "pt-4"
                 }`}
               >
-                <View key={index} className={`flex-row justify-between py-2`}>
-                  <View className="flex-row items-center">
-                    <View className="w-6 text-center mr-2">
-                      <Text className="text-gray-500">{item.quantity}×</Text>
+                <View key={index} className="flex-row justify-between py-2">
+                  {/* LEFT SIDE */}
+                  <View className="flex-1 flex-row items-center pr-2">
+                    <View className="w-6 mr-2">
+                      <Text className="text-gray-500 text-center">
+                        {item.quantity}×
+                      </Text>
                     </View>
-                    <Text>{item.dessert.name}</Text>
+
+                    <Text
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                      className="flex-shrink"
+                    >
+                      {item.dessert.name} {item.offerId && "(Members Offer)"}
+                    </Text>
                   </View>
 
-                  <Text className="font-medium">
-                    $
-                    {(
-                      Math.round(
-                        (item.itemPriceInCents * item.quantity) /
-                          (usersMembership?.isActive ? 0.85 : 1)
-                      ) / 100
-                    ).toFixed(2)}
-                  </Text>
+                  {/* RIGHT SIDE (prices) */}
+                  <View className="flex-col items-end flex-shrink-0">
+                    {item.discountedAmountInCents > 0 &&
+                      !item.offerId &&
+                      !item.loyaltyPointsUsed && (
+                        <Text className="font-medium line-through text-gray-500">
+                          {formatCurrency(getOriginalPrice(item))}
+                        </Text>
+                      )}
+
+                    <Text className="font-medium">
+                      {formatCurrency(
+                        (item.itemPriceInCents * item.quantity) / 100
+                      )}
+                    </Text>
+                  </View>
                 </View>
                 {item.customisations.map((customisation) => (
                   <Text key={customisation.id}>{`${
@@ -589,7 +706,7 @@ function CheckoutContent() {
             ))}
 
             <View className="mt-4 pt-3 border-t border-gray-200">
-              {usersMembership?.isActive && (
+              {usersMembership?.isActive && totalPrice > 0 && (
                 <View className="flex-row justify-between mb-1">
                   <Text className="text-gray-500">
                     Membership Discount Included (15%)
@@ -601,7 +718,7 @@ function CheckoutContent() {
               )}
               <View
                 className={`flex-row justify-between ${
-                  usersMembership?.isActive
+                  usersMembership?.isActive && totalPrice > 0
                     ? "mt-2 pt-2 border-t border-gray-200"
                     : ""
                 }`}
@@ -624,39 +741,49 @@ function CheckoutContent() {
           <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
             <View className=" mb-3 flex-row items-center gap-3">
               <TouchableOpacity
-                onPress={() => setDineIn(false)}
+                onPress={() => setEatIn(false)}
                 className={`px-5 py-3 rounded-lg ${
-                  dineIn ? "bg-gray-300" : "bg-primary"
+                  eatIn ? "bg-gray-300" : "bg-primary"
                 }`}
               >
                 <Text>Pick up</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => setDineIn(true)}
+                onPress={handleEatIn}
                 className={`px-5 py-3 rounded-lg  ${
-                  dineIn ? "bg-primary" : "bg-gray-300"
+                  eatIn ? "bg-primary" : "bg-gray-300"
                 }`}
               >
                 <Text>Eat in</Text>
               </TouchableOpacity>
+              {showEatInError && (
+                <Text className="text-sm text-red-500">
+                  Eat in not available
+                </Text>
+              )}
             </View>
-            {dineIn && (
+            {eatIn && (
               <Text className="text-sm text-gray-500 mb-2">
-                Eat ins are only available on the same day of purchase.{" "}
+                Eat ins are only available on the same day of purchase.
               </Text>
             )}
 
             <View className="mb-3 justify-between flex-row items-center">
               <Text className="text-lg font-medium">
-                {dineIn ? "Eat In Date" : "Pick Up Date"}
+                {eatIn ? "Eat In Date" : "Pick Up Date"}
               </Text>
               {pickupNow && <Text>{formatShortDate(pickupDate)}</Text>}
             </View>
-
-            <View className="flex-row items-center justify-between mb-4">
-              <Text>{dineIn ? "Eat in" : "Pickup"} as soon as possible</Text>
-              <Switch value={pickupNow} onValueChange={setPickupNow} />
-            </View>
+            {!(
+              eatIn &&
+              (new Date(restaurantStatus?.unavailableUntil) > nextValidTime ||
+                !restaurantStatus.dineInAvailability)
+            ) && (
+              <View className="flex-row items-center justify-between mb-4">
+                <Text>{eatIn ? "Eat in" : "Pickup"} as soon as possible</Text>
+                <Switch value={pickupNow} onValueChange={setPickupNow} />
+              </View>
+            )}
 
             {!pickupNow && (
               <View>
@@ -672,13 +799,13 @@ function CheckoutContent() {
                   <DateTimePickerModal
                     isVisible={showDatePicker}
                     mode="datetime"
-                    date={roundToNearest5(pickupDate)}
+                    date={roundToNearest5(eatIn ? eatInDate : pickupDate)}
                     minuteInterval={5}
                     onConfirm={handleConfirm}
                     onCancel={() => setShowDatePicker(false)}
-                    minimumDate={roundToNearest5(nextValidTime)}
+                    minimumDate={getMinTime()}
                     maximumDate={
-                      dineIn
+                      eatIn
                         ? new Date(closeTime.getTime() - 30 * 60 * 1000)
                         : (() => {
                             const date = new Date() // Create a new Date object
@@ -691,27 +818,36 @@ function CheckoutContent() {
 
                 {Platform.OS === "android" && showDate && (
                   <DateTimePicker
-                    value={pickupDate}
+                    value={eatIn ? eatInDate : pickupDate}
                     mode="date"
                     display="calendar"
                     onChange={onAndroidChangeDate}
-                    minimumDate={nextValidTime}
-                    maximumDate={(() => {
-                      const date = new Date() // Create a new Date object
-                      date.setMonth(date.getMonth() + 1)
-                      return date
-                    })()}
+                    minimumDate={getMinTime()}
+                    maximumDate={
+                      eatIn
+                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
+                        : (() => {
+                            const date = new Date() // Create a new Date object
+                            date.setMonth(date.getMonth() + 1)
+                            return date
+                          })()
+                    }
                   />
                 )}
 
                 {Platform.OS === "android" && showTime && (
                   <DateTimePicker
-                    value={pickupDate}
+                    value={roundToNearest5(eatIn ? eatInDate : pickupDate)}
                     mode="time"
                     display="spinner"
+                    minuteInterval={5}
                     onChange={onAndroidChangeTime}
-                    minimumDate={nextValidTime}
-                    maximumDate={closeTime}
+                    minimumDate={getMinTime()}
+                    maximumDate={
+                      eatIn
+                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
+                        : closeTime
+                    }
                   />
                 )}
                 {Platform.OS === "ios" && showDoneButton && showDatePicker && (

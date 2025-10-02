@@ -67,8 +67,8 @@ export default function CartPage() {
               renderItem={({ item }) => (
                 <View className="py-3 border-b border-gray-200">
                   <View className="flex-row justify-between py-3">
-                    <View>
-                      <Text className="text-lg font-semibold">
+                    <View className="flex-1 pr-2">
+                      <Text className="text-lg font-semibold ">
                         {item.dessert.name}{" "}
                         {item.offerId ? "(Members Offer)" : ""}
                       </Text>

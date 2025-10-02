@@ -155,10 +155,10 @@ export default function Orders() {
             You don't have any orders yet
           </Text>
           <TouchableOpacity
-            onPress={() => router.push("/menu")}
+            onPress={() => router.replace("/menu")}
             className="mt-6 bg-primary py-3 px-6 rounded-lg"
           >
-            <Text className="text-white font-medium">Start Shopping</Text>
+            <Text className="text-white font-medium">Start Ordering</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -196,6 +196,9 @@ export default function Orders() {
                 (total, item) => total + item.quantity,
                 0
               )
+              const originalTotalPrice =
+                (order.priceInCents + order.discountedAmountInCents) / 100
+              const finalTotalPrice = order.priceInCents / 100
               return (
                 <View
                   key={order.id}
@@ -224,9 +227,17 @@ export default function Orders() {
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Total</Text>
-                      <Text className="font-medium">
-                        ${(order.priceInCents / 100).toFixed(2)}
-                      </Text>
+                      <View className="flex items-center">
+                        {order.discountedAmountInCents > 0 && (
+                          <Text className="text-gray-400 font-medium line-through">
+                            ${originalTotalPrice.toFixed(2)}
+                          </Text>
+                        )}
+
+                        <Text className="font-medium">
+                          ${finalTotalPrice.toFixed(2)}
+                        </Text>
+                      </View>
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">
@@ -268,17 +279,10 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const itemTotalCostInCents =
-                          item.customisations.reduce(
-                            (total, customisationItem) => {
-                              return (
-                                total +
-                                customisationItem.customisation.priceInCents *
-                                  customisationItem.quantity
-                              )
-                            },
-                            0
-                          ) + item.dessert.priceInCents
+                        const originalPrice =
+                          (item.discountedAmountInCents + item.priceInCents) /
+                          100
+                        const finalPrice = item.priceInCents / 100
                         return (
                           <View
                             key={item.id}
@@ -297,7 +301,8 @@ export default function Orders() {
                             </View>
                             <View className="flex-1">
                               <Text className="font-medium">
-                                {item.dessert.name}
+                                {item.dessert.name}{" "}
+                                {item.offerId && `(Members Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
                                 <Text key={customisation.id}>{`${
@@ -308,17 +313,19 @@ export default function Orders() {
                                     : ``
                                 }`}</Text>
                               ))}
+
                               <Text className="text-gray-500 text-sm">
                                 Qty: {item.quantity} × $
-                                {(itemTotalCostInCents / 100).toFixed(2)}
+                                {item.discountedAmountInCents > 0 && (
+                                  <Text className="text-gray-400 text-sm line-through">
+                                    {originalPrice.toFixed(2)}{" "}
+                                  </Text>
+                                )}
+                                {finalPrice.toFixed(2)}
                               </Text>
                             </View>
                             <Text className="font-medium">
-                              $
-                              {(
-                                (item.quantity * itemTotalCostInCents) /
-                                100
-                              ).toFixed(2)}
+                              ${(item.quantity * finalPrice).toFixed(2)}
                             </Text>
                           </View>
                         )
@@ -342,6 +349,9 @@ export default function Orders() {
                 (total, item) => total + item.quantity,
                 0
               )
+              const originalTotalPrice =
+                (order.priceInCents + order.discountedAmountInCents) / 100
+              const discountedTotalPrice = order.priceInCents / 100
               return (
                 <View
                   key={order.id}
@@ -370,9 +380,17 @@ export default function Orders() {
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">Total</Text>
-                      <Text className="font-medium">
-                        ${(order.priceInCents / 100).toFixed(2)}
-                      </Text>
+                      <View className="flex-row gap-2">
+                        {order.discountedAmountInCents > 0 && (
+                          <Text className="text-gray-400 font-medium line-through">
+                            ${originalTotalPrice.toFixed(2)}
+                          </Text>
+                        )}
+
+                        <Text className="font-medium">
+                          ${discountedTotalPrice.toFixed(2)}
+                        </Text>
+                      </View>
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">
@@ -414,17 +432,10 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const itemTotalCostInCents =
-                          item.customisations.reduce(
-                            (total, customisationItem) => {
-                              return (
-                                total +
-                                customisationItem.customisation.priceInCents *
-                                  customisationItem.quantity
-                              )
-                            },
-                            0
-                          ) + item.dessert.priceInCents
+                        const originalPrice =
+                          (item.discountedAmountInCents + item.priceInCents) /
+                          100
+                        const finalPrice = item.priceInCents / 100
                         return (
                           <View
                             key={item.id}
@@ -443,7 +454,8 @@ export default function Orders() {
                             </View>
                             <View className="flex-1">
                               <Text className="font-medium">
-                                {item.dessert.name}
+                                {item.dessert.name}{" "}
+                                {item.offerId && `(Members Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
                                 <Text key={customisation.id}>{`${
@@ -456,15 +468,16 @@ export default function Orders() {
                               ))}
                               <Text className="text-gray-500 text-sm">
                                 Qty: {item.quantity} × $
-                                {(itemTotalCostInCents / 100).toFixed(2)}
+                                {item.discountedAmountInCents > 0 && (
+                                  <Text className="text-gray-400 text-sm line-through">
+                                    {originalPrice.toFixed(2)}{" "}
+                                  </Text>
+                                )}
+                                {finalPrice.toFixed(2)}
                               </Text>
                             </View>
                             <Text className="font-medium">
-                              $
-                              {(
-                                (item.quantity * itemTotalCostInCents) /
-                                100
-                              ).toFixed(2)}
+                              ${(item.quantity * finalPrice).toFixed(2)}
                             </Text>
                           </View>
                         )
