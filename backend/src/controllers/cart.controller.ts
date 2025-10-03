@@ -2,6 +2,15 @@ import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
 
+// function getNextMonday(fromDate = new Date()): Date {
+//   const date = new Date(fromDate)
+//   const day = date.getDay() // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+//   const daysUntilMonday = (8 - day) % 7 || 7 // ensures we always move forward
+//   date.setDate(date.getDate() + daysUntilMonday)
+//   date.setHours(0, 0, 0, 0) // optional: normalize to start of day
+//   return date
+// }
+
 export const redeemOfferForMembership = async (
   membershipId: string,
   offerId: string
@@ -19,17 +28,14 @@ export const redeemOfferForMembership = async (
       throw new Error("Offer usage limit reached")
     }
 
-    return db.offerRedemption.update({
+    return await db.offerRedemption.update({
       where: { id: existing.id },
-      data: {
-        used: { increment: 1 },
-        redeemedAt: new Date(),
-      },
+      data: { used: { increment: 1 }, redeemedAt: new Date() },
     })
   }
 
   // Create new redemption
-  return db.offerRedemption.create({
+  return await db.offerRedemption.create({
     data: {
       offerId,
       membershipId,

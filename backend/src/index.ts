@@ -10,7 +10,10 @@ import adminRoutes from "./routes/admin.routes"
 import { Server, Socket } from "socket.io"
 import http from "http"
 import cron from "node-cron"
-import { getFutureOrders } from "./controllers/admin.controller"
+import {
+  getFutureOrders,
+  renewMochiOffer,
+} from "./controllers/admin.controller"
 import jwt from "jsonwebtoken"
 import bodyParser from "body-parser"
 import { stripeWebhook } from "./controllers/stripe.controller"
@@ -138,7 +141,10 @@ app.use("/api/cart", cartRoutes)
 
 try {
   cron.schedule("* * * * *", getFutureOrders, {
-    timezone: "Pacific/Auckland", // or remove this if you don’t need it
+    timezone: "Pacific/Auckland",
+  })
+  cron.schedule("0 0 * * 1", renewMochiOffer, {
+    timezone: "Pacific/Auckland",
   })
 } catch (err) {
   console.error("Failed to schedule task:", err)

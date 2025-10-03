@@ -100,6 +100,7 @@ model OfferRedemption {
   offerId      String
   membershipId String
   redeemedAt   DateTime   @default(now())
+  renewsAt     DateTime?
   used         Int        @default(0)
   membership   Membership @relation(fields: [membershipId], references: [id])
   offer        Offer      @relation(fields: [offerId], references: [id], onDelete: Cascade)

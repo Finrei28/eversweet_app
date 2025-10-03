@@ -584,3 +584,15 @@ export const getFutureOrders = async () => {
     console.error("Error fetching future orders:", error)
   }
 }
+
+export const renewMochiOffer = async () => {
+  try {
+    await db.offerRedemption.updateMany({
+      data: {
+        used: 0,
+      },
+    })
+  } catch (error) {
+    throw new Error(`Failed to renew mochi offer: ${error}`)
+  }
+}
