@@ -1,9 +1,9 @@
 export const storeHours = {
-  Monday: null,
-  Tuesday: null,
+  Monday: ["12:30 PM", "9:30 PM"],
+  Tuesday: ["12:30 PM", "9:30 PM"],
   Wednesday: null,
-  Thursday: null,
-  Friday: null,
-  Saturday: null,
-  Sunday: null,
+  Thursday: ["12:30 PM", "9:30 PM"],
+  Friday: ["12:00 PM", "10:00 PM"],
+  Saturday: ["12:00 PM", "10:00 PM"],
+  Sunday: ["12:00 PM", "10:00 PM"],
 }
