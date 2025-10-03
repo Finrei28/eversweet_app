@@ -4,6 +4,7 @@ import { Resend } from "resend"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import { storeHours } from "../lib/storeHours"
+import { loyaltyRates } from "../lib/loyaltyRates"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -220,4 +221,8 @@ export const restaurantStatus = async (req: Request, res: Response) => {
   }
   res.status(200).json({ restaurantStatus })
   return
+}
+
+export const getLoyaltyRates = (req: Request, res: Response) => {
+  res.status(200).json(loyaltyRates)
 }
