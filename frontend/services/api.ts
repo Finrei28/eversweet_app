@@ -347,7 +347,7 @@ export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
 export async function createOrder(
   paymentMethodId: string | null,
   pickUpTime: Date,
-  dineIn: boolean,
+  eatIn: boolean,
   paymentIntentId: string | null
 ) {
   const token = await SecureStore.getItemAsync("token")
@@ -365,7 +365,7 @@ export async function createOrder(
       body: JSON.stringify({
         paymentMethodId,
         pickUpTime,
-        dineIn,
+        eatIn,
         paymentIntentId,
       }),
     })
