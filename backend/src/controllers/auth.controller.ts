@@ -557,7 +557,7 @@ export const createOrder = async (req: Request, res: Response) => {
         source: "APP",
         priceInCents: cart.totalPriceInCents,
         discountedAmountInCents: discountedAmountInCents,
-        GST: cart.totalPriceInCents * 0.15 * 100, // GST in cents
+        GST: cart.totalPriceInCents * 0.15, // GST in cents
         pickUpTime: parsedBody.pickUpTime,
         dineIn: parsedBody.eatIn,
         status: "PENDING",
