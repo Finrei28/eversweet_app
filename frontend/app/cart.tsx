@@ -6,7 +6,7 @@ import {
   useNavigation,
   useRoute,
 } from "@react-navigation/native"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Customisations, Dessert } from "@/utils/types"
 import CustomModal from "@/_components/modal"
 import Toast from "react-native-toast-message"
@@ -34,7 +34,7 @@ export default function CartPage() {
   const [modalVisible, setModalVisible] = useState(false)
   const [type, setType] = useState<"points" | "cents">("cents")
   const [editId, setEditId] = useState<string | null>(null)
-
+  const [earnablePoints, setEarnablePoints] = useState<number | null>(null)
   const total = getTotalCost()
 
   useFocusEffect(
@@ -46,6 +46,14 @@ export default function CartPage() {
       })
     }, [navigation, route.key])
   )
+  const totalCost = getTotalCost()
+  useEffect(() => {
+    const fetchPoints = async () => {
+      const points = await getEarnablePoints(usersMembership)
+      setEarnablePoints(points)
+    }
+    fetchPoints()
+  }, [usersMembership, totalCost])
 
   return (
     <>
@@ -157,11 +165,7 @@ export default function CartPage() {
                   <Text className="text-lg font-bold text-right">
                     Total: ${(total / 100).toFixed(2)}
                   </Text>
-                  {total > 0 && (
-                    <Text>
-                      Earnable points: {getEarnablePoints(usersMembership)}
-                    </Text>
-                  )}
+                  {total > 0 && <Text>Earnable points: {earnablePoints}</Text>}
                 </View>
               </View>
 

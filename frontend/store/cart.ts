@@ -11,6 +11,7 @@ import {
   clearCart,
   decrementCartItem,
   getCartItems,
+  getLoyaltyRates,
   incrementCartItem,
   removeItemFromCart,
   updateCartItem,
@@ -36,7 +37,7 @@ interface CartState {
   setError: (error: string | null) => void
   getTotalItems: () => number
   getTotalCost: () => number
-  getEarnablePoints: (usersMembership: UsersMembership) => number
+  getEarnablePoints: (usersMembership: UsersMembership) => Promise<number>
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
@@ -109,6 +110,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 5000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
       if (item?.loyaltyPointsUsed) {
@@ -121,6 +126,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         Toast.show({
@@ -130,6 +139,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     } catch (error) {
@@ -144,6 +157,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 4000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         // console.error("Failed to add item to cart", error)
@@ -155,6 +172,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 4000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     }
@@ -181,6 +202,10 @@ export const useCartStore = create<CartState>((set, get) => ({
         visibilityTime: 3000,
         autoHide: true,
         bottomOffset: 60,
+        props: {
+          text1NumberOfLines: 0,
+          text2NumberOfLines: 0, // allow wrapping
+        },
       })
     }
     // const now = Date.now()
@@ -219,6 +244,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         Toast.show({
@@ -243,6 +272,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 0,
           autoHide: false,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         Toast.show({
@@ -253,6 +286,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     }
@@ -276,6 +313,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         Toast.show({
@@ -297,6 +338,10 @@ export const useCartStore = create<CartState>((set, get) => ({
         visibilityTime: 5000,
         autoHide: true,
         bottomOffset: 60,
+        props: {
+          text1NumberOfLines: 0,
+          text2NumberOfLines: 0, // allow wrapping
+        },
       })
     }
   },
@@ -312,6 +357,10 @@ export const useCartStore = create<CartState>((set, get) => ({
       visibilityTime: 3000,
       autoHide: true,
       bottomOffset: 60,
+      props: {
+        text1NumberOfLines: 0,
+        text2NumberOfLines: 0, // allow wrapping
+      },
     })
   },
   incrementItem: async (id) => {
@@ -370,18 +419,19 @@ export const useCartStore = create<CartState>((set, get) => ({
       (acc, item) => acc + item.quantity * item.itemPriceInCents,
       0
     ),
-  getEarnablePoints: (usersMembership: UsersMembership) => {
-    if (usersMembership?.isActive) {
-      return get().items.reduce(
-        (acc, item) =>
-          acc + Math.floor((item.itemPriceInCents / 10) * item.quantity * 2.2),
-        0
-      )
-    }
-
+  getEarnablePoints: async (usersMembership: UsersMembership) => {
+    const rates = await getLoyaltyRates()
     return get().items.reduce(
       (acc, item) =>
-        acc + Math.floor((item.itemPriceInCents / 10) * item.quantity * 1.1),
+        acc +
+        Math.floor(
+          (item.itemPriceInCents / 100) * // points is calculated per dollar
+            (rates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
+            item.quantity *
+            (usersMembership?.isActive
+              ? (rates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
+              : rates.modifier ?? 1)
+        ),
       0
     )
   },

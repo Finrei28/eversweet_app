@@ -139,7 +139,9 @@ function CheckoutContent() {
       setNextValidTime(
         getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
       )
-      if (getEstimatedPickUpTime(totalItems).getTime() > pickupDate.getTime()) {
+      if (
+        getEstimatedPickUpTime(totalItems)?.getTime() > pickupDate?.getTime()
+      ) {
         setPickupDate(
           getNextValidPickupTime(new Date(), totalItems, storeHours)
         )
@@ -198,7 +200,7 @@ function CheckoutContent() {
             [
               {
                 text: "Check Orders",
-                onPress: () => router.push("/orders"),
+                onPress: () => router.replace("/orders"),
               },
               {
                 text: "Try Again",
@@ -226,7 +228,7 @@ function CheckoutContent() {
         [
           {
             text: "Check Orders",
-            onPress: () => router.push("/orders"),
+            onPress: () => router.replace("/orders"),
           },
           {
             text: "Dismiss",
@@ -260,7 +262,7 @@ function CheckoutContent() {
           [
             {
               text: "Check My Orders",
-              onPress: () => router.push("/orders"),
+              onPress: () => router.replace("/orders"),
             },
             {
               text: "Try Again",
@@ -279,7 +281,7 @@ function CheckoutContent() {
         [
           {
             text: "Check My Orders",
-            onPress: () => router.push("/orders"),
+            onPress: () => router.replace("/orders"),
           },
           {
             text: "Dismiss",
@@ -317,7 +319,9 @@ function CheckoutContent() {
   }
 
   const formatPickupTime = () => {
-    if (pickupNow) {
+    if (!pickupDate) {
+      return "Closed"
+    } else if (pickupNow) {
       return "As soon as possible"
     } else {
       const day = eatIn ? eatInDate.getDate() : pickupDate.getDate()
@@ -332,8 +336,12 @@ function CheckoutContent() {
     }
   }
 
-  const alertTimeChange = (date: Date, validTime: Date) => {
+  const alertTimeChange = (date: Date) => {
     const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
+
+    if (!openTime && !closeTime) {
+      Alert.alert("Sorry, we are currently closed at the moment")
+    }
 
     Alert.alert(
       "Sorry, we are closed at that time",
@@ -352,8 +360,10 @@ function CheckoutContent() {
 
   const handleConfirm = (date: Date) => {
     const validTime = getNextValidPickupTime(date, getTotalItems(), storeHours)
-    if (validTime.getTime() !== date.getTime()) {
-      alertTimeChange(date, validTime)
+    if (!validTime) {
+      alertTimeChange(null)
+    } else if (validTime.getTime() !== date.getTime()) {
+      alertTimeChange(date)
       eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
     } else {
       eatIn ? setEatInDate(date) : setPickupDate(date)
@@ -372,9 +382,11 @@ function CheckoutContent() {
       getTotalItems(),
       storeHours
     )
-    if (selectedDate) {
+    if (!validTime) {
+      alertTimeChange(null)
+    } else if (selectedDate) {
       if (validTime.getTime() !== selectedDate.getTime()) {
-        alertTimeChange(selectedDate, validTime)
+        alertTimeChange(selectedDate)
         eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
       } else {
         eatIn ? setEatInDate(selectedDate) : setPickupDate(selectedDate)
@@ -398,9 +410,11 @@ function CheckoutContent() {
       getTotalItems(),
       storeHours
     )
-    if (selectedTime) {
+    if (!validTime) {
+      alertTimeChange(null)
+    } else if (selectedTime) {
       if (validTime.getTime() !== selectedTime.getTime()) {
-        alertTimeChange(selectedTime, validTime)
+        alertTimeChange(selectedTime)
         eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
       } else {
         const newDate = new Date(pickupDate)
@@ -446,6 +460,12 @@ function CheckoutContent() {
   }
 
   const handlePlaceOrder = async () => {
+    if (!nextValidTime) {
+      Alert.alert(
+        "We're closed for the time being, sorry for any inconvenience caused"
+      )
+      return
+    }
     const totalAmount = Math.round(getTotalCost())
     const totalItems = getTotalItems()
 
@@ -537,7 +557,7 @@ function CheckoutContent() {
       // Clear cart
       await processOrder()
 
-      router.push("/orders")
+      router.replace("/orders")
     } catch (error: any) {
       if (paymentIntentId) {
         Alert.alert(
@@ -550,7 +570,7 @@ function CheckoutContent() {
             },
             {
               text: "View Orders",
-              onPress: () => router.push("/orders"),
+              onPress: () => router.replace("/orders"),
             },
           ]
         )
@@ -563,6 +583,10 @@ function CheckoutContent() {
           visibilityTime: undefined,
           autoHide: false,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     } finally {
@@ -580,10 +604,13 @@ function CheckoutContent() {
       return
     } else if (
       !restaurantStatus?.dineInAvailability &&
-      restaurantStatus?.unavailableUntil
+      restaurantStatus?.unavailableUntil &&
+      new Date(restaurantStatus?.unavailableUntil).getTime() + 15 * 60 * 1000 >
+        new Date().getTime()
     ) {
-      console.log("true")
       setEatInDate(new Date(restaurantStatus?.unavailableUntil))
+    } else {
+      setEatInDate(nextValidTime)
     }
     setEatIn(true)
   }
@@ -738,135 +765,162 @@ function CheckoutContent() {
           </View>
 
           {/* Pickup Time */}
-          <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <View className=" mb-3 flex-row items-center gap-3">
-              <TouchableOpacity
-                onPress={() => setEatIn(false)}
-                className={`px-5 py-3 rounded-lg ${
-                  eatIn ? "bg-gray-300" : "bg-primary"
-                }`}
-              >
-                <Text>Pick up</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleEatIn}
-                className={`px-5 py-3 rounded-lg  ${
-                  eatIn ? "bg-primary" : "bg-gray-300"
-                }`}
-              >
-                <Text>Eat in</Text>
-              </TouchableOpacity>
-              {showEatInError && (
-                <Text className="text-sm text-red-500">
-                  Eat in not available
+          {!nextValidTime ? (
+            <View className="bg-white rounded-xl shadow-sm p-5 mb-6">
+              <Text className="text-red-500">
+                We are currently closed for the time being. Please check our
+                socials or website for more information. Sorry for any
+                inconvenience caused.
+              </Text>
+            </View>
+          ) : (
+            <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
+              <View className=" mb-3 flex-row items-center gap-3">
+                <TouchableOpacity
+                  onPress={() => setEatIn(false)}
+                  className={`px-5 py-3 rounded-lg ${
+                    eatIn ? "bg-gray-300" : "bg-primary"
+                  }`}
+                >
+                  <Text>Pick up</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleEatIn}
+                  className={`px-5 py-3 rounded-lg  ${
+                    eatIn ? "bg-primary" : "bg-gray-300"
+                  }`}
+                >
+                  <Text>Eat in</Text>
+                </TouchableOpacity>
+                {showEatInError && (
+                  <Text className="text-sm text-red-500">
+                    Eat in not available
+                  </Text>
+                )}
+              </View>
+              {eatIn && (
+                <Text className="text-sm text-gray-500 mb-2">
+                  Eat ins are only available on the same day of purchase.
                 </Text>
               )}
-            </View>
-            {eatIn && (
-              <Text className="text-sm text-gray-500 mb-2">
-                Eat ins are only available on the same day of purchase.
-              </Text>
-            )}
 
-            <View className="mb-3 justify-between flex-row items-center">
-              <Text className="text-lg font-medium">
-                {eatIn ? "Eat In Date" : "Pick Up Date"}
-              </Text>
-              {pickupNow && <Text>{formatShortDate(pickupDate)}</Text>}
-            </View>
-            {!(
-              eatIn &&
-              (new Date(restaurantStatus?.unavailableUntil) > nextValidTime ||
-                !restaurantStatus.dineInAvailability)
-            ) && (
-              <View className="flex-row items-center justify-between mb-4">
-                <Text>{eatIn ? "Eat in" : "Pickup"} as soon as possible</Text>
-                <Switch value={pickupNow} onValueChange={setPickupNow} />
+              <View className="mb-3 justify-between flex-row items-center">
+                <Text className="text-lg font-medium">
+                  {eatIn ? "Eat In Date" : "Pick Up Date"}
+                </Text>
+                {pickupNow && <Text>{formatShortDate(pickupDate)}</Text>}
               </View>
-            )}
+              {!(
+                eatIn &&
+                (new Date(restaurantStatus?.unavailableUntil) > nextValidTime ||
+                  !restaurantStatus.dineInAvailability)
+              ) && (
+                <View className="flex-row items-center justify-between mb-4">
+                  <Text>{eatIn ? "Eat in" : "Pickup"} as soon as possible</Text>
+                  <Switch value={pickupNow} onValueChange={setPickupNow} />
+                </View>
+              )}
 
-            {!pickupNow && (
-              <View>
-                <TouchableOpacity
-                  onPress={handleOpenDatePicker}
-                  className="flex-row items-center justify-between p-3 border border-gray-200 rounded-lg"
-                >
-                  <Text>{formatPickupTime()}</Text>
-                  <Feather name="clock" size={20} color="#6B7280" />
-                </TouchableOpacity>
-
-                {Platform.OS === "ios" && showDatePicker && (
-                  <DateTimePickerModal
-                    isVisible={showDatePicker}
-                    mode="datetime"
-                    date={roundToNearest5(eatIn ? eatInDate : pickupDate)}
-                    minuteInterval={5}
-                    onConfirm={handleConfirm}
-                    onCancel={() => setShowDatePicker(false)}
-                    minimumDate={getMinTime()}
-                    maximumDate={
-                      eatIn
-                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
-                        : (() => {
-                            const date = new Date() // Create a new Date object
-                            date.setMonth(date.getMonth() + 1)
-                            return date
-                          })()
-                    }
-                  />
-                )}
-
-                {Platform.OS === "android" && showDate && (
-                  <DateTimePicker
-                    value={eatIn ? eatInDate : pickupDate}
-                    mode="date"
-                    display="calendar"
-                    onChange={onAndroidChangeDate}
-                    minimumDate={getMinTime()}
-                    maximumDate={
-                      eatIn
-                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
-                        : (() => {
-                            const date = new Date() // Create a new Date object
-                            date.setMonth(date.getMonth() + 1)
-                            return date
-                          })()
-                    }
-                  />
-                )}
-
-                {Platform.OS === "android" && showTime && (
-                  <DateTimePicker
-                    value={roundToNearest5(eatIn ? eatInDate : pickupDate)}
-                    mode="time"
-                    display="spinner"
-                    minuteInterval={5}
-                    onChange={onAndroidChangeTime}
-                    minimumDate={getMinTime()}
-                    maximumDate={
-                      eatIn
-                        ? new Date(closeTime.getTime() - 30 * 60 * 1000)
-                        : closeTime
-                    }
-                  />
-                )}
-                {Platform.OS === "ios" && showDoneButton && showDatePicker && (
+              {!pickupNow && (
+                <View>
                   <TouchableOpacity
-                    onPress={() => setShowDatePicker(false)}
-                    className="self-center bg-primary w-1/3 items-center p-2 rounded-lg"
+                    onPress={handleOpenDatePicker}
+                    className="flex-row items-center justify-between p-3 border border-gray-200 rounded-lg"
                   >
-                    <Text className="text-xl text-white">Done</Text>
+                    <Text>{formatPickupTime()}</Text>
+                    <Feather name="clock" size={20} color="#6B7280" />
                   </TouchableOpacity>
-                )}
-              </View>
-            )}
 
-            <Text className="text-sm text-gray-500 mt-2">
-              {pickupNow
-                ? "Your order will be ready in approximately 5-15 minutes, alternatively have your notifications turned on to receive real time changes to your order(s) status."
-                : "Please have the apps notifications turned on to receive real time changes to your order(s) status or arrive at your selected time to pick up your order."}
-            </Text>
-          </View>
+                  {Platform.OS === "ios" && showDatePicker && (
+                    <DateTimePickerModal
+                      isVisible={showDatePicker}
+                      mode="datetime"
+                      date={roundToNearest5(eatIn ? eatInDate : pickupDate)}
+                      minuteInterval={5}
+                      onConfirm={handleConfirm}
+                      onCancel={() => setShowDatePicker(false)}
+                      minimumDate={getMinTime()}
+                      maximumDate={
+                        eatIn
+                          ? new Date(
+                              (closeTime
+                                ? closeTime.getTime()
+                                : new Date().getTime()) -
+                                30 * 60 * 1000
+                            )
+                          : (() => {
+                              const date = new Date() // Create a new Date object
+                              date.setMonth(date.getMonth() + 1)
+                              return date
+                            })()
+                      }
+                    />
+                  )}
+
+                  {Platform.OS === "android" && showDate && (
+                    <DateTimePicker
+                      value={eatIn ? eatInDate : pickupDate}
+                      mode="date"
+                      display="calendar"
+                      onChange={onAndroidChangeDate}
+                      minimumDate={getMinTime()}
+                      maximumDate={
+                        eatIn
+                          ? new Date(
+                              (closeTime
+                                ? closeTime.getTime()
+                                : new Date().getTime()) -
+                                30 * 60 * 1000
+                            )
+                          : (() => {
+                              const date = new Date() // Create a new Date object
+                              date.setMonth(date.getMonth() + 1)
+                              return date
+                            })()
+                      }
+                    />
+                  )}
+
+                  {Platform.OS === "android" && showTime && (
+                    <DateTimePicker
+                      value={roundToNearest5(eatIn ? eatInDate : pickupDate)}
+                      mode="time"
+                      display="spinner"
+                      minuteInterval={5}
+                      onChange={onAndroidChangeTime}
+                      minimumDate={getMinTime()}
+                      maximumDate={
+                        eatIn
+                          ? new Date(
+                              (closeTime
+                                ? closeTime.getTime()
+                                : new Date().getTime()) -
+                                30 * 60 * 1000
+                            )
+                          : closeTime
+                      }
+                    />
+                  )}
+                  {Platform.OS === "ios" &&
+                    showDoneButton &&
+                    showDatePicker && (
+                      <TouchableOpacity
+                        onPress={() => setShowDatePicker(false)}
+                        className="self-center bg-primary w-1/3 items-center p-2 rounded-lg"
+                      >
+                        <Text className="text-xl text-white">Done</Text>
+                      </TouchableOpacity>
+                    )}
+                </View>
+              )}
+
+              <Text className="text-sm text-gray-500 mt-2">
+                {pickupNow
+                  ? "Your order will be ready in approximately 5-15 minutes, alternatively have your notifications turned on to receive real time changes to your order(s) status."
+                  : "Please have the apps notifications turned on to receive real time changes to your order(s) status or arrive at your selected time to pick up your order."}
+              </Text>
+            </View>
+          )}
 
           {/* Payment Method */}
           {getTotalCost() > 0 && (
@@ -968,7 +1022,9 @@ function CheckoutContent() {
           <TouchableOpacity
             onPress={handlePlaceOrder}
             className="bg-primary py-4 rounded-lg items-center"
-            disabled={isProcessingPayment || cartItems.length === 0}
+            disabled={
+              isProcessingPayment || cartItems.length === 0 || !nextValidTime
+            }
           >
             {isProcessingPayment ? (
               <ActivityIndicator size="small" color="#FFFFFF" />

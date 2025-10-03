@@ -8,6 +8,7 @@ import {
   DessertCategory,
   Offers,
   restaurantStatus,
+  LoyaltyRates,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -824,7 +825,7 @@ export const getStoreHours = async () => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(`Error: Could not get store hours`)
     }
 
     return data
@@ -850,5 +851,25 @@ export const getRestaurantStatus = async (): Promise<restaurantStatus> => {
     return data.restaurantStatus
   } catch (error) {
     throw new Error(error?.message || "Could not get restaurant status")
+  }
+}
+
+export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
+  try {
+    const res = await fetch(`${url}/api/getLoyaltyRates`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(`Error: Could not get loyalty rates`)
+    }
+
+    return data
+  } catch (error) {
+    throw new Error(error?.message || "Could not get loyalty rates")
   }
 }

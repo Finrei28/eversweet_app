@@ -51,7 +51,7 @@ export default function Index() {
                   <TouchableOpacity
                     onPress={() => {
                       // Handle button press
-                      router.push(`/menu?categoryParam=${category.category}`)
+                      router.replace(`/menu?categoryParam=${category.category}`)
                     }}
                     accessibilityLabel={`View more for ${category.title}`}
                     accessibilityHint={`Press to view more about ${category.title}`}

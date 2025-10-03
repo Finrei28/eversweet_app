@@ -189,3 +189,8 @@ export type restaurantStatus = {
   dineInAvailability: boolean | undefined
   unavailableUntil: Date | null | undefined
 }
+
+export type LoyaltyRates = {
+  rate: number
+  modifier: number
+}

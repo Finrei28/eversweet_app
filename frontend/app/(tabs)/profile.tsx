@@ -81,7 +81,12 @@ export default function Profile() {
           </Text>
           <TouchableOpacity
             className="bg-primary p-3 rounded-lg w-1/3 items-center mt-5"
-            onPress={() => router.push("/signin")}
+            onPress={() => {
+              router.push({
+                pathname: "/signin",
+                params: { redirectTo: "/profile" },
+              })
+            }}
           >
             <Text className="text-white text-xl">Sign in</Text>
           </TouchableOpacity>

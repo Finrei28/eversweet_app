@@ -58,6 +58,10 @@ export default function ResetPassword({
           visibilityTime: 5000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
         router.replace("/signin")
       } else {
@@ -69,6 +73,10 @@ export default function ResetPassword({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     } catch (error) {

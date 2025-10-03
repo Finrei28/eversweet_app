@@ -9,6 +9,7 @@ import {
   Image,
   TouchableWithoutFeedback,
   Alert,
+  ActivityIndicator,
 } from "react-native"
 import { Feather } from "@expo/vector-icons"
 import { cancelMembership } from "@/services/stripe-api"
@@ -41,6 +42,10 @@ export default function CancelMembershipModal({
         visibilityTime: 3000,
         autoHide: true,
         bottomOffset: 60,
+        props: {
+          text1NumberOfLines: 0,
+          text2NumberOfLines: 0, // allow wrapping
+        },
       })
     } catch (error) {
       Alert.alert(`Failed to cancel membership: ${(error as Error).message}`)
@@ -134,10 +139,15 @@ export default function CancelMembershipModal({
                 <TouchableOpacity
                   className="bg-red-500 px-6 py-3 rounded-lg w-[80%]"
                   onPress={handleCancelMembership}
+                  disabled={canceling}
                 >
-                  <Text className="text-white text-center font-bold text-lg">
-                    Cancel Membership
-                  </Text>
+                  {canceling ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text className="text-white text-center font-bold text-lg">
+                      Cancel Membership
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>

@@ -112,6 +112,10 @@ const OTPInput = ({
             visibilityTime: 5000,
             autoHide: true,
             bottomOffset: 60,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
           })
         }
       } else {
@@ -130,6 +134,10 @@ const OTPInput = ({
           visibilityTime: 3000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
         router.replace("/")
       }
@@ -153,6 +161,10 @@ const OTPInput = ({
           visibilityTime: 4000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       } else {
         Toast.show({
@@ -162,6 +174,10 @@ const OTPInput = ({
           visibilityTime: 5000,
           autoHide: true,
           bottomOffset: 60,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
         })
       }
     } catch (error) {
