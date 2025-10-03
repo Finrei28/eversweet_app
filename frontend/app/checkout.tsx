@@ -472,7 +472,9 @@ function CheckoutContent() {
     const pickUpNowTime = getEstimatedPickUpTime(totalItems)
     const notOpenYet =
       isOutsideBusinessHours(pickUpNowTime, storeHours) ||
-      isOutsideBusinessHours(pickupDate, storeHours)
+      (eatIn
+        ? isOutsideBusinessHours(eatInDate, storeHours)
+        : isOutsideBusinessHours(pickupDate, storeHours))
     if (notOpenYet && pickupNow) {
       Alert.alert(
         "We're closed or are not open yet. Please pick a suitable pick up time."
@@ -596,6 +598,13 @@ function CheckoutContent() {
 
   const handleEatIn = () => {
     if (
+      new Date(restaurantStatus?.unavailableUntil).getTime() >
+        nextValidTime.getTime() &&
+      !restaurantStatus?.dineInAvailability
+    ) {
+      setPickupNow(false)
+    }
+    if (
       !restaurantStatus?.dineInAvailability &&
       !restaurantStatus?.unavailableUntil
     ) {
@@ -605,8 +614,8 @@ function CheckoutContent() {
     } else if (
       !restaurantStatus?.dineInAvailability &&
       restaurantStatus?.unavailableUntil &&
-      new Date(restaurantStatus?.unavailableUntil).getTime() + 15 * 60 * 1000 >
-        new Date().getTime()
+      new Date(restaurantStatus?.unavailableUntil).getTime() >
+        nextValidTime?.getTime()
     ) {
       setEatInDate(new Date(restaurantStatus?.unavailableUntil))
     } else {
@@ -812,8 +821,9 @@ function CheckoutContent() {
               </View>
               {!(
                 eatIn &&
-                (new Date(restaurantStatus?.unavailableUntil) > nextValidTime ||
-                  !restaurantStatus.dineInAvailability)
+                new Date(restaurantStatus?.unavailableUntil).getTime() >
+                  nextValidTime.getTime() &&
+                !restaurantStatus?.dineInAvailability
               ) && (
                 <View className="flex-row items-center justify-between mb-4">
                   <Text>{eatIn ? "Eat in" : "Pickup"} as soon as possible</Text>

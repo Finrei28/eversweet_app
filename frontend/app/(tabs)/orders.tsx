@@ -241,7 +241,7 @@ export default function Orders() {
                     </View>
                     <View className="flex-row justify-between mb-2">
                       <Text className="text-gray-500">
-                        Estimated pick up time
+                        Estimated {order.dineIn ? "Eat In" : "Pick Up"} Time
                       </Text>
                       <Text className="font-medium">
                         {formatPickupTime(pickUpTime.toISOString())}

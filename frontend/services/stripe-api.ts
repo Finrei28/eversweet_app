@@ -235,7 +235,7 @@ export const createMembership = async (
 ) => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
-    throw new Error("Unauthenticated")
+    throw new Error("Please sign in to join our membership.")
   }
   try {
     const res = await fetch(`${url}/api/stripe/createMembership`, {
@@ -250,7 +250,7 @@ export const createMembership = async (
     const data = await res.json()
 
     if (res.status === 401) {
-      throw new Error("Unauthenticated")
+      throw new Error("Please sign in to join our membership.")
     }
     if (!res.ok) {
       throw new Error(`Error: ${data.message}`)

@@ -12,6 +12,8 @@ import { UsersMembership } from "@/utils/types"
 import { getUsersMembership } from "@/services/stripe-api"
 import { fallbackStoreHours, StoreHours } from "@/lib/businessHours"
 import { getStoreHours } from "@/services/api"
+import { useLoyaltyStore } from "./points"
+import { useCartStore } from "./cart"
 
 interface DecodedToken {
   userId: string
@@ -76,6 +78,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setToken(token)
     const membership = await getUsersMembership()
     setUsersMembership(membership)
+    useLoyaltyStore.getState().fetchPoints() // load fresh points on login
+    useCartStore.getState().fetchCart() // load cart items on login
   }
 
   const signOutProvider = async () => {

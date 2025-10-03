@@ -83,6 +83,7 @@ export type Order = {
   completedAt: Date | null
   pickedUpAt: Date | null
   pickUpTime: Date
+  dineIn: Boolean
   status: OrderStatus // Assuming $Enums.Status refers to an enum for order status
   desserts: {
     id: string
