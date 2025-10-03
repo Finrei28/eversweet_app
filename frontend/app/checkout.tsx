@@ -598,9 +598,11 @@ function CheckoutContent() {
 
   const handleEatIn = () => {
     if (
-      new Date(restaurantStatus?.unavailableUntil).getTime() >
-        nextValidTime.getTime() &&
-      !restaurantStatus?.dineInAvailability
+      restaurantStatus?.unavailableUntil
+        ? new Date(restaurantStatus?.unavailableUntil).getTime() > // if unavailableUntil is null and dine in availablility is false = indefinite unavailablility so don't allow eat in now.
+          nextValidTime.getTime()
+        : true && // if next valid time time to collect > unavailableUntil then it means unavailableUntil time has passed so can collect ASAP
+          !restaurantStatus?.dineInAvailability // if dine in availablility is true, allow eat in now. else don't allow
     ) {
       setPickupNow(false)
     }
