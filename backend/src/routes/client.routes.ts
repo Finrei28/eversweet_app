@@ -7,6 +7,7 @@ import {
   resetPassword,
   getStoreHours,
   restaurantStatus,
+  getLoyaltyRates,
 } from "../controllers/client.controller"
 
 const router = Router()
@@ -18,5 +19,6 @@ router.post("/verifyResetPasswordCode", verifyResetPasswordCode)
 router.post("/resetPassword", resetPassword)
 router.get("/getStoreHours", getStoreHours)
 router.get("/restaurantStatus", restaurantStatus)
+router.get("/getLoyaltyRates", getLoyaltyRates)
 
 export default router
