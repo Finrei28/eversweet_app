@@ -387,7 +387,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
 export const createMembership = async (req: Request, res: Response) => {
   const userId = (req as any).userId
   if (!userId) {
-    res.status(401).json({ message: "Unauthenticated" })
+    res.status(401).json({ message: "Please sign in to join our membership." })
     return
   }
   try {
@@ -419,7 +419,7 @@ export const createMembership = async (req: Request, res: Response) => {
     const existingSubs = await stripe.subscriptions.list({
       customer: customerId,
       status: "active", // or "active" if you only care about active ones
-      expand: ["data.items.price"],
+      expand: ["data.items.data.price"],
     })
 
     const hasSameSub = existingSubs.data.some((sub) =>
