@@ -227,3 +227,8 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
   res.status(200).json(loyaltyRates)
   return
 }
+
+export const getServerURL = (req: Request, res: Response) => {
+  res.status(200).json(process.env.SERVER_URL)
+  return
+}
