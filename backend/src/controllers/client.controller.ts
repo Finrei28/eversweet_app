@@ -225,4 +225,5 @@ export const restaurantStatus = async (req: Request, res: Response) => {
 
 export const getLoyaltyRates = (req: Request, res: Response) => {
   res.status(200).json(loyaltyRates)
+  return
 }
