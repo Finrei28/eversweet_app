@@ -58,9 +58,6 @@ export default function CustomModal({
   const { usersMembership } = useAuth()
   const addItem = useCartStore((state) => state.addItem)
   const editItem = useCartStore((state) => state.editItem)
-  const getTotalMembershipDiscount = useCartStore(
-    (state) => state.getTotalMembershipDiscount
-  )
   const {
     data: availableCustomisations,
     error,
@@ -79,6 +76,7 @@ export default function CustomModal({
   const [buttonLoading, setButtonLoading] = useState(false)
   const [customisationQuantity, setCustomisationQuantity] =
     useState<Customisations>([])
+  const [hasMochi, setHasMochi] = useState(true)
 
   const points = selectedDessert.priceInLoyaltyPoints
 
@@ -94,6 +92,28 @@ export default function CustomModal({
       setCustomisationQuantity(initialQuantities)
     }
   }, [state, customisations])
+
+  useEffect(() => {
+    if (offerId || type === "points") {
+      return
+    }
+    const wantsNoGlutinous = customisationQuantity.some(
+      (c) => c.name === "Glutinous Balls" && c.quantity === 0
+    )
+    const wantsNoMochi = customisationQuantity.some(
+      (c) => c.name === "Mochi" && c.quantity === 0
+    )
+
+    if (wantsNoGlutinous && wantsNoMochi && hasMochi) {
+      // both removed → subtract $2
+      setPrice((prev) => prev - (usersMembership?.isActive ? 200 * 0.85 : 200))
+      setHasMochi(false)
+    } else if (!wantsNoGlutinous && !wantsNoMochi && !hasMochi) {
+      // if any added back → restore original
+      setPrice((prev) => prev + (usersMembership?.isActive ? 200 * 0.85 : 200))
+      setHasMochi(true)
+    }
+  }, [customisationQuantity])
 
   // ---------- PANRESPONDER (for outside-ScrollView swipe/tap) ----------
   // We'll attach this to the header area (above the ScrollView) and

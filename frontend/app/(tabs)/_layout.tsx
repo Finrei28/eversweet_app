@@ -1,10 +1,11 @@
 import { Image } from "react-native"
-import React from "react"
+import React, { useEffect } from "react"
 import { Tabs } from "expo-router"
 import Entypo from "@expo/vector-icons/Entypo"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
+import { useAuth } from "@/store/authProvider"
 
 const tabOptions = (title: string) => {
   return {
@@ -16,6 +17,13 @@ const tabOptions = (title: string) => {
 }
 
 export default function _layout() {
+  const { refetchUsersMembership } = useAuth()
+  useEffect(() => {
+    const fetchData = async () => {
+      await refetchUsersMembership()
+    }
+    fetchData
+  }, [])
   return (
     <SafeAreaProvider>
       <Tabs>
