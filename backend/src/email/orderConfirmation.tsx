@@ -187,7 +187,8 @@ export default function EmailOrderConfirmation({
               </Heading>
 
               {order.desserts.map((item) => {
-                const pricePerItem = item.priceInCents / 100
+                const pricePerItem =
+                  (item.priceInCents - item.discountedAmountInCents) / 100
                 return (
                   <Row key={item.id} className="py-2">
                     {/* Dessert Image */}
@@ -266,7 +267,11 @@ export default function EmailOrderConfirmation({
                   <Text>Total</Text>
                 </Column>
                 <Column align="right">
-                  <Text>{formatCurrency(order.priceInCents / 100)}</Text>
+                  <Text>
+                    {formatCurrency(
+                      (order.priceInCents - order.discountedAmountInCents) / 100
+                    )}
+                  </Text>
                 </Column>
               </Row>
             </Section>
