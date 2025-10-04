@@ -578,10 +578,6 @@ function CheckoutContent() {
           visibilityTime: undefined,
           autoHide: false,
           bottomOffset: 60,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
         })
       }
     } finally {

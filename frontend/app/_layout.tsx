@@ -3,7 +3,7 @@ import "./global.css"
 import { StatusBar } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
-import Toast from "react-native-toast-message"
+import Toast, { BaseToast } from "react-native-toast-message"
 import { useEffect, useRef, useState } from "react"
 import { useLoyaltyStore } from "@/store/points"
 import { getToken } from "@/services/authToken"
@@ -86,6 +86,18 @@ export default function RootLayout() {
     }
   }, [isAuthenticated])
 
+  const toastConfig = {
+    error: (props: any) => (
+      <BaseToast
+        {...props}
+        style={{ borderLeftColor: "red" }}
+        contentContainerStyle={{ paddingHorizontal: 10 }}
+        text1NumberOfLines={0} // allow wrapping
+        text2NumberOfLines={0}
+      />
+    ),
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -104,7 +116,7 @@ export default function RootLayout() {
             />
           )}
 
-          <Toast />
+          <Toast config={toastConfig} />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
