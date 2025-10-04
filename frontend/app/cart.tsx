@@ -14,6 +14,7 @@ import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useAuth } from "@/store/authProvider"
+import { formatCurrency } from "@/lib/formatters"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -93,7 +94,11 @@ export default function CartPage() {
                       })}
                     </View>
                     <Text className="text-lg font-semibold">
-                      ${(Number(item.itemPriceInCents) / 100).toFixed(2)}
+                      {formatCurrency(
+                        Number(
+                          item.itemPriceInCents - item.discountedAmountInCents
+                        ) / 100
+                      )}
                     </Text>
                   </View>
                   <View className="flex-row justify-between items-center">
@@ -163,7 +168,7 @@ export default function CartPage() {
                 </TouchableOpacity>
                 <View>
                   <Text className="text-lg font-bold text-right">
-                    Total: ${(total / 100).toFixed(2)}
+                    Total: {formatCurrency(total / 100)}
                   </Text>
                   {total > 0 && <Text>Earnable points: {earnablePoints}</Text>}
                 </View>

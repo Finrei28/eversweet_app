@@ -69,14 +69,11 @@ export default function CustomModal({
       ? editItemPrice
       : offerItemPrice !== undefined && offerItemPrice !== null
       ? offerItemPrice
-      : usersMembership?.isActive && !offerId
-      ? selectedDessert.priceInCents * 0.85
       : selectedDessert.priceInCents
   )
   const [buttonLoading, setButtonLoading] = useState(false)
   const [customisationQuantity, setCustomisationQuantity] =
     useState<Customisations>([])
-  const [hasMochi, setHasMochi] = useState(true)
 
   const points = selectedDessert.priceInLoyaltyPoints
 
@@ -92,28 +89,6 @@ export default function CustomModal({
       setCustomisationQuantity(initialQuantities)
     }
   }, [state, customisations])
-
-  useEffect(() => {
-    if (offerId || type === "points") {
-      return
-    }
-    const wantsNoGlutinous = customisationQuantity.some(
-      (c) => c.name === "Glutinous Balls" && c.quantity === 0
-    )
-    const wantsNoMochi = customisationQuantity.some(
-      (c) => c.name === "Mochi" && c.quantity === 0
-    )
-
-    if (wantsNoGlutinous && wantsNoMochi && hasMochi) {
-      // both removed → subtract $2
-      setPrice((prev) => prev - (usersMembership?.isActive ? 200 * 0.85 : 200))
-      setHasMochi(false)
-    } else if (!wantsNoGlutinous && !wantsNoMochi && !hasMochi) {
-      // if any added back → restore original
-      setPrice((prev) => prev + (usersMembership?.isActive ? 200 * 0.85 : 200))
-      setHasMochi(true)
-    }
-  }, [customisationQuantity])
 
   // ---------- PANRESPONDER (for outside-ScrollView swipe/tap) ----------
   // We'll attach this to the header area (above the ScrollView) and
@@ -195,13 +170,7 @@ export default function CustomModal({
             if (!included || item.quantity >= 1) {
               // not inclided or Increase price only if crossing 1 → 2 //
 
-              setPrice(
-                (prev) =>
-                  prev +
-                  (usersMembership?.isActive
-                    ? customisation.priceInCents * 0.85
-                    : customisation.priceInCents)
-              )
+              setPrice((prev) => prev + customisation.priceInCents)
             }
 
             return { ...item, quantity: newQuantity }
@@ -218,13 +187,7 @@ export default function CustomModal({
         }
 
         // Increase price if this is the first customization
-        setPrice(
-          (prev) =>
-            prev +
-            (usersMembership?.isActive
-              ? customisation.priceInCents * 0.85
-              : customisation.priceInCents)
-        )
+        setPrice((prev) => prev + customisation.priceInCents)
 
         return [...prev, newCustomization] // Add new customization to the state
       }
@@ -249,42 +212,18 @@ export default function CustomModal({
         if (existingItem.quantity > 0) {
           const newQuantity = existingItem.quantity - 1
           if (existingItem.quantity === 1) {
-            setPrice((prev) =>
-              Math.max(
-                0,
-                prev -
-                  (usersMembership?.isActive
-                    ? customisation.priceInCents * 0.85
-                    : customisation.priceInCents)
-              )
-            )
+            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
             return prev.filter((item) => item.id !== ingredientId)
           }
           if (!included) {
-            setPrice((prev) =>
-              Math.max(
-                0,
-                prev -
-                  (usersMembership?.isActive
-                    ? customisation.priceInCents * 0.85
-                    : customisation.priceInCents)
-              )
-            )
+            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
             if (newQuantity === 0)
               return prev.filter((item) => item.id !== ingredientId)
           }
 
           // Decrease price only if crossing 2 → 1
           else if (existingItem.quantity > 1) {
-            setPrice((prev) =>
-              Math.max(
-                0,
-                prev -
-                  (usersMembership?.isActive
-                    ? customisation.priceInCents * 0.85
-                    : customisation.priceInCents)
-              )
-            )
+            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
           }
 
           // Return the updated array with the decreased quantity
@@ -366,7 +305,11 @@ export default function CustomModal({
                       <Text className="mt-2 font-semibold text-lg">
                         Price:{" "}
                         {type === "cents"
-                          ? `${formatCurrency(Number(price) / 100)}`
+                          ? `${formatCurrency(
+                              (Number(price) *
+                                (usersMembership?.isActive ? 0.85 : 1)) /
+                                100
+                            )}`
                           : `${points} points`}
                       </Text>
                     </View>
@@ -528,10 +471,6 @@ export default function CustomModal({
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
                           offerId: offerId ? offerId : null,
-                          discountedAmountInCents:
-                            usersMembership?.isActive && !offerId && price > 0
-                              ? Math.round(price / 0.85 - price)
-                              : 0,
                         })
                       } else {
                         await editItem({
@@ -542,10 +481,7 @@ export default function CustomModal({
                           customisations: customisationQuantity,
                           itemPriceInCents: type === "points" ? 0 : price,
                           offerId: offerId ? offerId : null,
-                          discountedAmountInCents:
-                            usersMembership?.isActive && !offerId && price > 0
-                              ? Math.round(price / 0.85 - price)
-                              : 0,
+                          discountedAmountInCents: 0,
                         })
                       }
                       setButtonLoading(false)

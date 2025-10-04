@@ -9,6 +9,8 @@ import {
   Offers,
   restaurantStatus,
   LoyaltyRates,
+  Promotion,
+  Promotions,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -191,70 +193,70 @@ export async function getAvailableCustomisations(
   }
 }
 
-export async function restoreLoyaltyPoints(points: number) {
-  const token = await SecureStore.getItemAsync("token")
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/auth/addLoyaltyPoints`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ points }),
-    })
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (res.status === 404) {
-      throw new Error("Failed to find your details, please try again later")
-    }
-    if (res.status === 400) {
-      throw new Error("Could not add points")
-    }
-    return true
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
-  }
-}
+// export async function restoreLoyaltyPoints(points: number) {
+//   const token = await SecureStore.getItemAsync("token")
+//   if (!token) {
+//     throw new Error("Unauthenticated")
+//   }
+//   try {
+//     const res = await fetch(`${url}/api/auth/addLoyaltyPoints`, {
+//       method: "PATCH",
+//       headers: {
+//         "Content-Type": "application/json",
+//         Authorization: `Bearer ${token}`,
+//       },
+//       body: JSON.stringify({ points }),
+//     })
+//     if (res.status === 401) {
+//       throw new Error("Unauthenticated")
+//     }
+//     if (res.status === 404) {
+//       throw new Error("Failed to find your details, please try again later")
+//     }
+//     if (res.status === 400) {
+//       throw new Error("Could not add points")
+//     }
+//     return true
+//   } catch (error: any) {
+//     throw new Error(error?.message || "Something went wrong.")
+//   }
+// }
 
-export async function orderWithLoyaltyPoints(points: number) {
-  const token = await SecureStore.getItemAsync("token")
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
+// export async function orderWithLoyaltyPoints(points: number) {
+//   const token = await SecureStore.getItemAsync("token")
+//   if (!token) {
+//     throw new Error("Unauthenticated")
+//   }
 
-  try {
-    const res = await fetch(`${url}/api/auth/orderWithLoyaltyPoints`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ points }),
-    })
+//   try {
+//     const res = await fetch(`${url}/api/auth/orderWithLoyaltyPoints`, {
+//       method: "PATCH",
+//       headers: {
+//         "Content-Type": "application/json",
+//         Authorization: `Bearer ${token}`,
+//       },
+//       body: JSON.stringify({ points }),
+//     })
 
-    const data = await res.json()
+//     const data = await res.json()
 
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (res.status === 404) {
-      throw new Error("Failed to find your details, please try again later")
-    }
-    if (res.status === 400) {
-      throw new Error("Insufficient points")
-    }
-    if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
-    }
-    return data.loyaltyPoints
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
-  }
-}
+//     if (res.status === 401) {
+//       throw new Error("Unauthenticated")
+//     }
+//     if (res.status === 404) {
+//       throw new Error("Failed to find your details, please try again later")
+//     }
+//     if (res.status === 400) {
+//       throw new Error("Insufficient points")
+//     }
+//     if (!res.ok) {
+//       throw new Error(data?.message || "Server error. Please try again later.")
+//     }
+//     return data.loyaltyPoints
+//   } catch (error: any) {
+//     throw new Error(error?.message || "Something went wrong.")
+//   }
+// }
 
 export async function getUserProfile() {
   const token = await SecureStore.getItemAsync("token")
@@ -506,7 +508,6 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
     customisations,
     loyaltyPointsUsed,
     offerId,
-    discountedAmountInCents,
   } = item
   const cartItem = {
     dessertId: dessert.id,
@@ -515,7 +516,6 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
     customisations,
     loyaltyPointsUsed,
     offerId,
-    discountedAmountInCents,
   }
 
   try {
@@ -589,7 +589,6 @@ export const updateCartItem = async (
     customisations,
     itemPriceInCents,
     loyaltyPointsUsed,
-    discountedAmountInCents,
   } = item
   const updatedItem = {
     id,
@@ -598,7 +597,6 @@ export const updateCartItem = async (
     customisations,
     itemPriceInCents,
     loyaltyPointsUsed,
-    discountedAmountInCents,
   }
 
   try {
@@ -871,5 +869,22 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
     return data
   } catch (error) {
     throw new Error(error?.message || "Could not get loyalty rates")
+  }
+}
+
+export const getPromotions = async (): Promise<Promotions> => {
+  try {
+    const res = await fetch(`${url}/api/getPromotions`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    throw new Error(error?.message || "Could not get promotions")
   }
 }

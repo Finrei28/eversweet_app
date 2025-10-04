@@ -416,7 +416,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     get().items.reduce((acc, item) => acc + item.quantity, 0),
   getTotalCost: () =>
     get().items.reduce(
-      (acc, item) => acc + item.quantity * item.itemPriceInCents,
+      (acc, item) =>
+        acc +
+        item.quantity * (item.itemPriceInCents - item.discountedAmountInCents),
       0
     ),
   getEarnablePoints: async (usersMembership: UsersMembership) => {
@@ -425,7 +427,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       (acc, item) =>
         acc +
         Math.floor(
-          (item.itemPriceInCents / 100) * // points is calculated per dollar
+          ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
             (rates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
             item.quantity *
             (usersMembership?.isActive

@@ -137,7 +137,6 @@ export type AddCartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
-  discountedAmountInCents: number
 }
 
 export type MembershipDetails = {
@@ -195,3 +194,13 @@ export type LoyaltyRates = {
   rate: number
   modifier: number
 }
+
+export type Promotion = {
+  id: string
+  title: string
+  description: string
+  category: string
+  imagePath: string
+}
+
+export type Promotions = Promotion[]

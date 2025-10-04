@@ -1,7 +1,7 @@
 import BouncingLoader from "@/_components/loader"
 import { StatusBadge } from "@/_components/orderStatusBadge"
 import PageHeader from "@/_components/pageheader"
-import { formatDate, getCollectionTime } from "@/lib/formatters"
+import { formatCurrency, formatDate, getCollectionTime } from "@/lib/formatters"
 import { getUserOrders } from "@/services/api"
 import useFetch from "@/services/use_fetch"
 import { useAuth } from "@/store/authProvider"
@@ -196,9 +196,10 @@ export default function Orders() {
                 (total, item) => total + item.quantity,
                 0
               )
-              const originalTotalPrice =
-                (order.priceInCents + order.discountedAmountInCents) / 100
-              const finalTotalPrice = order.priceInCents / 100
+              const originalTotalPrice = order.priceInCents / 100
+
+              const finalTotalPrice =
+                (order.priceInCents - order.discountedAmountInCents) / 100
               return (
                 <View
                   key={order.id}
@@ -230,12 +231,12 @@ export default function Orders() {
                       <View className="flex items-center">
                         {order.discountedAmountInCents > 0 && (
                           <Text className="text-gray-400 font-medium line-through">
-                            ${originalTotalPrice.toFixed(2)}
+                            {formatCurrency(originalTotalPrice)}
                           </Text>
                         )}
 
                         <Text className="font-medium">
-                          ${finalTotalPrice.toFixed(2)}
+                          {formatCurrency(finalTotalPrice)}
                         </Text>
                       </View>
                     </View>
@@ -279,10 +280,11 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const originalPrice =
-                          (item.discountedAmountInCents + item.priceInCents) /
+                        const originalPrice = item.priceInCents / 100
+
+                        const finalPrice =
+                          (item.priceInCents - item.discountedAmountInCents) /
                           100
-                        const finalPrice = item.priceInCents / 100
                         return (
                           <View
                             key={item.id}
@@ -315,17 +317,17 @@ export default function Orders() {
                               ))}
 
                               <Text className="text-gray-500 text-sm">
-                                Qty: {item.quantity} × $
+                                Qty: {item.quantity}×{" "}
                                 {item.discountedAmountInCents > 0 && (
                                   <Text className="text-gray-400 text-sm line-through">
-                                    {originalPrice.toFixed(2)}{" "}
+                                    {formatCurrency(originalPrice)}{" "}
                                   </Text>
                                 )}
-                                {finalPrice.toFixed(2)}
+                                {formatCurrency(finalPrice)}
                               </Text>
                             </View>
                             <Text className="font-medium">
-                              ${(item.quantity * finalPrice).toFixed(2)}
+                              {formatCurrency(item.quantity * finalPrice)}
                             </Text>
                           </View>
                         )
@@ -349,9 +351,10 @@ export default function Orders() {
                 (total, item) => total + item.quantity,
                 0
               )
-              const originalTotalPrice =
-                (order.priceInCents + order.discountedAmountInCents) / 100
-              const discountedTotalPrice = order.priceInCents / 100
+              const originalTotalPrice = order.priceInCents / 100
+
+              const discountedTotalPrice =
+                (order.priceInCents - order.discountedAmountInCents) / 100
               return (
                 <View
                   key={order.id}
@@ -383,12 +386,12 @@ export default function Orders() {
                       <View className="flex-row gap-2">
                         {order.discountedAmountInCents > 0 && (
                           <Text className="text-gray-400 font-medium line-through">
-                            ${originalTotalPrice.toFixed(2)}
+                            {formatCurrency(originalTotalPrice)}
                           </Text>
                         )}
 
                         <Text className="font-medium">
-                          ${discountedTotalPrice.toFixed(2)}
+                          {formatCurrency(discountedTotalPrice)}
                         </Text>
                       </View>
                     </View>
@@ -432,10 +435,11 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const originalPrice =
-                          (item.discountedAmountInCents + item.priceInCents) /
+                        const originalPrice = item.priceInCents / 100
+
+                        const finalPrice =
+                          (item.priceInCents - item.discountedAmountInCents) /
                           100
-                        const finalPrice = item.priceInCents / 100
                         return (
                           <View
                             key={item.id}
@@ -467,17 +471,17 @@ export default function Orders() {
                                 }`}</Text>
                               ))}
                               <Text className="text-gray-500 text-sm">
-                                Qty: {item.quantity} × $
+                                Qty: {item.quantity}×{" "}
                                 {item.discountedAmountInCents > 0 && (
                                   <Text className="text-gray-400 text-sm line-through">
-                                    {originalPrice.toFixed(2)}{" "}
+                                    {formatCurrency(originalPrice)}{" "}
                                   </Text>
                                 )}
-                                {finalPrice.toFixed(2)}
+                                {formatCurrency(finalPrice)}
                               </Text>
                             </View>
                             <Text className="font-medium">
-                              ${(item.quantity * finalPrice).toFixed(2)}
+                              {formatCurrency(item.quantity * finalPrice)}
                             </Text>
                           </View>
                         )

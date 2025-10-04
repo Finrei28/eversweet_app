@@ -448,13 +448,6 @@ function CheckoutContent() {
     return getTotalCost() / 100
   }
 
-  const getOriginalPrice = (item: CartItem) => {
-    return (
-      ((item.itemPriceInCents + item.discountedAmountInCents) * item.quantity) /
-      100
-    )
-  }
-
   const calculateMembershipDiscount = () => {
     return getTotalMembershipDiscount() / 100
   }
@@ -720,13 +713,18 @@ function CheckoutContent() {
                       !item.offerId &&
                       !item.loyaltyPointsUsed && (
                         <Text className="font-medium line-through text-gray-500">
-                          {formatCurrency(getOriginalPrice(item))}
+                          {formatCurrency(
+                            (item.itemPriceInCents * item.quantity) / 100
+                          )}
                         </Text>
                       )}
 
                     <Text className="font-medium">
                       {formatCurrency(
-                        (item.itemPriceInCents * item.quantity) / 100
+                        ((item.itemPriceInCents -
+                          item.discountedAmountInCents) *
+                          item.quantity) /
+                          100
                       )}
                     </Text>
                   </View>
@@ -750,7 +748,7 @@ function CheckoutContent() {
                     Membership Discount Included (15%)
                   </Text>
                   <Text className="font-medium">
-                    - ${calculateMembershipDiscount().toFixed(2)}
+                    - {formatCurrency(calculateMembershipDiscount())}
                   </Text>
                 </View>
               )}
@@ -763,13 +761,13 @@ function CheckoutContent() {
               >
                 <Text className="text-gray-500">GST Included (15%)</Text>
                 <Text className="font-medium">
-                  ${calculateGST().toFixed(2)}
+                  {formatCurrency(calculateGST())}
                 </Text>
               </View>
               <View className="flex-row justify-between mt-2 pt-2 border-t border-gray-200">
                 <Text className="font-bold">Total</Text>
                 <Text className="font-bold">
-                  ${calculateTotal().toFixed(2)}
+                  {formatCurrency(calculateTotal())}
                 </Text>
               </View>
             </View>

@@ -15,7 +15,7 @@ import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
 import useFetch from "@/services/use_fetch"
 import { getUserOrders } from "@/services/api"
-import { formatDate } from "@/lib/formatters"
+import { formatCurrency, formatDate } from "@/lib/formatters"
 import { useAuth } from "@/store/authProvider"
 
 export default function OrderHistory() {
@@ -125,7 +125,10 @@ export default function OrderHistory() {
                   <View className="flex-row justify-between mb-2">
                     <Text className="text-gray-500">Total</Text>
                     <Text className="font-medium">
-                      ${(order.priceInCents / 100).toFixed(2)}
+                      {formatCurrency(
+                        (order.priceInCents - order.discountedAmountInCents) /
+                          100
+                      )}
                     </Text>
                   </View>
                 </View>
@@ -163,9 +166,10 @@ export default function OrderHistory() {
                     {/* Order Items */}
                     <Text className="font-medium mb-3">Items</Text>
                     {order.desserts.map((item, index) => {
-                      const originalPrice =
-                        (item.discountedAmountInCents + item.priceInCents) / 100
-                      const finalPrice = item.priceInCents / 100
+                      const originalPrice = item.priceInCents / 100
+
+                      const finalPrice =
+                        (item.priceInCents - item.discountedAmountInCents) / 100
                       return (
                         <View
                           key={index}
@@ -198,17 +202,17 @@ export default function OrderHistory() {
                               }`}</Text>
                             ))}
                             <Text className="text-gray-500 text-sm">
-                              Qty: {item.quantity} × $
+                              Qty: {item.quantity}×{" "}
                               {item.discountedAmountInCents > 0 && (
                                 <Text className="text-gray-400 text-sm line-through">
-                                  {originalPrice.toFixed(2)}{" "}
+                                  {formatCurrency(originalPrice)}{" "}
                                 </Text>
                               )}
-                              {finalPrice.toFixed(2)}
+                              {formatCurrency(finalPrice)}
                             </Text>
                           </View>
                           <Text className="font-medium">
-                            ${(item.quantity * finalPrice).toFixed(2)}
+                            {formatCurrency(item.quantity * finalPrice)}
                           </Text>
                         </View>
                       )

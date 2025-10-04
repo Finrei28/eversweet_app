@@ -21,6 +21,7 @@ import Toast from "react-native-toast-message"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
+import { DessertCard } from "@/_components/dessertCard"
 
 export default function Menu() {
   const [selectedCategory, setSelectedCategory] =
@@ -61,14 +62,6 @@ export default function Menu() {
       params: { categoryParam: newCategory },
     })
   }
-
-  // useEffect(() => {
-  //   if (menu && menu.length > 0) {
-  //     const selectedCategory = menu.find((cat) => cat.id === activeCategory)
-  //     scrollToCategory(activeCategory)
-  //     setSelectedCategory(selectedCategory || null)
-  //   }
-  // }, [activeCategory])
 
   const handleCategoryChange = (category: DessertCategory) => {
     changeCategory(category.name)
@@ -169,88 +162,14 @@ export default function Menu() {
                       data={item.desserts} // Only this category's desserts
                       keyExtractor={(dessert) => dessert.id.toString()}
                       renderItem={({ item: dessert }) => (
-                        <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 py-5 ">
-                          {/* Dessert Image */}
-                          <Image
-                            source={{ uri: dessert.imagePath }}
-                            className="relative w-full h-80 rounded-lg"
-                            resizeMode="cover"
-                          />
-                          {/* Dessert Name */}
-                          <Text className="text-lg font-medium">
-                            {dessert.name}
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => {
-                              if (token) {
-                                setSelectedDessert(dessert)
-                                setModalVisible(true)
-                              } else {
-                                router.push("/signin")
-                              }
-                            }}
-                            accessibilityLabel={`View more for ${dessert.name}`}
-                            accessibilityHint={`Press to view more about ${dessert.name}`}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected: false }}
-                            accessibilityLabelledBy="view-more-button"
-                            className="bg-primary rounded-lg p-3 items-center w-1/2 mt-4 mx-auto"
-                            // style={{
-                            //   backgroundColor: "#007BFF", // Replace with your desired button color
-                            //   padding: 10,
-                            //   borderRadius: 5,
-                            //   alignItems: "center",
-                            // }}
-                          >
-                            <Text
-                              style={{ color: "#FFFFFF", fontWeight: "bold" }}
-                            >
-                              {token ? (
-                                <View className="flex-col items-center justify-center">
-                                  {/* Regular Price */}
-                                  {usersMembership?.isActive ? (
-                                    <>
-                                      <View className="flex-row items-center gap-1">
-                                        <Text className="text-red-600 line-through text-sm">
-                                          {formatCurrency(
-                                            Number(dessert.priceInCents) / 100
-                                          )}
-                                        </Text>
-                                        {/* Discounted Member Price */}
-                                        <Text className="text-white font-bold text-lg">
-                                          {formatCurrency(
-                                            (Number(dessert.priceInCents) *
-                                              0.85) /
-                                              100
-                                          )}{" "}
-                                        </Text>
-                                      </View>
-
-                                      <Text className="text-xs text-yellow-300">
-                                        Member Price
-                                      </Text>
-                                    </>
-                                  ) : (
-                                    <Text className="text-white font-bold text-lg">
-                                      {formatCurrency(
-                                        Number(dessert.priceInCents) / 100
-                                      )}{" "}
-                                    </Text>
-                                  )}
-                                </View>
-                              ) : (
-                                <Text
-                                  style={{
-                                    color: "#FFFFFF",
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  Sign In
-                                </Text>
-                              )}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
+                        <DessertCard
+                          dessert={dessert}
+                          token={token}
+                          usersMembership={usersMembership}
+                          setSelectedDessert={setSelectedDessert}
+                          setModalVisible={setModalVisible}
+                          router={router}
+                        />
                       )}
                     />
                   </View>
