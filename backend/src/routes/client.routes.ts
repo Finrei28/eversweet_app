@@ -8,6 +8,7 @@ import {
   getStoreHours,
   restaurantStatus,
   getLoyaltyRates,
+  getPromotions,
 } from "../controllers/client.controller"
 
 const router = Router()
@@ -20,5 +21,6 @@ router.post("/resetPassword", resetPassword)
 router.get("/getStoreHours", getStoreHours)
 router.get("/restaurantStatus", restaurantStatus)
 router.get("/getLoyaltyRates", getLoyaltyRates)
+router.get("/getPromotions", getPromotions)
 
 export default router
