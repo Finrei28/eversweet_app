@@ -189,30 +189,42 @@ export default function EmailOrderConfirmation({
               {order.desserts.map((item) => {
                 const pricePerItem = item.priceInCents / 100
                 return (
-                  <Row key={item.id}>
-                    <Column className="h-20 w-20 py-4 align-top">
-                      {item.dessert.imagePath ? (
-                        <Img
-                          src={item.dessert.imagePath || "/placeholder.svg"}
-                          alt={item.dessert.name}
-                          width={"100%"}
-                          height={"100%"}
-                          className="rounded-xl object-cover"
-                        />
-                      ) : (
-                        <Column className="flex h-full w-full items-center justify-center bg-gray-100">
-                          {/* <ShoppingBag className="h-8 w-8 text-gray-400" /> */}
-                        </Column>
-                      )}
+                  <Row key={item.id} className="py-2">
+                    {/* Dessert Image */}
+                    <Column align="left" className="h-20 w-20">
+                      <Img
+                        src={
+                          "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1757935847/products/products/1d1e48faa59e9416678b39dccd72a73197335d11.jpg"
+                        }
+                        alt={item.dessert.name}
+                        width="100%"
+                        height="100%"
+                        className="rounded-xl object-cover"
+                      />
                     </Column>
-                    <Column className="flex flex-1 flex-col px-2">
-                      <Row>
-                        <Heading as="h4">{item.dessert.name}</Heading>
 
+                    {/* Dessert Info + Quantity + Total */}
+                    <Row className="ml-2">
+                      <Column>
+                        <Row>
+                          <Column>
+                            <Heading as="h4">
+                              {/* Dessert Name */}
+                              {item.dessert.name}
+                            </Heading>
+                          </Column>
+
+                          <Column align="right">
+                            {/* Price per item */}
+                            <Text>{formatCurrency(pricePerItem)}</Text>
+                          </Column>
+                        </Row>
+
+                        {/* Customisations */}
                         {item.customisations?.map((customisation) => (
                           <Text
-                            className="-mb-4 -mt-4 ml-1 text-sm text-gray-500"
                             key={customisation.id}
+                            className="text-sm text-gray-500 leading-tight"
                           >
                             {customisation.quantity > 1
                               ? `+ ${customisation.quantity} ${customisation.customisation.name}`
@@ -221,19 +233,23 @@ export default function EmailOrderConfirmation({
                                 : `- ${customisation.customisation.name}`}
                           </Text>
                         ))}
+                      </Column>
+                    </Row>
 
+                    {/* Quantity + Total Price aligned */}
+                    <Row className="mt-1 ml-2">
+                      <Column>
                         <Text className="text-sm text-gray-500">
                           Quantity: {item.quantity}
                         </Text>
-                      </Row>
-                    </Column>
-                    <Column align="right" className="align-bottom">
-                      <Text className="">{formatCurrency(pricePerItem)}</Text>
+                      </Column>
 
-                      <Text className="text-sm text-gray-500">
-                        {formatCurrency(pricePerItem * item.quantity)}
-                      </Text>
-                    </Column>
+                      <Column align="right">
+                        <Text className="font-semibold">
+                          {formatCurrency(pricePerItem * item.quantity)}
+                        </Text>
+                      </Column>
+                    </Row>
                   </Row>
                 )
               })}
