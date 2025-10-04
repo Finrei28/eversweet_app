@@ -1,6 +1,5 @@
 import { Router } from "express"
 import {
-  addLoyaltyPoints,
   checkVerificationCode,
   createOrder,
   getOrder,
@@ -8,7 +7,6 @@ import {
   getUserLoyaltyPoints,
   getUserOrders,
   orderStatus,
-  orderWithLoyaltyPoints,
   showOffers,
   signIn,
   signUp,
@@ -24,12 +22,6 @@ router.post("/checkVerificationCode", checkVerificationCode)
 router.get("/getUser", authenticateToken, getUser)
 router.patch("/updateUser", authenticateToken, updateUser)
 router.get("/getUserLoyaltyPoints", authenticateToken, getUserLoyaltyPoints)
-router.patch("/addLoyaltyPoints", authenticateToken, addLoyaltyPoints)
-router.patch(
-  "/orderWithLoyaltyPoints",
-  authenticateToken,
-  orderWithLoyaltyPoints
-)
 router.get("/getOrder", authenticateToken, getOrder)
 router.post("/getUserOrders", authenticateToken, getUserOrders)
 router.post("/createOrder", authenticateToken, createOrder)
