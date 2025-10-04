@@ -9,6 +9,7 @@ import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../index"
 import { Status } from "../types/types"
+import { loyaltyRates } from "../lib/loyaltyRates"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -446,7 +447,7 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     const discountedAmountInCents = cart.cartItems.reduce(
-      (total, item) => total + item.discountedAmountInCents,
+      (total, item) => total + item.discountedAmountInCents * item.quantity,
       0
     )
 
@@ -556,14 +557,14 @@ export const createOrder = async (req: Request, res: Response) => {
         earnablePoints = cart.cartItems.reduce(
           (acc, item) =>
             acc +
-            Math.floor((item.itemPriceInCents / 10) * item.quantity * 2.2),
-          0
-        )
-      } else {
-        earnablePoints = cart.cartItems.reduce(
-          (acc, item) =>
-            acc +
-            Math.floor((item.itemPriceInCents / 10) * item.quantity * 1.1),
+            Math.floor(
+              ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
+                (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
+                item.quantity *
+                (membership?.isActive
+                  ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
+                  : (loyaltyRates.modifier ?? 1))
+            ),
           0
         )
       }

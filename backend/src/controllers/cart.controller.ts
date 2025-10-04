@@ -126,11 +126,12 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     const noMochi = isMochiBowl && wantsNoGlutinous && wantsNoMochi
 
+    const finalItemPriceInCents =
+      cartItem.itemPriceInCents - (noMochi ? 200 : 0)
+
     const discountedAmount =
       membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
-        ? Math.round(
-            cartItem.itemPriceInCents / 0.85 - cartItem.itemPriceInCents
-          )
+        ? Math.round(finalItemPriceInCents * 0.15)
         : 0
 
     let cart = await db.cart.findUnique({
@@ -154,9 +155,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
         },
       },
       quantity: cartItem.quantity,
-      itemPriceInCents:
-        cartItem.itemPriceInCents -
-        (noMochi ? (membership?.isActive ? 200 * 0.85 : 200) : 0), // get price from order item
+      itemPriceInCents: cartItem.itemPriceInCents - (noMochi ? 200 : 0), // get price from order item
       loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
       discountedAmountInCents: discountedAmount,
       customisations: {
@@ -637,23 +636,20 @@ export const updateCartItem = async (req: Request, res: Response) => {
       existingCartHasNoBalls &&
       existingCartHasNoMochi &&
       !wantsNoGlutinous &&
-      !wantsNoMochi &&
-      isMochiBowl // If there was no mochi but now is then user is trying to add it back
+      !wantsNoMochi // If there was no mochi but now is then user is trying to add it back
 
     const membership = await db.membership.findUnique({ where: { userId } })
 
+    const finalItemPriceInCents = addBackMochi
+      ? cartItem.itemPriceInCents + 200 // If user is trying to add mochi back, charge them $2
+      : removeMochi
+        ? cartItem.itemPriceInCents - 200 // If user is removing mochi, minus $2
+        : cartItem.itemPriceInCents // else normal price
+
     const discountedAmount =
       membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
-        ? Math.round(
-            cartItem.itemPriceInCents / 0.85 - cartItem.itemPriceInCents
-          )
+        ? Math.round(finalItemPriceInCents * 0.15)
         : 0
-
-    const finalItemPriceInCents = addBackMochi
-      ? cartItem.itemPriceInCents + (membership?.isActive ? 200 * 0.85 : 200) // If user is trying to add mochi back, charge them $2
-      : removeMochi
-        ? cartItem.itemPriceInCents - (membership?.isActive ? 200 * 0.85 : 200) // If user is removing mochi, minus $2
-        : cartItem.itemPriceInCents // else normal price
 
     const priceDifference =
       (cartItem.itemPriceInCents - existingCartItem.itemPriceInCents) *

@@ -619,7 +619,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           where: { stripeSubscriptionId: sub.id },
           data: { endDate: new Date(sub.cancel_at * 1000), cancel: true }, // timestamp to JS Date
         })
-        console.log("subscription updated")
       }
       break
     }
