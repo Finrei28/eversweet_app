@@ -14,7 +14,6 @@ export const dessertSchema = z.object({
   quantity: z.number().int().positive(),
   loyaltyPointsUsed: z.number().nullable().optional(),
   offerId: z.string().nullable().optional(),
-  discountedAmountInCents: z.number().min(0),
 })
 
 export const CreateOrderSchema = z.object({

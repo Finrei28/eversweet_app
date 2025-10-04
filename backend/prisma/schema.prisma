@@ -272,6 +272,17 @@ model Loyalty {
   points Int
   userId String @unique
   User   User   @relation(fields: [userId], references: [id])
+  records LoyaltyRecord[]
+}
+
+model LoyaltyRecord {
+  id         String   @id @default(cuid())
+  change     Int      // positive = earned, negative = spent
+  reason     String
+  createdAt  DateTime @default(now())
+
+  loyaltyId  String
+  loyalty    Loyalty  @relation(fields: [loyaltyId], references: [id])
 }
 
 model Cart {

@@ -66,8 +66,8 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     const cartItem = parsedBody.data
 
+    const membership = await db.membership.findUnique({ where: { userId } })
     if (cartItem.offerId) {
-      const membership = await db.membership.findUnique({ where: { userId } })
       if (!membership?.isActive) {
         res.status(403).json({
           message: "Join our membership to redeem this awesome offer!",
@@ -95,9 +95,43 @@ export const addItemToCart = async (req: Request, res: Response) => {
           points: {
             decrement: cartItem.loyaltyPointsUsed,
           },
+          records: {
+            create: {
+              change: -cartItem.loyaltyPointsUsed,
+              reason: "REWARDS",
+            },
+          },
         },
       })
     }
+
+    const wantsNoGlutinous = cartItem.customisations.some(
+      (c) => c.name === "Glutinous Balls" && c.quantity === 0
+    )
+    const wantsNoMochi = cartItem.customisations.some(
+      (c) => c.name === "Mochi" && c.quantity === 0
+    )
+
+    let isMochiBowl = false
+
+    if (wantsNoGlutinous && wantsNoMochi) {
+      const dessert = await db.dessert.findUnique({
+        where: { id: cartItem.dessertId },
+        select: { category: true },
+      })
+      if (dessert?.category.name === "Mochi Series") {
+        isMochiBowl = true
+      }
+    }
+
+    const noMochi = isMochiBowl && wantsNoGlutinous && wantsNoMochi
+
+    const discountedAmount =
+      membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
+        ? Math.round(
+            cartItem.itemPriceInCents / 0.85 - cartItem.itemPriceInCents
+          )
+        : 0
 
     let cart = await db.cart.findUnique({
       where: { userId },
@@ -120,9 +154,11 @@ export const addItemToCart = async (req: Request, res: Response) => {
         },
       },
       quantity: cartItem.quantity,
-      itemPriceInCents: cartItem.itemPriceInCents, // get price from order item
+      itemPriceInCents:
+        cartItem.itemPriceInCents -
+        (noMochi ? (membership?.isActive ? 200 * 0.85 : 200) : 0), // get price from order item
       loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
-      discountedAmountInCents: cartItem.discountedAmountInCents,
+      discountedAmountInCents: discountedAmount,
       customisations: {
         create: cartItem.customisations.map((cartItemCustomisation) => ({
           customisation: {
@@ -245,7 +281,12 @@ export const getCartItems = async (req: Request, res: Response) => {
       if (totalPointsToRefund > 0) {
         await db.loyalty.update({
           where: { userId },
-          data: { points: { increment: totalPointsToRefund } },
+          data: {
+            points: { increment: totalPointsToRefund },
+            records: {
+              create: { change: totalPointsToRefund, reason: "REFUND" },
+            },
+          },
         })
       }
 
@@ -373,7 +414,12 @@ export const clearCart = async (req: Request, res: Response) => {
     if (totalPointsToRefund > 0) {
       await db.loyalty.update({
         where: { userId },
-        data: { points: { increment: totalPointsToRefund } },
+        data: {
+          points: { increment: totalPointsToRefund },
+          records: {
+            create: { change: totalPointsToRefund, reason: "REFUND" },
+          },
+        },
       })
     }
 
@@ -490,6 +536,9 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
           points: {
             increment: cartItem.loyaltyPointsUsed,
           },
+          records: {
+            create: { change: cartItem.loyaltyPointsUsed, reason: "REFUND" },
+          },
         },
       })
     }
@@ -542,6 +591,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
         itemPriceInCents: true,
         loyaltyPointsUsed: true,
         quantity: true,
+        customisations: { include: { customisation: true } },
       },
     })
 
@@ -549,6 +599,61 @@ export const updateCartItem = async (req: Request, res: Response) => {
       res.status(404).json({ message: "Cart item not found" })
       return
     }
+
+    const wantsNoGlutinous = cartItem.customisations.some(
+      (c) => c.name === "Glutinous Balls" && c.quantity === 0 // user does not want balls
+    )
+    const wantsNoMochi = cartItem.customisations.some(
+      // user does not want mochi
+      (c) => c.name === "Mochi" && c.quantity === 0
+    )
+
+    const existingCartHasNoBalls = existingCartItem.customisations.some(
+      (c) => c.customisation.name === "Glutinous Balls" && c.quantity === 0
+    ) // existing mochi has no balls
+    const existingCartHasNoMochi = existingCartItem.customisations.some(
+      (c) => c.customisation.name === "Mochi" && c.quantity === 0
+    ) // existing mochi has no mochi
+
+    let isMochiBowl = false
+
+    if (wantsNoGlutinous && wantsNoMochi) {
+      const dessert = await db.dessert.findUnique({
+        where: { id: cartItem.dessertId },
+        select: { category: true },
+      })
+      if (dessert?.category.name === "Mochi Series") {
+        isMochiBowl = true
+      }
+    }
+
+    const removeMochi =
+      isMochiBowl &&
+      wantsNoGlutinous &&
+      wantsNoMochi &&
+      !existingCartHasNoBalls &&
+      !existingCartHasNoMochi
+    const addBackMochi =
+      existingCartHasNoBalls &&
+      existingCartHasNoMochi &&
+      !wantsNoGlutinous &&
+      !wantsNoMochi &&
+      isMochiBowl // If there was no mochi but now is then user is trying to add it back
+
+    const membership = await db.membership.findUnique({ where: { userId } })
+
+    const discountedAmount =
+      membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
+        ? Math.round(
+            cartItem.itemPriceInCents / 0.85 - cartItem.itemPriceInCents
+          )
+        : 0
+
+    const finalItemPriceInCents = addBackMochi
+      ? cartItem.itemPriceInCents + (membership?.isActive ? 200 * 0.85 : 200) // If user is trying to add mochi back, charge them $2
+      : removeMochi
+        ? cartItem.itemPriceInCents - (membership?.isActive ? 200 * 0.85 : 200) // If user is removing mochi, minus $2
+        : cartItem.itemPriceInCents // else normal price
 
     const priceDifference =
       (cartItem.itemPriceInCents - existingCartItem.itemPriceInCents) *
@@ -567,8 +672,8 @@ export const updateCartItem = async (req: Request, res: Response) => {
           update: {
             where: { id: cartItem.id },
             data: {
-              discountedAmountInCents: cartItem.discountedAmountInCents,
-              itemPriceInCents: cartItem.itemPriceInCents,
+              itemPriceInCents: finalItemPriceInCents, // get price from order item
+              discountedAmountInCents: discountedAmount,
               loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
               // quantity: cartItem.quantity,
               customisations: {
