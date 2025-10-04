@@ -5,7 +5,7 @@ import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import { storeHours } from "../lib/storeHours"
 import { loyaltyRates } from "../lib/loyaltyRates"
-import { promotions } from "../lib/Promotions"
+import { promotions } from "../lib/promotions"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
