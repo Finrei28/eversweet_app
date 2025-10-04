@@ -488,7 +488,7 @@ export const createOrder = async (req: Request, res: Response) => {
               create: dessertItem.customisations.map((customisationsItem) => ({
                 customisation: {
                   connect: {
-                    id: customisationsItem.id, // Ensure customisation exists before connecting
+                    id: customisationsItem.customisationId, // Ensure customisation exists before connecting
                   },
                 },
                 quantity: customisationsItem.quantity,
