@@ -7,6 +7,7 @@ import {
   getOverview,
   getPastOrders,
   getPendingOrders,
+  setOrderNotified,
   updateOrderStatus,
 } from "../controllers/admin.controller"
 
@@ -46,6 +47,13 @@ router.get(
   authenticateToken,
   authorizeRole("ADMIN"),
   getOverview
+)
+
+router.patch(
+  "/setOrderNotified",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  setOrderNotified
 )
 
 export default router

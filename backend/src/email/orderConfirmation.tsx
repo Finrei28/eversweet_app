@@ -205,7 +205,7 @@ export default function EmailOrderConfirmation({
                     </Column>
 
                     {/* Dessert Info + Quantity + Total */}
-                    <Row className="ml-2">
+                    <Row className="mx-1">
                       <Column>
                         <Row>
                           <Column>
@@ -238,7 +238,7 @@ export default function EmailOrderConfirmation({
                     </Row>
 
                     {/* Quantity + Total Price aligned */}
-                    <Row className="mt-1 ml-2">
+                    <Row className="mt-1 mx-1">
                       <Column>
                         <Text className="text-sm text-gray-500">
                           Quantity: {item.quantity}

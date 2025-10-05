@@ -487,6 +487,29 @@ export const getOverview = async (req: Request, res: Response) => {
   }
 }
 
+export const setOrderNotified = async (req: Request, res: Response) => {
+  const userId = (req as any).userId
+  const role = (req as any).role
+
+  const { orderId } = req.body
+
+  if (!userId && role !== "ADMIN") {
+    res.status(403).json({ message: "You're unauthorised to access this!" })
+    return
+  }
+  try {
+    await db.order.update({
+      where: { id: orderId },
+      data: { notified: true }, // set this on the frontend receive this to know any missed order alerts
+    })
+  } catch (error) {
+    res.status(500).json({
+      message: "Error updaing order notifier",
+      error: (error as Error).message,
+    })
+  }
+}
+
 // Get future orders where pickUpTime is more than 15 minutes from when the order was created
 export const getFutureOrders = async () => {
   try {
