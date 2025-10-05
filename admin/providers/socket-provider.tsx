@@ -1,6 +1,7 @@
 "use client"
 
 import { Order } from "@/lib/types"
+import { setOrderNotified } from "@/services/api"
 import { getToken } from "@/services/auth"
 import {
   createContext,
@@ -69,7 +70,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         setTimeout(() => {
           setOrderAlertQueue((prev) => [...prev, order.id])
         }, 100)
-
+        await setOrderNotified(order.id)
         // Play notification sound if enabled
       })
 

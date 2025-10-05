@@ -11,6 +11,11 @@ type PastOrderCardProps = {
 }
 
 export function PastOrderCard({ order, onPress }: PastOrderCardProps) {
+  const totalItems = order.desserts.reduce(
+    (total, item) => total + item.quantity,
+    0
+  )
+
   return (
     <TouchableOpacity
       className="bg-white rounded-lg p-4 shadow-sm"
@@ -35,7 +40,7 @@ export function PastOrderCard({ order, onPress }: PastOrderCardProps) {
       <View className="flex-row justify-between items-center mt-3">
         <View>
           <Text className="text-gray-700">{`${order.customerFirstName} ${order.customerLastName}`}</Text>
-          <Text className="text-gray-500">{order.desserts.length} items</Text>
+          <Text className="text-gray-500">{totalItems} items</Text>
         </View>
         <Text className="font-bold text-lg">
           {formatCurrency(order.priceInCents / 100)}

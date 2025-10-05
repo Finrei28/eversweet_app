@@ -16,6 +16,11 @@ export function OrderListItem({ order, onPress }: OrderListItemProps) {
     (item) => item.customisations && item.customisations.length > 0
   )
 
+  const totalItems = order.desserts.reduce(
+    (total, item) => total + item.quantity,
+    0
+  )
+
   return (
     <TouchableOpacity
       className="bg-gray-50 rounded-lg p-3 mb-2 border border-gray-100"
@@ -34,9 +39,7 @@ export function OrderListItem({ order, onPress }: OrderListItemProps) {
 
       <View className="flex-row justify-between items-center mt-2">
         <View className="flex-row items-center">
-          <Text className="text-gray-600 mr-2">
-            {order.desserts.length} items
-          </Text>
+          <Text className="text-gray-600 mr-2">{totalItems} items</Text>
           {hasCustomizations && (
             <View className="bg-amber-100 rounded-full px-2 py-0.5">
               <Text className="text-amber-800 text-xs">Customized</Text>

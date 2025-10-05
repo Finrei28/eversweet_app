@@ -170,6 +170,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       if (newStatus === "ACCEPTED") {
         // Delete from pending
         setPendingOrders((prev) => prev.filter((order) => order.id !== orderId))
+        setCurrentAlertId(null)
 
         // Find the order
         const newOrder = pendingOrders.find((order) => order.id === orderId)

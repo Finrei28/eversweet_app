@@ -27,6 +27,11 @@ export default function NewOrderAlert() {
   const order = findPendingOrdersById(id)
   const hasAccepted = useRef(false)
 
+  const totalItems = order.desserts.reduce(
+    (total, item) => total + item.quantity,
+    0
+  )
+
   // Play notification sound and animation when component mounts
   useEffect(() => {
     const fadeIn = Animated.timing(fadeAnim, {
@@ -95,6 +100,9 @@ export default function NewOrderAlert() {
     if (hasAccepted.current) return // Prevent double execution
     hasAccepted.current = true
     // Fade out animation before closing
+    if (sound.current) {
+      sound.current.unloadAsync()
+    }
     await updateOrderStatus(order.id, "ACCEPTED")
     Animated.timing(fadeAnim, {
       toValue: 0,
@@ -172,9 +180,7 @@ export default function NewOrderAlert() {
             </Text>
           </View>
 
-          <Text className="text-gray-500 mb-4">
-            {order.desserts.length} items
-          </Text>
+          <Text className="text-gray-500 mb-4">{totalItems} items</Text>
 
           {/* Order items preview */}
           <View className="bg-gray-50 rounded-lg p-3 mb-4">

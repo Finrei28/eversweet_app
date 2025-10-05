@@ -25,7 +25,8 @@
           "fetch",
           "remote-notification"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message."
       }
     },
     "android": {

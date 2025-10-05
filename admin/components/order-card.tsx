@@ -64,6 +64,11 @@ export function OrderCard({
       ? "#16A34A" // text-green-600
       : "#4F46E5" // default: text-indigo-600
 
+  const totalItems = order.desserts.reduce(
+    (total, item) => total + item.quantity,
+    0
+  )
+
   return (
     <View className="bg-white rounded-lg shadow-sm overflow-hidden">
       {/* Order header */}
@@ -88,7 +93,7 @@ export function OrderCard({
         <View className="flex-row justify-between items-center mt-3">
           <View>
             <Text className="text-gray-700">{`${order.customerFirstName} ${order.customerLastName}`}</Text>
-            <Text className="text-gray-500">{order.desserts.length} items</Text>
+            <Text className="text-gray-500">{totalItems} items</Text>
           </View>
           <Text className="font-bold text-lg">
             {formatCurrency(order.priceInCents / 100)}
