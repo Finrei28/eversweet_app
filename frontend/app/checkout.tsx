@@ -526,6 +526,7 @@ function CheckoutContent() {
 
         const orderResponse = await createOrder(
           paymentMethodId,
+          pickupNow,
           pickUpTime,
           eatIn,
           paymentIntent.id
@@ -537,7 +538,13 @@ function CheckoutContent() {
         setOrderInProgress(orderResponse.id)
       } else {
         // handle orders paid with points
-        const orderResponse = await createOrder(null, pickUpTime, eatIn, null)
+        const orderResponse = await createOrder(
+          null,
+          pickupNow,
+          pickUpTime,
+          eatIn,
+          null
+        )
         if (!orderResponse) {
           throw new Error("Failed to create order")
         }

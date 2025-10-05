@@ -350,6 +350,7 @@ export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
 
 export async function createOrder(
   paymentMethodId: string | null,
+  pickupNow: boolean,
   pickUpTime: Date,
   eatIn: boolean,
   paymentIntentId: string | null
@@ -368,6 +369,7 @@ export async function createOrder(
       },
       body: JSON.stringify({
         paymentMethodId,
+        pickupNow,
         pickUpTime,
         eatIn,
         paymentIntentId,
