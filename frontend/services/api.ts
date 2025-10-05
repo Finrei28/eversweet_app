@@ -11,6 +11,8 @@ import {
   LoyaltyRates,
   Promotion,
   Promotions,
+  Announcements,
+  HomePageContent,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -828,7 +830,7 @@ export const getStoreHours = async () => {
 
     return data
   } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+    console.error(error?.message || "Something went wrong.")
   }
 }
 
@@ -868,7 +870,7 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
 
     return data
   } catch (error) {
-    throw new Error(error?.message || "Could not get loyalty rates")
+    console.error(error?.message || "Could not get loyalty rates")
   }
 }
 
@@ -885,6 +887,40 @@ export const getPromotions = async (): Promise<Promotions> => {
 
     return data
   } catch (error) {
-    throw new Error(error?.message || "Could not get promotions")
+    console.error(error?.message || "Could not get promotions")
+  }
+}
+
+export const getAnnouncements = async (): Promise<Announcements> => {
+  try {
+    const res = await fetch(`${url}/api/getAnnouncements`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    console.error(error?.message || "Could not get announcements")
+  }
+}
+
+export const getHomepageCards = async (): Promise<HomePageContent[]> => {
+  try {
+    const res = await fetch(`${url}/api/getHomepageCards`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    console.error(error?.message || "Could not get home page contents")
   }
 }

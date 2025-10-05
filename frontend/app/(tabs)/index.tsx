@@ -1,49 +1,63 @@
-import React, { useState, useEffect } from "react"
+import React, { useEffect } from "react"
 import {
   Text,
   View,
   Image,
-  StatusBar,
-  FlatList,
   TouchableOpacity,
   ScrollView,
+  Platform,
 } from "react-native"
-import { homepageCards } from "@/_components/_homepageContent"
 import PageHeader from "@/_components/pageheader"
-import { SplashScreen, Stack, useRouter } from "expo-router"
-import ViewCart from "@/_components/viewCart"
-import { useCartStore } from "@/store/cart"
+import { SplashScreen, useRouter } from "expo-router"
 import { FontAwesome } from "@expo/vector-icons"
 import useFetch from "@/services/use_fetch"
-import { getPromotions } from "@/services/api"
+import { getHomepageCards, getPromotions } from "@/services/api"
+import BouncingLoader from "@/_components/loader"
+
+// Keep splash screen on when loading data
+SplashScreen.preventAutoHideAsync()
 
 // This is needed for the order history screen to properly import FontAwesome
 export { FontAwesome }
 
-SplashScreen.preventAutoHideAsync()
-
 export default function Index() {
   const router = useRouter()
-  const cartItems = useCartStore((state) => state.items)
   const { data: promotions, loading: loadingPromotions } = useFetch(() =>
     getPromotions()
   )
+  const { data: homePageContents, loading: loadingContents } = useFetch(() =>
+    getHomepageCards()
+  )
   useEffect(() => {
-    if (!loadingPromotions) {
+    if (!loadingPromotions && !loadingContents) {
       SplashScreen.hideAsync()
     }
   }, [loadingPromotions])
+  if (!homePageContents || homePageContents?.length === 0) {
+    return (
+      <View className="flex-1 bg-background">
+        <PageHeader />
+        <View
+          className={`flex-1 items-center justify-center ${
+            Platform.OS === "ios" ? "mt-32" : "mt-24"
+          }`}
+        >
+          <BouncingLoader />
+        </View>
+      </View>
+    )
+  }
   return (
     <View className="flex-1 bg-background">
       <PageHeader />
-      <ScrollView>
+      <ScrollView className={`${Platform.OS === "ios" ? "mt-32" : "mt-24"}`}>
         {promotions?.length > 0 && (
           <>
-            <Text className="mt-36 text-4xl font-bold text-primary p-5 text-center">
+            <Text className=" text-4xl font-bold text-primary p-5 mt-4 text-center">
               Promotions
             </Text>
 
-            {promotions.map((promotion) => (
+            {promotions?.map((promotion) => (
               <View
                 key={promotion.id}
                 className="flex justify-center bg-white mx-10 py-5 my-4 gap-5 rounded-2xl shadow-sm"
@@ -92,10 +106,10 @@ export default function Index() {
         )}
 
         <>
-          <Text className="text-4xl font-bold text-primary p-5 text-center">
+          <Text className="text-4xl font-bold text-primary p-5 mt-4 text-center">
             Our Dessert Series
           </Text>
-          {homepageCards.map((category, index) => {
+          {homePageContents?.map((category, index) => {
             return (
               <View
                 key={index}

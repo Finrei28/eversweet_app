@@ -31,7 +31,7 @@ export default function Menu() {
   const [modalVisible, setModalVisible] = useState(false)
   const [previousIndex, setPreviousIndex] = useState(0)
   const { token, usersMembership } = useAuth()
-
+  const flatListRef = useRef<FlatList<DessertCategory>>(null)
   const router = useRouter()
   const cartItems = useCartStore((state) => state.items)
 
@@ -55,6 +55,12 @@ export default function Menu() {
       fetchData()
     }, [categoryParam, menu])
   )
+
+  useEffect(() => {
+    if (flatListRef.current) {
+      flatListRef.current.scrollToOffset({ offset: 0, animated: true })
+    }
+  }, [categoryParam])
 
   const changeCategory = (newCategory: string) => {
     router.replace({
@@ -148,6 +154,7 @@ export default function Menu() {
             )}
             {selectedCategory ? (
               <FlatList
+                ref={flatListRef}
                 data={[selectedCategory]}
                 keyExtractor={(item) => item.id.toString()}
                 renderItem={({ item }) => (

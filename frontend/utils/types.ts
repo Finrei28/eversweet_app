@@ -204,3 +204,16 @@ export type Promotion = {
 }
 
 export type Promotions = Promotion[]
+
+export type Announcement = {
+  title: string
+  description: string
+}
+
+export type Announcements = Announcement[]
+
+export type HomePageContent = {
+  title: string
+  image: string
+  category: string
+}

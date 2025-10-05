@@ -27,7 +27,7 @@ export default function Loyalty() {
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [previousIndex, setPreviousIndex] = useState(0)
-
+  const flatListRef = useRef<FlatList<DessertCategory>>(null)
   const router = useRouter()
 
   const cartItems = useCartStore((state) => state.items)
@@ -64,7 +64,9 @@ export default function Loyalty() {
         (cat) => cat.id === activeCategory
       )
       setSelectedCategory(selectedCategory || null)
-      // router.replace("/loyalty")
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: true })
+      }
     }
   }, [activeCategory])
 
@@ -178,6 +180,7 @@ export default function Loyalty() {
                 </View>
                 {selectedCategory ? (
                   <FlatList
+                    ref={flatListRef}
                     data={[selectedCategory]}
                     keyExtractor={(item) => item.id.toString()}
                     renderItem={({ item }) => (
