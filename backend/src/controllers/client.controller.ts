@@ -6,6 +6,8 @@ import bcrypt from "bcrypt"
 import { storeHours } from "../lib/storeHours"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { promotions } from "../lib/promotions"
+import { announcements } from "../lib/announcements"
+import { homepageCards } from "../lib/homePageContent"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -231,5 +233,15 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
 
 export const getPromotions = (req: Request, res: Response) => {
   res.status(200).json(promotions)
+  return
+}
+
+export const getAnnouncements = (req: Request, res: Response) => {
+  res.status(200).json(announcements)
+  return
+}
+
+export const getHomepageCards = (req: Request, res: Response) => {
+  res.status(200).json(homepageCards)
   return
 }
