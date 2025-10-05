@@ -580,8 +580,9 @@ export const createOrder = async (req: Request, res: Response) => {
       react: EmailOrderConfirmation({ order: newOrder }),
     })
     if (
-      newOrder.pickUpTime.getTime() - new Date().getTime() <=
-      1000 * 60 * 15
+      newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
+        1000 * 60 * 15 ||
+      parsedBody.pickupNow
     ) {
       emitNewOrder(newOrder)
       await db.order.update({
