@@ -66,8 +66,14 @@ export default function Index() {
                   {promotion.title}
                 </Text>
                 <Text className="text-gray-500 font-semibold text-md text-center px-6">
-                  {promotion.description}
+                  {promotion.text1}
                 </Text>
+                {promotion.text2 && (
+                  <Text className="text-gray-500 font-semibold text-md text-center px-6">
+                    {promotion.text2}
+                  </Text>
+                )}
+
                 {promotion.imagePath && (
                   <Image
                     source={{ uri: promotion.imagePath }}

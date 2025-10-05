@@ -198,7 +198,8 @@ export type LoyaltyRates = {
 export type Promotion = {
   id: string
   title: string
-  description: string
+  text1: string
+  text2?: string
   category: string
   imagePath: string
 }
@@ -207,7 +208,8 @@ export type Promotions = Promotion[]
 
 export type Announcement = {
   title: string
-  description: string
+  text1: string
+  text2?: string
 }
 
 export type Announcements = Announcement[]

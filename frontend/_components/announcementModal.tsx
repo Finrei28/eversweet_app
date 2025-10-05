@@ -62,9 +62,12 @@ export default function AnnouncementsPopup() {
               <Text className="text-2xl font-bold text-center mb-4">
                 {current.title}
               </Text>
-              <Text className="text-gray-600 text-center">
-                {current.description}
-              </Text>
+              <Text className="text-gray-600 text-center">{current.text1}</Text>
+              {current.text2 && (
+                <Text className="text-gray-600 text-center mt-2">
+                  {current.text2}
+                </Text>
+              )}
             </View>
           </ScrollView>
           <View className="flex-row justify-between gap-6">
