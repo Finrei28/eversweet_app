@@ -111,7 +111,10 @@ function CheckoutContent() {
   const [showDoneButton, setShowDoneButton] = useState(false)
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
-  const { closeTime } = getOpenCloseTime(pickupDate, storeHours)
+  const { closeTime } = getOpenCloseTime(
+    eatIn ? eatInDate : pickupDate,
+    storeHours
+  )
 
   // Fetch saved cards when component mounts
 
@@ -340,22 +343,22 @@ function CheckoutContent() {
     const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
 
     if (!openTime && !closeTime) {
-      Alert.alert("Sorry, we are currently closed at the moment")
-    }
-
-    Alert.alert(
-      "Sorry, we are closed at that time",
-      `Please choose a time during store hours. We are open ${openTime.toLocaleTimeString(
-        "en-NZ",
-        {
+      Alert.alert("Sorry, we are closed on that day...")
+    } else {
+      Alert.alert(
+        "Sorry, we are closed at that time",
+        `Please choose a time during store hours. We are open ${openTime.toLocaleTimeString(
+          "en-NZ",
+          {
+            hour: "2-digit",
+            minute: "2-digit",
+          }
+        )} to ${closeTime.toLocaleTimeString("en-NZ", {
           hour: "2-digit",
           minute: "2-digit",
-        }
-      )} to ${closeTime.toLocaleTimeString("en-NZ", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })} on a ${dayName}.`
-    )
+        })} on a ${dayName}.`
+      )
+    }
   }
 
   const handleConfirm = (date: Date) => {
@@ -364,7 +367,7 @@ function CheckoutContent() {
       alertTimeChange(null)
     } else if (validTime.getTime() !== date.getTime()) {
       alertTimeChange(date)
-      eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
+      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
     } else {
       eatIn ? setEatInDate(date) : setPickupDate(date)
     }
@@ -384,6 +387,7 @@ function CheckoutContent() {
     )
     if (!validTime) {
       alertTimeChange(null)
+      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
     } else if (selectedDate) {
       if (validTime.getTime() !== selectedDate.getTime()) {
         alertTimeChange(selectedDate)
@@ -412,6 +416,7 @@ function CheckoutContent() {
     )
     if (!validTime) {
       alertTimeChange(null)
+      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
     } else if (selectedTime) {
       if (validTime.getTime() !== selectedTime.getTime()) {
         alertTimeChange(selectedTime)
