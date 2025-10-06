@@ -1,14 +1,6 @@
-import { getAnnouncements } from "@/services/api"
 import { Announcements } from "@/utils/types"
-import React, { useEffect, useState } from "react"
-import {
-  Modal,
-  View,
-  Text,
-  Button,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native"
+import React, { useState } from "react"
+import { Modal, View, Text, ScrollView, TouchableOpacity } from "react-native"
 
 type AnnouncementsPopupProps = {
   setShowAnnounceModal: React.Dispatch<React.SetStateAction<boolean>>
