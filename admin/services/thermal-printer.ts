@@ -3,6 +3,7 @@ import { Order } from "@/lib/types"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { Buffer } from "buffer"
 import EventEmitter from "events"
+import * as Location from "expo-location"
 import { Platform } from "react-native"
 import {
   BleManager,
@@ -10,7 +11,6 @@ import {
   type Device,
   type Service,
 } from "react-native-ble-plx"
-import { check, PERMISSIONS, request, RESULTS } from "react-native-permissions"
 
 // Storage keys
 const PRINTERS_STORAGE_KEY = "thermal_printers"
@@ -105,23 +105,13 @@ class ThermalPrinterService {
    */
   async requestBluetoothPermissions(): Promise<boolean> {
     if (Platform.OS === "ios") {
-      const result = await request(PERMISSIONS.IOS.BLUETOOTH)
-      return result === RESULTS.GRANTED
+      // iOS 13+ often requires Location permission for BLE scanning
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      return status === "granted"
     } else if (Platform.OS === "android") {
-      // For Android 12+ (SDK 31+)
-      if (Platform.Version >= 31) {
-        const scanResult = await request(PERMISSIONS.ANDROID.BLUETOOTH_SCAN)
-        const connectResult = await request(
-          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT
-        )
-        return (
-          scanResult === RESULTS.GRANTED && connectResult === RESULTS.GRANTED
-        )
-      } else {
-        // For older Android versions
-        const result = await request(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION)
-        return result === RESULTS.GRANTED
-      }
+      // Android BLE scanning also requires Location permission
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      return status === "granted"
     }
     return false
   }
@@ -198,24 +188,8 @@ class ThermalPrinterService {
    * Check if we have the necessary permissions
    */
   private async checkPermissions(): Promise<boolean> {
-    if (Platform.OS === "ios") {
-      const result = await check(PERMISSIONS.IOS.BLUETOOTH)
-      return result === RESULTS.GRANTED
-    } else if (Platform.OS === "android") {
-      // For Android 12+ (SDK 31+)
-      if (Platform.Version >= 31) {
-        const scanResult = await check(PERMISSIONS.ANDROID.BLUETOOTH_SCAN)
-        const connectResult = await check(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT)
-        return (
-          scanResult === RESULTS.GRANTED && connectResult === RESULTS.GRANTED
-        )
-      } else {
-        // For older Android versions
-        const result = await check(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION)
-        return result === RESULTS.GRANTED
-      }
-    }
-    return false
+    const { status } = await Location.getForegroundPermissionsAsync()
+    return status === "granted"
   }
 
   /**
@@ -685,15 +659,7 @@ class ThermalPrinterService {
         }
 
         const pricePerItem =
-          (item.dessert.priceInCents +
-            item.customisations.reduce((total, customisation) => {
-              return (
-                total +
-                customisation.customisation.priceInCents *
-                  customisation.quantity
-              )
-            }, 0)) /
-          100
+          (item.priceInCents - item.discountedAmountInCents) / 100
 
         // Add item price
         receiptText += ALIGN_RIGHT
@@ -707,13 +673,23 @@ class ThermalPrinterService {
 
       // Totals
       receiptText += ALIGN_RIGHT
-      receiptText += "Subtotal: $" + (orderData.priceInCents / 100).toFixed(2)
+      receiptText +=
+        "Subtotal: $" +
+        (
+          (orderData.priceInCents - orderData.discountedAmountInCents) /
+          100
+        ).toFixed(2)
       receiptText += LINE_FEED
       receiptText += "GST: $" + (orderData.GST / 100).toFixed(2)
       receiptText += LINE_FEED
 
       receiptText += BOLD_ON
-      receiptText += "TOTAL: $" + (orderData.priceInCents / 100).toFixed(2)
+      receiptText +=
+        "TOTAL: $" +
+        (
+          (orderData.priceInCents - orderData.discountedAmountInCents) /
+          100
+        ).toFixed(2)
       receiptText += BOLD_OFF
       receiptText += LINE_FEED + LINE_FEED
 

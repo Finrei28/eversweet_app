@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "EversweetAdmin",
+    "name": "Eversweet Manager",
     "slug": "eversweet_admin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/eversweet_1024.png",
-    "scheme": "eversweetappadmin",
+    "scheme": "eversweetappmanager",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "androidNavigationBar": {
@@ -17,13 +17,12 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to thermal printers",
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to thermal printers",
+        "NSLocationWhenInUseUsageDescription": "This app uses location access to discover nearby Bluetooth printers",
         "UIBackgroundModes": [
           "audio",
           "fetch",
           "remote-notification",
-          "bluetooth-central",
-          "fetch",
-          "remote-notification"
+          "bluetooth-central"
         ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message."
@@ -39,7 +38,8 @@
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.BLUETOOTH_SCAN",
-        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.FOREGROUND_SERVICE"
       ]
     },
     "web": {
@@ -70,19 +70,7 @@
           "bluetoothAlwaysPermission": "This app uses Bluetooth to connect to thermal printers"
         }
       ],
-      [
-        "react-native-permissions",
-        {
-          "iosPermissions": ["Bluetooth"]
-        }
-      ],
-
-      [
-        "expo-screen-orientation",
-        {
-          "initialOrientation": "LANDSCAPE"
-        }
-      ]
+      ["expo-screen-orientation"]
     ],
     "experiments": {
       "typedRoutes": true

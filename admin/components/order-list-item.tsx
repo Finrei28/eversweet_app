@@ -42,13 +42,15 @@ export function OrderListItem({ order, onPress }: OrderListItemProps) {
           <Text className="text-gray-600 mr-2">{totalItems} items</Text>
           {hasCustomizations && (
             <View className="bg-amber-100 rounded-full px-2 py-0.5">
-              <Text className="text-amber-800 text-xs">Customized</Text>
+              <Text className="text-amber-800 text-xs">Customised</Text>
             </View>
           )}
         </View>
         <View className="flex-row items-center">
           <Text className="font-medium mr-1">
-            {formatCurrency(order.priceInCents / 100)}
+            {formatCurrency(
+              (order.priceInCents - order.discountedAmountInCents) / 100
+            )}
           </Text>
           <Ionicons name="chevron-forward" size={16} color="#6B7280" />
         </View>

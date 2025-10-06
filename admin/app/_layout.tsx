@@ -5,13 +5,17 @@ import { SocketProvider } from "@/providers/socket-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 import { isUserAuthorised } from "@/services/auth"
 import { Ionicons } from "@expo/vector-icons"
-import { Audio } from "expo-av"
 import { useFonts } from "expo-font"
 import { Stack, useRouter } from "expo-router"
 import * as SecureStore from "expo-secure-store"
 import { StatusBar } from "expo-status-bar"
 import { useEffect } from "react"
-import { ActivityIndicator, TouchableOpacity, View } from "react-native"
+import {
+  ActivityIndicator,
+  Platform,
+  TouchableOpacity,
+  View,
+} from "react-native"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast from "react-native-toast-message"
 import "./global.css"
@@ -31,11 +35,6 @@ function AppLayout() {
     // Preload the notification sound
     const init = async () => {
       try {
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-        })
-
         const isAuthorised = await isUserAuthorised()
         if (isAuthorised) {
           setAuthenticated(true)
@@ -84,11 +83,17 @@ function AppLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen
               name="new-order-alert/[id]"
-              options={{ headerShown: false, presentation: "transparentModal" }}
+              options={{
+                headerShown: Platform.OS === "ios" ? true : false,
+                presentation: "transparentModal",
+              }}
             />
             <Stack.Screen
               name="order-details/[id]"
-              options={{ headerShown: false, presentation: "modal" }}
+              options={{
+                headerShown: Platform.OS === "ios" ? true : false,
+                presentation: "modal",
+              }}
             />
             <Stack.Screen
               name="bluetooth-printer-setup"

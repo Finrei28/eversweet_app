@@ -5,6 +5,7 @@ import {
   getCurrentOrders,
   getPastOrders,
   getPendingOrders,
+  setOrderNotified,
   updateOrderStatusAPI,
 } from "@/services/api"
 import thermalPrinter from "@/services/thermal-printer"
@@ -28,14 +29,12 @@ type OrderContextType = {
   currentOrders: Order[]
   completedOrders: Order[]
   isLoading: boolean
-  orderAlertQueue: string[]
   currentAlertId: string | null
   fetchOrders: () => Promise<void>
   fetchCompletedOrders: (date?: Date) => Promise<void>
   updateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>
   findOrderById: (id: string) => Order | undefined
   findPendingOrdersById: (id: string) => Order | undefined
-  setOrderAlertQueue: Dispatch<SetStateAction<string[]>>
   setPendingOrders: Dispatch<SetStateAction<Order[]>>
   // processNextOrderAlert: () => void
 }
@@ -52,7 +51,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [isPrinting, setIsPrinting] = useState(false)
 
   // Add these new state variables after the existing state declarations
-  const [orderAlertQueue, setOrderAlertQueue] = useState<string[]>([])
   const [currentAlertId, setCurrentAlertId] = useState<string | null>(null)
 
   // Fetch orders on mount
@@ -61,10 +59,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (orderAlertQueue.length > 0 && currentAlertId === null) {
-      processNextOrderAlert()
+    if (pendingOrders.length > 0 && currentAlertId === null) {
+      processNextOrderAlert(pendingOrders[0].id)
     }
-  }, [orderAlertQueue, currentAlertId])
+  }, [pendingOrders, currentAlertId])
 
   // Fetch current orders
   const fetchOrders = async () => {
@@ -140,18 +138,14 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     return pendingOrders.find((order) => order.id === id)
   }
 
-  const processNextOrderAlert = () => {
-    if (orderAlertQueue.length > 0) {
-      const nextOrderId = orderAlertQueue[0]
-      setCurrentAlertId(nextOrderId)
-
-      // Remove this order from the queue
-      setOrderAlertQueue((prev) => prev.slice(1))
+  const processNextOrderAlert = (orderId: string) => {
+    if (pendingOrders.length > 0) {
+      setCurrentAlertId(orderId)
 
       // Show the alert for this order
       router.push({
         pathname: "/new-order-alert/[id]",
-        params: { id: nextOrderId },
+        params: { id: orderId },
       })
     } else {
       setCurrentAlertId(null)
@@ -168,12 +162,12 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
       // For demo, update state directly
       if (newStatus === "ACCEPTED") {
+        // Find the order
+        const newOrder = pendingOrders.find((order) => order.id === orderId)
         // Delete from pending
         setPendingOrders((prev) => prev.filter((order) => order.id !== orderId))
         setCurrentAlertId(null)
-
-        // Find the order
-        const newOrder = pendingOrders.find((order) => order.id === orderId)
+        await setOrderNotified(orderId)
 
         if (newOrder) {
           // Update the order status
@@ -217,12 +211,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           )
         )
       }
-      if (orderId === currentAlertId) {
-        // If we just processed the current alert, move to the next one
-        setTimeout(() => {
-          processNextOrderAlert()
-        }, 500) // Small delay to allow animations to complete
-      }
     } catch (error) {
       console.error("Failed to update order status:", error)
       Toast.show({
@@ -243,14 +231,12 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         currentOrders,
         completedOrders,
         isLoading,
-        orderAlertQueue,
         currentAlertId,
         fetchOrders,
         fetchCompletedOrders,
         updateOrderStatus,
         findOrderById,
         findPendingOrdersById,
-        setOrderAlertQueue,
         setPendingOrders,
       }}
     >

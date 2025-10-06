@@ -2,30 +2,30 @@
 
 import thermalPrinter, { type Printer } from "@/services/thermal-printer"
 import { Ionicons } from "@expo/vector-icons"
-import { useNavigation } from "expo-router"
+import * as Location from "expo-location"
+import { useRouter } from "expo-router"
 import { StatusBar } from "expo-status-bar"
 import { useEffect, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native"
 import type { Device } from "react-native-ble-plx"
-import { check, PERMISSIONS, RESULTS } from "react-native-permissions"
 
 export default function BluetoothPrinterSetup() {
-  const navigation = useNavigation()
+  const router = useRouter()
   const [isScanning, setIsScanning] = useState(false)
   const [availableDevices, setAvailableDevices] = useState<Device[]>([])
   const [savedPrinters, setSavedPrinters] = useState<Printer[]>([])
   const [defaultPrinterId, setDefaultPrinterId] = useState<string | null>(null)
   const [permissionStatus, setPermissionStatus] = useState<string | null>(null)
   const [bluetoothEnabled, setBluetoothEnabled] = useState(false)
+  const [location, setLocation] = useState<Location.LocationObject | null>(null)
 
   useEffect(() => {
     checkPermissions()
@@ -34,28 +34,28 @@ export default function BluetoothPrinterSetup() {
   }, [])
 
   const checkPermissions = async () => {
-    let result
-    if (Platform.OS === "ios") {
-      result = await check(PERMISSIONS.IOS.BLUETOOTH)
-    } else if (Platform.OS === "android") {
-      // For Android 12+ (SDK 31+)
-      if (Platform.Version >= 31) {
-        result = await check(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT)
-      } else {
-        result = await check(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION)
-      }
-    }
+    const { status } = await Location.getForegroundPermissionsAsync()
+    setPermissionStatus(status)
 
-    setPermissionStatus(result)
+    if (status === "granted") {
+      const currentLocation = await Location.getCurrentPositionAsync({})
+      setLocation(currentLocation)
+    }
   }
 
   const requestPermissions = async () => {
     try {
-      const granted = await thermalPrinter.requestBluetoothPermissions()
-      setPermissionStatus(granted ? RESULTS.GRANTED : RESULTS.DENIED)
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      setPermissionStatus(status)
 
-      if (granted) {
-        checkBluetoothStatus()
+      if (status === "granted") {
+        const currentLocation = await Location.getCurrentPositionAsync({})
+        setLocation(currentLocation)
+      } else {
+        Alert.alert(
+          "Permission Denied",
+          "Location permission is required to continue."
+        )
       }
     } catch (error) {
       console.error("Error requesting permissions:", error)
@@ -203,7 +203,7 @@ export default function BluetoothPrinterSetup() {
       const connected = await thermalPrinter.connectToPrinter(deviceId)
 
       if (connected) {
-        navigation.navigate("printer-test" as never)
+        router.push("printer-test" as never)
       } else {
         Alert.alert(
           "Connection Failed",
@@ -222,12 +222,12 @@ export default function BluetoothPrinterSetup() {
   }
 
   // Render permission request screen if permissions not granted
-  if (permissionStatus !== RESULTS.GRANTED) {
+  if (permissionStatus !== "granted") {
     return (
       <View style={styles.container}>
         <StatusBar style="dark" />
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Bluetooth Permissions</Text>

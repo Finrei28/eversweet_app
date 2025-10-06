@@ -2,7 +2,10 @@ export type Order = {
   id: string
   tempOrderId: string
   priceInCents: number
+  discountedAmountInCents: number
+  GST: number
   createdAt: Date
+  updatedAt: Date
   customerFirstName: string
   customerLastName: string
   customerEmail: string
@@ -10,31 +13,29 @@ export type Order = {
   completedAt: Date | null
   pickedUpAt: Date | null
   pickUpTime: Date
-  GST: number
-  appUserId: string | null
+  dineIn: Boolean
+  appUserId: string
   status: OrderStatus // Assuming $Enums.Status refers to an enum for order status
-  notes: string
   desserts: {
     id: string
-    dessertId: string
     orderId: string
     quantity: number
+    priceInCents: number
+    discountedAmountInCents: number
+    offerId: string
     dessert: {
       id: string
       name: string
       chineseName: string
       imagePath: string
-      priceInCents: number
     }
     customisations: {
       id: string
-      customisationId: string
       quantity: number
       customisation: {
         id: string
         name: string
         chineseName: string
-        priceInCents: number
       }
     }[]
   }[]

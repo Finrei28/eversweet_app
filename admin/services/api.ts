@@ -1,7 +1,7 @@
 import { Order, OrderStatus, Overview } from "@/lib/types"
 import { getToken, isUserAuthorised } from "./auth"
 
-const url = process.env.EXPO_PUBLIC_URL!
+const url = process.env.EXPO_PUBLIC_SERVER_URL!
 
 export async function signInAPI({
   username,

@@ -4,7 +4,7 @@ import { formatCurrency, getCollectionTime } from "@/lib/formatters"
 import { useOrderContext } from "@/providers/order-provider"
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import { Audio } from "expo-av"
+import { useAudioPlayer } from "expo-audio"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { StatusBar } from "expo-status-bar"
 import { useEffect, useRef } from "react"
@@ -19,15 +19,16 @@ import {
 export default function NewOrderAlert() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { findPendingOrdersById, updateOrderStatus, orderAlertQueue } =
+  const { findPendingOrdersById, updateOrderStatus, pendingOrders } =
     useOrderContext()
-  const sound = useRef<Audio.Sound | null>(null)
   const fadeAnim = useRef(new Animated.Value(0)).current
   const windowHeight = Dimensions.get("window").height
   const order = findPendingOrdersById(id)
   const hasAccepted = useRef(false)
-
-  const totalItems = order.desserts.reduce(
+  const player = useAudioPlayer(
+    require("../../assets/sounds/chinese-justin.mp3")
+  )
+  const totalItems = order?.desserts?.reduce(
     (total, item) => total + item.quantity,
     0
   )
@@ -41,25 +42,33 @@ export default function NewOrderAlert() {
     })
 
     fadeIn.start()
-
-    const playSound = async () => {
-      const soundEnabled = await AsyncStorage.getItem("soundEnabled")
-      // If sound is not explicitly disabled
-      if (soundEnabled !== "false") {
-        try {
-          const { sound: newSound } = await Audio.Sound.createAsync(
-            require("../../assets/sounds/chinese-justin.mp3"),
-            { shouldPlay: true, volume: 1.0 }
-          )
-          newSound.setIsLoopingAsync(true)
-          sound.current = newSound
-        } catch (error) {
-          console.error("Error playing sound", error)
+    if (player) {
+      const checkSoundAndPlay = async () => {
+        const soundEnabled = await AsyncStorage.getItem("soundEnabled")
+        if (soundEnabled !== "false") {
+          player.play()
         }
       }
-    }
+      checkSoundAndPlay()
 
-    playSound()
+      // Set up the listener for the looping logic
+      player.addListener("playbackStatusUpdate", async (status) => {
+        const soundEnabled = await AsyncStorage.getItem("soundEnabled")
+        // If sound is not explicitly disabled
+        if (soundEnabled !== "false") {
+          try {
+            // Check if playback has finished
+            if (status.didJustFinish) {
+              // Rewind and play again
+              await player.seekTo(0)
+              player.play()
+            }
+          } catch (error) {
+            console.error("Error playing sound", error)
+          }
+        }
+      })
+    }
 
     // Check if auto-accept is enabled
     const checkAutoAccept = async () => {
@@ -72,18 +81,19 @@ export default function NewOrderAlert() {
     }
 
     checkAutoAccept()
+    console.log(player.playing)
 
     return () => {
-      if (sound.current) {
-        sound.current.unloadAsync()
+      if (player) {
+        player.pause()
       }
     }
-  }, [])
+  }, [order, player])
 
   if (!order) {
     // Close the modal if order not found
-    if (sound.current) {
-      sound.current.unloadAsync()
+    if (player) {
+      player.pause()
     }
     setTimeout(() => {
       if (router.canGoBack?.()) {
@@ -100,8 +110,8 @@ export default function NewOrderAlert() {
     if (hasAccepted.current) return // Prevent double execution
     hasAccepted.current = true
     // Fade out animation before closing
-    if (sound.current) {
-      sound.current.unloadAsync()
+    if (player) {
+      player.pause()
     }
     await updateOrderStatus(order.id, "ACCEPTED")
     Animated.timing(fadeAnim, {
@@ -109,7 +119,7 @@ export default function NewOrderAlert() {
       duration: 200,
       useNativeDriver: true,
     }).start(() => {
-      if (orderAlertQueue.length === 0) {
+      if (pendingOrders?.length === 0) {
         setTimeout(() => {
           router.push(`/order-details/${order.id}`)
         }, 100)
@@ -134,7 +144,6 @@ export default function NewOrderAlert() {
 
   //   return
   // }
-
   return (
     <View className="flex-1 items-center justify-center bg-black/60">
       <StatusBar style="light" />
@@ -176,7 +185,9 @@ export default function NewOrderAlert() {
               Order #{order.tempOrderId}
             </Text>
             <Text className="font-bold text-lg">
-              {formatCurrency(order.priceInCents / 100)}
+              {formatCurrency(
+                (order.priceInCents - order.discountedAmountInCents) / 100
+              )}
             </Text>
           </View>
 
@@ -186,20 +197,25 @@ export default function NewOrderAlert() {
           <View className="bg-gray-50 rounded-lg p-3 mb-4">
             {order.desserts.slice(0, 3).map((item) => {
               const pricePerItem =
-                (item.dessert.priceInCents +
-                  item.customisations.reduce((total, customisation) => {
-                    return (
-                      total +
-                      customisation.customisation.priceInCents *
-                        customisation.quantity
-                    )
-                  }, 0)) /
-                100
+                (item.priceInCents - item.discountedAmountInCents) / 100
               return (
                 <View key={item.id} className="flex-row justify-between mb-1">
-                  <Text className="text-gray-700">
-                    {item.quantity}x {item.dessert.name}
-                  </Text>
+                  <View className="flex-col">
+                    <Text className="text-gray-700 text-lg">
+                      {item.quantity}x {item.dessert.name}
+                    </Text>
+                    {item.customisations.map((customisation) => (
+                      <Text
+                        className="text-gray-700 ml-2"
+                        key={customisation.id}
+                      >
+                        {customisation.quantity === 0 ? "-" : "+"}
+                        {customisation.quantity}x{" "}
+                        {customisation.customisation.name}
+                      </Text>
+                    ))}
+                  </View>
+
                   <Text className="text-gray-700">
                     {formatCurrency(pricePerItem * item.quantity)}
                   </Text>

@@ -1,7 +1,6 @@
 "use client"
 
 import { Order } from "@/lib/types"
-import { setOrderNotified } from "@/services/api"
 import { getToken } from "@/services/auth"
 import {
   createContext,
@@ -23,7 +22,7 @@ const SocketContext = createContext<SocketContextType | undefined>(undefined)
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
-  const { setOrderAlertQueue, setPendingOrders } = useOrderContext()
+  const { setPendingOrders, findOrderById } = useOrderContext()
 
   const setupSocket = async () => {
     try {
@@ -35,16 +34,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         return
       }
       // Create socket connection
-      const socketInstance = io(
-        process.env.EXPO_PUBLIC_SOCKET_URL || "http://localhost:3001",
-        {
-          transports: ["polling"],
-          auth: { token },
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-        }
-      )
+      const socketInstance = io(process.env.EXPO_PUBLIC_SERVER_URL!, {
+        transports: ["websocket"],
+        auth: { token },
+        reconnection: true,
+        reconnectionDelay: 1000,
+      })
 
       // Set up event listeners
       socketInstance.on("connect", () => {
@@ -66,11 +61,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socketInstance.on("new-order", async (order: Order) => {
         // Add the order to the context
         // console.log("New order received:", order)
+        const existingOrder = findOrderById(order.id)
+        if (existingOrder) {
+          return
+        }
         setPendingOrders((prev) => [...prev, order])
-        setTimeout(() => {
-          setOrderAlertQueue((prev) => [...prev, order.id])
-        }, 100)
-        await setOrderNotified(order.id)
+
         // Play notification sound if enabled
       })
 

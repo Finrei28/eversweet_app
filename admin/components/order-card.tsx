@@ -96,7 +96,9 @@ export function OrderCard({
             <Text className="text-gray-500">{totalItems} items</Text>
           </View>
           <Text className="font-bold text-lg">
-            {formatCurrency(order.priceInCents / 100)}
+            {formatCurrency(
+              (order.priceInCents - order.discountedAmountInCents) / 100
+            )}
           </Text>
         </View>
 

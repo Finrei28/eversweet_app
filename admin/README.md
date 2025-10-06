@@ -1,4 +1,4 @@
-# Welcome Eversweet Admin 👋
+# Welcome to Eversweet App Manager 👋
 
 # App Audio Permission Explanation
 

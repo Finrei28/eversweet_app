@@ -113,7 +113,7 @@ export default function Dashboard() {
 
           <SummaryCard
             title="Pending Orders"
-            value={pendingOrders.length.toString()}
+            value={pendingOrders?.length.toString()}
             icon="time-outline"
             color="#F59E0B"
             isLoading={isLoading}
@@ -129,12 +129,14 @@ export default function Dashboard() {
         </View>
 
         {/* Orders Chart */}
-        <View className="bg-white rounded-xl p-4 mt-6 shadow-sm">
-          <Text className="text-lg font-semibold mb-4">
-            Orders Overview for this week
-          </Text>
-          <OrdersOverviewChart data={overview} isLoading={loadingOverview} />
-        </View>
+        {overview && (
+          <View className="bg-white rounded-xl p-4 mt-6 shadow-sm">
+            <Text className="text-lg font-semibold mb-4">
+              Orders Overview for this week
+            </Text>
+            <OrdersOverviewChart data={overview} isLoading={loadingOverview} />
+          </View>
+        )}
 
         {/* Recent Orders */}
         <View className="bg-white rounded-xl p-4 mt-6 shadow-sm">
@@ -149,7 +151,7 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
 
-          {recentOrders.length > 0 ? (
+          {recentOrders?.length > 0 ? (
             recentOrders.map((order) => (
               <OrderListItem
                 key={order.id}
@@ -166,7 +168,7 @@ export default function Dashboard() {
         </View>
 
         {/* Pending Actions */}
-        {pendingOrders.length > 0 && (
+        {pendingOrders?.length > 0 && (
           <View className="bg-white rounded-xl p-4 mt-6 mb-6 shadow-sm">
             <Text className="text-lg font-semibold mb-4">Pending Actions</Text>
             <TouchableOpacity
@@ -183,7 +185,7 @@ export default function Dashboard() {
               <View className="flex-1">
                 <Text className="font-medium">New Order Requests</Text>
                 <Text className="text-gray-600">
-                  {pendingOrders.length} orders waiting for approval
+                  {pendingOrders?.length} orders waiting for approval
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />

@@ -9,18 +9,10 @@ import { useOrderContext } from "@/providers/order-provider"
 import { Ionicons } from "@expo/vector-icons"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
-import {
-  Image,
-  Platform,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native"
+import { Image, ScrollView, Text, TouchableOpacity, View } from "react-native"
 
 const getScreenOptions = () => ({
   title: ` Order details`,
-  headerShown: Platform.OS === "ios" ? false : true,
   headerTitleStyle: {
     fontFamily: "Inter-SemiBold",
   },
@@ -33,20 +25,6 @@ export default function OrderDetails() {
   const [statusModalVisible, setStatusModalVisible] = useState(false)
 
   const order = findOrderById(id)
-  if (!order) {
-    return (
-      <View className="flex-1 items-center justify-center bg-white">
-        <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
-        <Text className="mt-4 text-lg font-medium">Order not found</Text>
-        <TouchableOpacity
-          className="mt-4 bg-indigo-600 px-4 py-2 rounded-lg"
-          onPress={() => router.back()}
-        >
-          <Text className="text-white font-medium">Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    )
-  }
 
   const handleStatusUpdate = async (newStatus: OrderStatus) => {
     try {
@@ -65,9 +43,24 @@ export default function OrderDetails() {
     }
   }
 
-  const hasCustomizations = order.desserts.some(
-    (item) => item.customisations && item.customisations.length > 0
+  const hasCustomizations = order?.desserts?.some(
+    (item) => item?.customisations && item?.customisations?.length > 0
   )
+
+  if (!order) {
+    return (
+      <View className="flex-1 items-center justify-center bg-white">
+        <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+        <Text className="mt-4 text-lg font-medium">Order not found</Text>
+        <TouchableOpacity
+          className="mt-4 bg-indigo-600 px-4 py-2 rounded-lg"
+          onPress={() => router.back()}
+        >
+          <Text className="text-white font-medium">Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
 
   return (
     <>
@@ -161,7 +154,9 @@ export default function OrderDetails() {
                       {item.dessert.name}
                     </Text>
                     <Text className="font-medium">
-                      {formatCurrency(item.dessert.priceInCents / 100)}
+                      {formatCurrency(
+                        (item.priceInCents - item.discountedAmountInCents) / 100
+                      )}
                     </Text>
                   </View>
 
@@ -176,13 +171,6 @@ export default function OrderDetails() {
                         >
                           <Text className="text-gray-600 text-sm">
                             • {custom.customisation.name}: {custom.quantity}x
-                          </Text>
-                          <Text className="text-gray-600 text-sm">
-                            {formatCurrency(
-                              (custom.customisation.priceInCents *
-                                custom.quantity) /
-                                100
-                            )}
                           </Text>
                         </View>
                       ))}
@@ -202,7 +190,9 @@ export default function OrderDetails() {
               <View className="flex-row justify-between pt-2 mt-2 border-t border-gray-200">
                 <Text className="font-bold text-base">Total</Text>
                 <Text className="font-bold text-base">
-                  {formatCurrency(order.priceInCents / 100)}
+                  {formatCurrency(
+                    (order.priceInCents - order.discountedAmountInCents) / 100
+                  )}
                 </Text>
               </View>
             </View>
