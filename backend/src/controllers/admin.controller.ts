@@ -575,9 +575,10 @@ export const getFutureOrders = async () => {
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
       if (
-        timeBetween <= 15 * 60 * 1000 &&
-        order.source === "APP" &&
-        order.notified === true
+        (timeBetween <= 15 * 60 * 1000 &&
+          order.source === "APP" &&
+          order.notified === true) ||
+        order.source === "APP"
       )
         return false
       // Calculate how early we should start preparing based on dessert count
