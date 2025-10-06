@@ -25,7 +25,7 @@ export default function MembershipPopup({
   }
 
   return (
-    <View className="flex-1 justify-center items-center bg-gray-100">
+    <View>
       {/* Membership Modal */}
       <Modal
         animationType="fade"

@@ -26,7 +26,7 @@ export default function RootLayout() {
   const notificationListener = useRef<{ unsubscribe: () => void } | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcements>([])
-  const [showAnnounceModal, setShowAnnounceModal] = useState(true)
+  const [showAnnounceModal, setShowAnnounceModal] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -45,6 +45,9 @@ export default function RootLayout() {
       const token = await getToken()
       const annoucementList = await getAnnouncements()
       setAnnouncements(annoucementList)
+      if (announcements.length > 0) {
+        setShowAnnounceModal(true)
+      }
 
       if (token) {
         const showMembershipPopup = await hasMembershipPopupExpired()
@@ -120,13 +123,13 @@ export default function RootLayout() {
               setModalVisible={setModalVisible}
             />
           )}
-          {/* {announcements?.length > 0 && showAnnounceModal && (
+          {showAnnounceModal && (
             <AnnouncementsPopup
               showAnnounceModal={showAnnounceModal}
               setShowAnnounceModal={setShowAnnounceModal}
               announcements={announcements}
             />
-          )} */}
+          )}
 
           <Toast config={toastConfig} />
         </AuthProvider>
