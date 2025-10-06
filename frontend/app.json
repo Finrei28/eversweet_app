@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "eversweet_app",
-    "slug": "eversweet_app",
+    "name": "Eversweet",
+    "slug": "Eversweet",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/ios-light.png",
-    "scheme": "myapp",
+    "scheme": "eversweet",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {

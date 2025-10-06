@@ -54,20 +54,6 @@ export type DessertCategory = {
 
 export type Menu = DessertCategory[]
 
-export type OrderData = {
-  items: {
-    customisations: Customisations
-    itemPriceInCents: number
-    quantity: number
-    loyaltyPointsUsed: number | null
-    dessertId: string
-  }[]
-  paymentMethodId: string
-  pickUpTime: Date
-  GST: number
-  totalPriceInCents: number
-}
-
 export type Order = {
   id: string
   tempOrderId: string
@@ -84,10 +70,10 @@ export type Order = {
   pickedUpAt: Date | null
   pickUpTime: Date
   dineIn: Boolean
+  appUserId: string
   status: OrderStatus // Assuming $Enums.Status refers to an enum for order status
   desserts: {
     id: string
-    dessertId: string
     orderId: string
     quantity: number
     priceInCents: number
@@ -101,7 +87,6 @@ export type Order = {
     }
     customisations: {
       id: string
-      customisationId: string
       quantity: number
       customisation: {
         id: string
