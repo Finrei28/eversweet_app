@@ -10,28 +10,24 @@ import {
   TouchableOpacity,
 } from "react-native"
 
-export default function AnnouncementsPopup() {
-  const [announcements, setAnnouncements] = useState<Announcements>([])
-  const [visible, setVisible] = useState(false)
-  const [index, setIndex] = useState(0)
+type AnnouncementsPopupProps = {
+  setShowAnnounceModal: React.Dispatch<React.SetStateAction<boolean>>
+  showAnnounceModal: boolean
+  announcements: Announcements
+}
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const data = await getAnnouncements()
-      if (data?.length > 0) {
-        setAnnouncements(data)
-        setIndex(0) // start at first announcement
-        setVisible(true) // show popup automatically if announcements exist
-      }
-    }
-    fetchData()
-  }, [])
+export default function AnnouncementsPopup({
+  announcements,
+  showAnnounceModal,
+  setShowAnnounceModal,
+}: AnnouncementsPopupProps) {
+  const [index, setIndex] = useState(0)
 
   const handleNext = () => {
     if (index < announcements.length - 1) {
       setIndex(index + 1)
     } else {
-      setVisible(false) // close after last
+      setShowAnnounceModal(false) // close after last
     }
   }
 
@@ -41,16 +37,14 @@ export default function AnnouncementsPopup() {
     }
   }
 
-  if (announcements.length === 0) return null
-
   const current = announcements[index]
 
   return (
     <Modal
-      visible={visible}
+      visible={showAnnounceModal}
       transparent
       animationType="slide"
-      onRequestClose={() => setVisible(false)}
+      onRequestClose={() => setShowAnnounceModal(false)}
     >
       <View className="flex-1 bg-black/50 justify-center items-center px-4">
         <View className="bg-white rounded-2xl p-6 w-full max-w-md relative items-center">

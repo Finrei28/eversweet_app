@@ -17,14 +17,16 @@ import {
 import { AuthProvider } from "@/store/authProvider"
 import { useCartStore } from "@/store/cart"
 import MembershipPopup from "@/_components/membershipAd"
-import { getStoreHours } from "@/services/api"
+import { getAnnouncements, getStoreHours } from "@/services/api"
 import AnnouncementsPopup from "@/_components/announcementModal"
+import { Announcements } from "@/utils/types"
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-  const [expoPushToken, setExpoPushToken] = useState<string | null>(null)
   const notificationListener = useRef<{ unsubscribe: () => void } | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
+  const [announcements, setAnnouncements] = useState<Announcements>([])
+  const [showAnnounceModal, setShowAnnounceModal] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
@@ -41,6 +43,8 @@ export default function RootLayout() {
     const fetchInitialData = async () => {
       getStoreHours()
       const token = await getToken()
+      const annoucementList = await getAnnouncements()
+      setAnnouncements(annoucementList)
 
       if (token) {
         const showMembershipPopup = await hasMembershipPopupExpired()
@@ -62,7 +66,6 @@ export default function RootLayout() {
       const registerPushNotifications = async () => {
         await registerForPushNotificationsAsync().then((token) => {
           if (token) {
-            setExpoPushToken(token)
             // Save the token to the server
             savePushToken(token)
           }
@@ -116,7 +119,14 @@ export default function RootLayout() {
               setModalVisible={setModalVisible}
             />
           )}
-          <AnnouncementsPopup />
+          {announcements?.length > 0 && showAnnounceModal && (
+            <AnnouncementsPopup
+              showAnnounceModal={showAnnounceModal}
+              setShowAnnounceModal={setShowAnnounceModal}
+              announcements={announcements}
+            />
+          )}
+
           <Toast config={toastConfig} />
         </AuthProvider>
       </SafeAreaProvider>
