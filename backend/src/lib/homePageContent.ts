@@ -33,7 +33,7 @@ export const homepageCards = [
   {
     title: "Snack series",
     image:
-      "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1749037224/products/r9th6kmh4e3hohzs9rau.png",
+      "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1757841322/products/products/f1a0f9a72f2485eb0ca30e0450955f4248a07f7f.jpg",
     category: "Snack Series",
   },
 ]

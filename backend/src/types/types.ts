@@ -14,7 +14,6 @@ export type FullOrderType = {
   status: StatusType // Assuming $Enums.Status refers to an enum for order status
   desserts: {
     id: string
-    dessertId: string
     orderId: string
     quantity: number
     priceInCents: number
@@ -27,7 +26,6 @@ export type FullOrderType = {
     }
     customisations: {
       id: string
-      customisationId: string
       quantity: number
       customisation: {
         id: string

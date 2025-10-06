@@ -59,14 +59,10 @@ export const getPendingOrders = async (req: Request, res: Response) => {
   }
 
   try {
-    const now = new Date()
-    const fiveFromNow = new Date(now.getTime() + 5 * 60 * 1000)
     const orders = await db.order.findMany({
       where: {
         status: "PENDING",
-        pickUpTime: {
-          lte: fiveFromNow,
-        },
+        notified: false,
       },
       select: {
         id: true,
@@ -79,18 +75,22 @@ export const getPendingOrders = async (req: Request, res: Response) => {
         customerPhoneNumber: true,
         priceInCents: true,
         pickUpTime: true,
+        discountedAmountInCents: true,
+        dineIn: true,
         GST: true,
         appUserId: true,
         desserts: {
           select: {
+            orderId: true,
             id: true,
             quantity: true,
+            priceInCents: true,
+            discountedAmountInCents: true,
             dessert: {
               select: {
                 id: true,
                 name: true,
                 chineseName: true,
-                priceInCents: true,
                 imagePath: true,
               },
             },
@@ -103,7 +103,6 @@ export const getPendingOrders = async (req: Request, res: Response) => {
                     id: true,
                     name: true,
                     chineseName: true,
-                    priceInCents: true,
                   },
                 },
               },
@@ -137,6 +136,7 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
         status: {
           notIn: ["PICKED_UP", "PENDING"],
         },
+        notified: true,
       },
       select: {
         id: true,
@@ -149,18 +149,22 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
         customerPhoneNumber: true,
         priceInCents: true,
         pickUpTime: true,
+        discountedAmountInCents: true,
+        dineIn: true,
         GST: true,
         appUserId: true,
         desserts: {
           select: {
+            orderId: true,
             id: true,
             quantity: true,
+            priceInCents: true,
+            discountedAmountInCents: true,
             dessert: {
               select: {
                 id: true,
                 name: true,
                 chineseName: true,
-                priceInCents: true,
                 imagePath: true,
               },
             },
@@ -173,7 +177,6 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
                     id: true,
                     name: true,
                     chineseName: true,
-                    priceInCents: true,
                   },
                 },
               },
@@ -239,18 +242,22 @@ export const getPastOrders = async (req: Request, res: Response) => {
         customerEmail: true,
         customerPhoneNumber: true,
         priceInCents: true,
+        discountedAmountInCents: true,
+        dineIn: true,
         GST: true,
         appUserId: true,
         desserts: {
           select: {
+            orderId: true,
             id: true,
             quantity: true,
+            priceInCents: true,
+            discountedAmountInCents: true,
             dessert: {
               select: {
                 id: true,
                 name: true,
                 chineseName: true,
-                priceInCents: true,
                 imagePath: true,
               },
             },
@@ -263,7 +270,6 @@ export const getPastOrders = async (req: Request, res: Response) => {
                     id: true,
                     name: true,
                     chineseName: true,
-                    priceInCents: true,
                   },
                 },
               },
@@ -535,20 +541,24 @@ export const getFutureOrders = async () => {
         customerEmail: true,
         customerPhoneNumber: true,
         priceInCents: true,
+        discountedAmountInCents: true,
+        dineIn: true,
         source: true,
         notified: true,
         GST: true,
         appUserId: true,
         desserts: {
           select: {
+            orderId: true,
             id: true,
             quantity: true,
+            priceInCents: true,
+            discountedAmountInCents: true,
             dessert: {
               select: {
                 id: true,
                 name: true,
                 chineseName: true,
-                priceInCents: true,
                 imagePath: true,
               },
             },
@@ -561,7 +571,6 @@ export const getFutureOrders = async () => {
                     id: true,
                     name: true,
                     chineseName: true,
-                    priceInCents: true,
                   },
                 },
               },
@@ -574,13 +583,7 @@ export const getFutureOrders = async () => {
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
-      if (
-        (timeBetween <= 15 * 60 * 1000 &&
-          order.source === "APP" &&
-          order.notified === true) ||
-        order.source === "APP"
-      )
-        return false
+      if (order.notified === true) return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
@@ -598,11 +601,7 @@ export const getFutureOrders = async () => {
     })
 
     for (const order of filteredOrders) {
-      emitNewOrder(order)
-      await db.order.update({
-        where: { id: order.id },
-        data: { notified: true }, // ✅ persist notification state
-      })
+      emitNewOrder(order) // change notified to true on the frontend when the frontend accepts the order.
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)

@@ -45,7 +45,6 @@ export const io = new Server(server, {
 // Authentication middleware for socket connections
 io.use((socket, next) => {
   const token = socket.handshake.auth.token
-  console.log("Socket connection attempt ", token)
   if (!token) {
     return next(new Error("Authentication error"))
   }
@@ -53,19 +52,11 @@ io.use((socket, next) => {
   // In a real app, verify the token here
   // For example: verifyJWT(token)
 
-  jwt.verify(
-    token,
-    process.env.JWT_SECRET!,
-    (
-      err: jwt.VerifyErrors | null,
-      decoded: jwt.JwtPayload | string | undefined
-    ) => {
-      if (err) {
-        return next(new Error("Authentication error"))
-      }
-      console.log("Decoded token: ", decoded)
+  jwt.verify(token, process.env.JWT_SECRET!, (err: jwt.VerifyErrors | null) => {
+    if (err) {
+      return next(new Error("Authentication error"))
     }
-  )
+  })
 
   // Attach user info to the socket
   socket.userId = "admin" // This would come from the token verification

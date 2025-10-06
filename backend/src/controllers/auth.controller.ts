@@ -476,7 +476,7 @@ export const createOrder = async (req: Request, res: Response) => {
           create: cart.cartItems.map((dessertItem) => ({
             dessert: {
               connect: {
-                id: dessertItem.dessertId, // Ensure dessert exists before connecting
+                id: dessertItem.dessert.id, // Ensure dessert exists before connecting
               },
             },
 
@@ -488,7 +488,7 @@ export const createOrder = async (req: Request, res: Response) => {
               create: dessertItem.customisations.map((customisationsItem) => ({
                 customisation: {
                   connect: {
-                    id: customisationsItem.customisationId, // Ensure customisation exists before connecting
+                    id: customisationsItem.customisation.id, // Ensure customisation exists before connecting
                   },
                 },
                 quantity: customisationsItem.quantity,
@@ -513,12 +513,12 @@ export const createOrder = async (req: Request, res: Response) => {
         pickedUpAt: true,
         GST: true,
         appUserId: true,
+        notified: true,
         desserts: {
           select: {
             orderId: true,
             id: true,
             quantity: true,
-            dessertId: true,
             priceInCents: true,
             discountedAmountInCents: true,
             dessert: {
@@ -533,7 +533,6 @@ export const createOrder = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 quantity: true,
-                customisationId: true,
                 customisation: {
                   select: {
                     id: true,
@@ -579,13 +578,14 @@ export const createOrder = async (req: Request, res: Response) => {
       subject: "Order Confirmation",
       react: EmailOrderConfirmation({ order: newOrder }),
     })
-    // if (
-    //   newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
-    //     1000 * 60 * 15 ||
-    //   parsedBody.pickupNow
-    // ) {
-    //   emitNewOrder(newOrder)
-    // }
+    if (
+      (newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
+        1000 * 60 * 15 ||
+        parsedBody.pickupNow) &&
+      !newOrder.notified
+    ) {
+      emitNewOrder(newOrder)
+    }
 
     res.status(201).json({ order: newOrder })
     return
