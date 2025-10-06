@@ -7,15 +7,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import { useAuth } from "@/store/authProvider"
 
-const tabOptions = (title: string) => {
-  return {
-    title: title,
-    headerShown: false,
-    tabBarActiveTintColor: "#e6aa6b",
-    tabBarInactiveTintColor: "#000",
-  }
-}
-
 export default function _layout() {
   const { refetchUsersMembership } = useAuth()
   useEffect(() => {
