@@ -11,6 +11,8 @@ type DessertCardProps = {
   setSelectedDessert: React.Dispatch<React.SetStateAction<Dessert>>
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
   router: Router
+  currency: "cents" | "points"
+  loyaltyPoints?: number
 }
 
 export const DessertCard = React.memo(
@@ -21,6 +23,8 @@ export const DessertCard = React.memo(
     setSelectedDessert,
     setModalVisible,
     router,
+    currency = "cents",
+    loyaltyPoints,
   }: DessertCardProps) => {
     const { height, width } = Dimensions.get("window")
 
@@ -33,7 +37,9 @@ export const DessertCard = React.memo(
           resizeMode="contain"
         />
 
-        <Text className="text-lg font-medium my-2">{dessert.name}</Text>
+        <Text className="text-lg font-medium my-2 text-center">
+          {dessert.name}
+        </Text>
 
         <TouchableOpacity
           onPress={() => {
@@ -44,27 +50,38 @@ export const DessertCard = React.memo(
               router.push("/signin")
             }
           }}
+          disabled={loyaltyPoints < dessert.priceInLoyaltyPoints}
           className="bg-primary rounded-lg p-3 items-center w-1/2  mx-auto"
         >
           {token ? (
             <View className="flex-col items-center justify-center">
-              {usersMembership?.isActive ? (
+              {currency === "cents" ? (
                 <>
-                  <View className="flex-row items-center gap-1">
-                    <Text className="text-red-600 line-through text-sm">
+                  {usersMembership?.isActive ? (
+                    <>
+                      <View className="flex-row items-center gap-1">
+                        <Text className="text-red-600 line-through text-sm">
+                          {formatCurrency(Number(dessert.priceInCents) / 100)}
+                        </Text>
+                        <Text className="text-white font-bold text-lg">
+                          {formatCurrency(
+                            (Number(dessert.priceInCents) * 0.85) / 100
+                          )}
+                        </Text>
+                      </View>
+                      <Text className="text-xs text-yellow-300">
+                        Member Price
+                      </Text>
+                    </>
+                  ) : (
+                    <Text className="text-white font-bold text-lg">
                       {formatCurrency(Number(dessert.priceInCents) / 100)}
                     </Text>
-                    <Text className="text-white font-bold text-lg">
-                      {formatCurrency(
-                        (Number(dessert.priceInCents) * 0.85) / 100
-                      )}
-                    </Text>
-                  </View>
-                  <Text className="text-xs text-yellow-300">Member Price</Text>
+                  )}
                 </>
               ) : (
                 <Text className="text-white font-bold text-lg">
-                  {formatCurrency(Number(dessert.priceInCents) / 100)}
+                  {dessert.priceInLoyaltyPoints} points
                 </Text>
               )}
             </View>

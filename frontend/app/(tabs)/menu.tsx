@@ -176,6 +176,7 @@ export default function Menu() {
                           setSelectedDessert={setSelectedDessert}
                           setModalVisible={setModalVisible}
                           router={router}
+                          currency="cents"
                         />
                       )}
                     />

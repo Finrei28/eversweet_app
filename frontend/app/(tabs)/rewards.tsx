@@ -19,8 +19,10 @@ import useFetch from "@/services/use_fetch"
 import CustomModal from "@/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
+import { DessertCard } from "@/_components/dessertCard"
 
 export default function Loyalty() {
+  const { usersMembership } = useAuth()
   const [selectedCategory, setSelectedCategory] =
     useState<DessertCategory | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>("")
@@ -186,7 +188,7 @@ export default function Loyalty() {
                     renderItem={({ item }) => (
                       <View className="mb-8">
                         {/* Category Name */}
-                        <Text className="text-xl font-bold text-center mb-6">
+                        <Text className="text-3xl font-bold text-center mb-6">
                           {item.name}
                         </Text>
 
@@ -195,58 +197,17 @@ export default function Loyalty() {
                           data={item.desserts} // Only this category's desserts
                           keyExtractor={(dessert) => dessert.id.toString()}
                           renderItem={({ item: dessert }) => {
-                            const requiredPoints =
-                              Math.round(Number(dessert.priceInCents) / 5) * 5
                             return (
-                              <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 py-5 ">
-                                {/* Dessert Image */}
-                                <Image
-                                  source={{ uri: dessert.imagePath }}
-                                  className="relative w-full h-80 rounded-lg"
-                                  resizeMode="cover"
-                                />
-                                {/* Dessert Name */}
-                                <Text className="text-lg font-medium">
-                                  {dessert.name}
-                                </Text>
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    // Handle button press
-                                    // addItem({ ...dessert, quantity: quantity,  })
-                                    setSelectedDessert(dessert)
-                                    setModalVisible(true)
-                                  }}
-                                  disabled={
-                                    requiredPoints > Number(loyaltyPoints)
-                                  }
-                                  accessibilityLabel={`View more for ${dessert.name}`}
-                                  accessibilityHint={`Press to view more about ${dessert.name}`}
-                                  accessibilityRole="button"
-                                  accessibilityState={{ selected: false }}
-                                  accessibilityLabelledBy="view-more-button"
-                                  className={`rounded-lg p-3 items-center w-1/2 mt-4 mx-auto 
-                                ${
-                                  requiredPoints > Number(loyaltyPoints)
-                                    ? "bg-gray-300"
-                                    : "bg-primary"
-                                }`}
-                                  // style={{
-                                  //   backgroundColor: "#007BFF", // Replace with your desired button color
-                                  //   padding: 10,
-                                  //   borderRadius: 5,
-                                  //   alignItems: "center",
-                                  // }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: "#FFFFFF",
-                                      fontWeight: "bold",
-                                    }}
-                                  >
-                                    Add {dessert.priceInLoyaltyPoints} points
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
+                              <DessertCard
+                                dessert={dessert}
+                                token={token}
+                                usersMembership={usersMembership}
+                                setSelectedDessert={setSelectedDessert}
+                                setModalVisible={setModalVisible}
+                                router={router}
+                                currency="points"
+                                loyaltyPoints={loyaltyPoints}
+                              />
                             )
                           }}
                         />
