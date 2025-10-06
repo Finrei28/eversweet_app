@@ -552,21 +552,21 @@ export const createOrder = async (req: Request, res: Response) => {
     // add points members and non members
     if (cart.totalPriceInCents > 0) {
       let earnablePoints = 0
-      if (membership?.isActive) {
-        earnablePoints = cart.cartItems.reduce(
-          (acc, item) =>
-            acc +
-            Math.floor(
-              ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
-                (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
-                item.quantity *
-                (membership?.isActive
-                  ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
-                  : (loyaltyRates.modifier ?? 1))
-            ),
-          0
-        )
-      }
+
+      earnablePoints = cart.cartItems.reduce(
+        (acc, item) =>
+          acc +
+          Math.floor(
+            ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
+              (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
+              item.quantity *
+              (membership?.isActive
+                ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
+                : (loyaltyRates.modifier ?? 1))
+          ),
+        0
+      )
+
       await incrementLoyaltyPoints(userId, earnablePoints)
     }
 
@@ -590,13 +590,6 @@ export const createOrder = async (req: Request, res: Response) => {
     res.status(201).json({ order: newOrder })
     return
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({
-        message: "Invalid data",
-        errors: error.errors, // This will give the validation errors
-      })
-      return
-    }
     if (newOrder?.id) {
       res.status(500).json({
         message: "Order was created, but a follow-up action failed.",
@@ -604,6 +597,14 @@ export const createOrder = async (req: Request, res: Response) => {
       })
       return
     }
+    if (error instanceof z.ZodError) {
+      res.status(400).json({
+        message: "Invalid data",
+        errors: error.errors, // This will give the validation errors
+      })
+      return
+    }
+
     // Handle other types of errors (e.g., DB errors)
     res.status(500).json({ message: "Internal server error" })
     return
