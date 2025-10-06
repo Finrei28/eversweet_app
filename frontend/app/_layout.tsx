@@ -41,7 +41,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      getStoreHours()
+      await getStoreHours()
       const token = await getToken()
       const annoucementList = await getAnnouncements()
       setAnnouncements(annoucementList)
