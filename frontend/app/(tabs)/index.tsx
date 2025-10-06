@@ -1,4 +1,4 @@
-import React, { useEffect } from "react"
+import React from "react"
 import {
   Text,
   View,
@@ -8,7 +8,7 @@ import {
   Platform,
 } from "react-native"
 import PageHeader from "@/_components/pageheader"
-import { SplashScreen, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
 import { FontAwesome } from "@expo/vector-icons"
 import useFetch from "@/services/use_fetch"
 import { getHomepageCards, getPromotions } from "@/services/api"

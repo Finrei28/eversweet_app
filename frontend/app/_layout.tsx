@@ -107,6 +107,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AuthProvider>
           <StatusBar barStyle="dark-content" />
+
           <Stack
             screenOptions={{
               headerShown: false,
@@ -119,13 +120,13 @@ export default function RootLayout() {
               setModalVisible={setModalVisible}
             />
           )}
-          {announcements?.length > 0 && showAnnounceModal && (
+          {/* {announcements?.length > 0 && showAnnounceModal && (
             <AnnouncementsPopup
               showAnnounceModal={showAnnounceModal}
               setShowAnnounceModal={setShowAnnounceModal}
               announcements={announcements}
             />
-          )}
+          )} */}
 
           <Toast config={toastConfig} />
         </AuthProvider>
