@@ -32,7 +32,7 @@ export default function Index() {
     if (!loadingPromotions && !loadingContents) {
       SplashScreen.hideAsync()
     }
-  }, [loadingPromotions])
+  }, [loadingPromotions, loadingContents])
   if (!homePageContents || homePageContents?.length === 0) {
     return (
       <View className="flex-1 bg-background">

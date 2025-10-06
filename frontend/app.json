@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Eversweet",
-    "slug": "Eversweet",
+    "slug": "eversweet_app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/ios-light.png",
