@@ -2,7 +2,7 @@ import { formatCurrency } from "@/lib/formatters"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
 import React from "react"
-import { View, Image, Text, TouchableOpacity } from "react-native"
+import { View, Image, Text, TouchableOpacity, Dimensions } from "react-native"
 
 type DessertCardProps = {
   dessert: Dessert
@@ -22,14 +22,18 @@ export const DessertCard = React.memo(
     setModalVisible,
     router,
   }: DessertCardProps) => {
+    const { height, width } = Dimensions.get("window")
+
     return (
-      <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 pb-5">
+      <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 p-5">
         <Image
           source={{ uri: dessert.imagePath }}
-          className="relative rounded-lg w-full h-80"
-          resizeMode="cover"
+          className="relative rounded-lg w-full"
+          style={{ height: height * 0.3 }}
+          resizeMode="contain"
         />
-        <Text className="text-lg font-medium">{dessert.name}</Text>
+
+        <Text className="text-lg font-medium my-2">{dessert.name}</Text>
 
         <TouchableOpacity
           onPress={() => {
@@ -40,7 +44,7 @@ export const DessertCard = React.memo(
               router.push("/signin")
             }
           }}
-          className="bg-primary rounded-lg p-3 items-center w-1/2 mt-4 mx-auto"
+          className="bg-primary rounded-lg p-3 items-center w-1/2  mx-auto"
         >
           {token ? (
             <View className="flex-col items-center justify-center">

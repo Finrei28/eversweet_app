@@ -14,9 +14,6 @@ import useFetch from "@/services/use_fetch"
 import { getHomepageCards, getPromotions } from "@/services/api"
 import BouncingLoader from "@/_components/loader"
 
-// Keep splash screen on when loading data
-SplashScreen.preventAutoHideAsync()
-
 // This is needed for the order history screen to properly import FontAwesome
 export { FontAwesome }
 
@@ -28,12 +25,12 @@ export default function Index() {
   const { data: homePageContents, loading: loadingContents } = useFetch(() =>
     getHomepageCards()
   )
-  useEffect(() => {
-    if (!loadingPromotions && !loadingContents) {
-      SplashScreen.hideAsync()
-    }
-  }, [loadingPromotions, loadingContents])
-  if (!homePageContents || homePageContents?.length === 0) {
+
+  if (
+    loadingContents ||
+    loadingPromotions ||
+    (homePageContents?.length === 0 && promotions?.length === 0)
+  ) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />
@@ -47,6 +44,7 @@ export default function Index() {
       </View>
     )
   }
+
   return (
     <View className="flex-1 bg-background">
       <PageHeader />
