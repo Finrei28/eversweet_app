@@ -197,36 +197,3 @@ export const getOverviewAPI = async (): Promise<Overview> => {
     throw new Error(error?.message || "Something went wrong.")
   }
 }
-
-export const setOrderNotified = async (orderId: string) => {
-  try {
-    const token = await getToken()
-    const isAuthorised = await isUserAuthorised()
-    if (!isAuthorised) {
-      throw new Error("You're unauthorised to access this!")
-    }
-
-    const res = await fetch(`${url}/api/admin/setOrderNotified`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        orderId,
-      }),
-    })
-    const data = await res.json()
-    if (res.status === 403) {
-      throw new Error("You're unauthorised to access this!")
-    }
-
-    if (!res.ok) {
-      throw new Error(data.message || "failed to update order notifier")
-    }
-
-    return data
-  } catch (error) {
-    throw new Error(error?.message || "Something went wrong.")
-  }
-}

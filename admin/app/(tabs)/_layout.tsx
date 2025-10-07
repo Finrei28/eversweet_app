@@ -6,8 +6,6 @@ import { Ionicons } from "@expo/vector-icons"
 import { Redirect, Tabs } from "expo-router"
 import { ActivityIndicator, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import * as ScreenOrientation from "expo-screen-orientation"
-import { useEffect } from "react"
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets()
@@ -30,7 +28,7 @@ export default function TabsLayout() {
   if (!authenticated) {
     return <Redirect href="/sign-in" />
   }
-  const { pendingOrders } = useOrderContext()
+  const { currentOrders } = useOrderContext()
 
   return (
     <Tabs
@@ -67,7 +65,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time-outline" size={size} color={color} />
           ),
-          tabBarBadge: pendingOrders.length || undefined,
+          tabBarBadge: currentOrders.length || undefined,
           tabBarBadgeStyle: { backgroundColor: "#EF4444" },
         }}
       />

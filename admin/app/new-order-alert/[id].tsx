@@ -52,22 +52,22 @@ export default function NewOrderAlert() {
       checkSoundAndPlay()
 
       // Set up the listener for the looping logic
-      player.addListener("playbackStatusUpdate", async (status) => {
-        const soundEnabled = await AsyncStorage.getItem("soundEnabled")
-        // If sound is not explicitly disabled
-        if (soundEnabled !== "false") {
-          try {
-            // Check if playback has finished
-            if (status.didJustFinish) {
-              // Rewind and play again
-              await player.seekTo(0)
-              player.play()
-            }
-          } catch (error) {
-            console.error("Error playing sound", error)
-          }
-        }
-      })
+      // player.addListener("playbackStatusUpdate", async (status) => {
+      //   const soundEnabled = await AsyncStorage.getItem("soundEnabled")
+      //   // If sound is not explicitly disabled
+      //   if (soundEnabled !== "false") {
+      //     try {
+      //       // Check if playback has finished
+      //       if (status.didJustFinish) {
+      //         // Rewind and play again
+      //         await player.seekTo(0)
+      //         player.play()
+      //       }
+      //     } catch (error) {
+      //       console.error("Error playing sound", error)
+      //     }
+      //   }
+      // })
     }
 
     // Check if auto-accept is enabled
@@ -81,24 +81,12 @@ export default function NewOrderAlert() {
     }
 
     checkAutoAccept()
-    console.log(player.playing)
-
-    return () => {
-      if (player) {
-        player.pause()
-      }
-    }
-  }, [order, player])
+  }, [player])
 
   if (!order) {
     // Close the modal if order not found
-    if (player) {
-      player.pause()
-    }
     setTimeout(() => {
       if (router.canGoBack?.()) {
-        router.back()
-      } else {
         router.replace("/current-orders")
       }
     }, 200)
@@ -110,9 +98,6 @@ export default function NewOrderAlert() {
     if (hasAccepted.current) return // Prevent double execution
     hasAccepted.current = true
     // Fade out animation before closing
-    if (player) {
-      player.pause()
-    }
     await updateOrderStatus(order.id, "ACCEPTED")
     Animated.timing(fadeAnim, {
       toValue: 0,
@@ -178,7 +163,8 @@ export default function NewOrderAlert() {
             {getCollectionTime(new Date())}
           </Text>
           <Text className="text-gray-500 mb-4">
-            Pick up at {getCollectionTime(new Date(order.pickUpTime))}
+            {order?.dineIn ? "Eat in" : "Pick up"} at{" "}
+            {getCollectionTime(new Date(order.pickUpTime))}
           </Text>
           <View className="flex-row justify-between mb-2">
             <Text className="text-xl font-semibold">

@@ -21,38 +21,30 @@ import {
 
 export default function CurrentOrders() {
   const router = useRouter()
-  const {
-    currentOrders,
-    pendingOrders,
-    fetchOrders,
-    updateOrderStatus,
-    isLoading,
-  } = useOrderContext()
+  const { currentOrders, fetchOrders, updateOrderStatus, isLoading } =
+    useOrderContext()
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const { authenticated, loading } = useAuth()
 
-  const statuses = ["PENDING", "ACCEPTED", "MAKING", "READY", "PICKED_UP"]
+  const statuses = ["ACCEPTED", "MAKING", "READY", "PICKED_UP"]
 
   const filteredOrders = useMemo(() => {
     let orders = [...currentOrders]
 
     // Add pending orders that haven't been accepted/declined yet
-    if (selectedStatus === "PENDING" || !selectedStatus) {
-      orders = [...pendingOrders, ...orders]
-    }
 
     // Filter by selected status
     if (selectedStatus) {
       orders = orders.filter((order) => order.status === selectedStatus)
     }
 
-    // Sort by created time (newest first)
+    // Sort by created time (earlist first)
     return orders.sort(
       (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        new Date(a.pickUpTime).getTime() - new Date(b.pickUpTime).getTime()
     )
-  }, [currentOrders, pendingOrders, selectedStatus])
+  }, [currentOrders, selectedStatus])
 
   const onRefresh = async () => {
     setRefreshing(true)

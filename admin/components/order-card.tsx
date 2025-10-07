@@ -82,7 +82,7 @@ export function OrderCard({
               {formatDate(new Date(order.createdAt).toISOString())}
             </Text>
             <Text className="text-gray-500">
-              Desired pick up time:{" "}
+              Desired {order.dineIn ? "eat in" : "pick up"} time:{" "}
               {getCollectionTime(new Date(order.pickUpTime))}
             </Text>
           </View>

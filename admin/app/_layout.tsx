@@ -84,7 +84,7 @@ function AppLayout() {
             <Stack.Screen
               name="new-order-alert/[id]"
               options={{
-                headerShown: Platform.OS === "ios" ? true : false,
+                headerShown: false,
                 presentation: "transparentModal",
               }}
             />

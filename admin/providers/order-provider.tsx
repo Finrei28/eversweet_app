@@ -4,8 +4,6 @@ import { Order, OrderStatus } from "@/lib/types"
 import {
   getCurrentOrders,
   getPastOrders,
-  getPendingOrders,
-  setOrderNotified,
   updateOrderStatusAPI,
 } from "@/services/api"
 import thermalPrinter from "@/services/thermal-printer"
@@ -68,9 +66,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
-      const pendingOrders = await getPendingOrders()
       const currentOrders = await getCurrentOrders()
-      setPendingOrders(pendingOrders)
       setCurrentOrders(currentOrders)
     } catch (error) {
       Alert.alert("Error", error.message)
@@ -167,16 +163,15 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         // Delete from pending
         setPendingOrders((prev) => prev.filter((order) => order.id !== orderId))
         setCurrentAlertId(null)
-        await setOrderNotified(orderId)
 
         if (newOrder) {
           // Update the order status
-          const updatedOrder = { ...newOrder, status: newStatus as OrderStatus }
+          const updatedOrder = { ...newOrder, status: newStatus }
           setCurrentOrders((prev) => [...prev, updatedOrder])
         } else if (existingOrder) {
           const updatedOrder = {
             ...existingOrder,
-            status: newStatus as OrderStatus,
+            status: newStatus,
           }
           setCurrentOrders((prev) =>
             prev.map((o) => (o.id === orderId ? updatedOrder : o))
@@ -185,8 +180,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         await handlePrintReceipt(existingOrder)
 
         // } else if (newStatus === "DECLINED") {
-        //   // Remove from pending
-        //   setPendingOrders((prev) => prev.filter((order) => order.id !== orderId))
       } else if (newStatus === "PICKED_UP") {
         // Move from current to completed
         const order = currentOrders.find((order) => order.id === orderId)

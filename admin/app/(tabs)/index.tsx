@@ -112,8 +112,8 @@ export default function Dashboard() {
           />
 
           <SummaryCard
-            title="Pending Orders"
-            value={pendingOrders?.length.toString()}
+            title="Current Orders"
+            value={currentOrders?.length.toString()}
             icon="time-outline"
             color="#F59E0B"
             isLoading={isLoading}

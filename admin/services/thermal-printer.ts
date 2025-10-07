@@ -627,6 +627,10 @@ class ThermalPrinterService {
       receiptText += LINE_FEED
       receiptText += "Date: " + getCollectionTime(new Date())
       receiptText += LINE_FEED
+      receiptText += BOLD_ON
+      receiptText += orderData.dineIn ? "EAT IN" : "TAKE AWAY"
+      receiptText += BOLD_OFF
+      receiptText += LINE_FEED
       receiptText +=
         "Customer: " +
         orderData.customerFirstName +
@@ -695,7 +699,7 @@ class ThermalPrinterService {
 
       // Footer
       receiptText += ALIGN_CENTER
-      receiptText += "Desired pick up time:"
+      receiptText += `Desired ${orderData.dineIn ? "eat in" : "pick up"} time`
       receiptText += LINE_FEED
       receiptText += formatTime(new Date(orderData.pickUpTime))
       receiptText += LINE_FEED + LINE_FEED + LINE_FEED + LINE_FEED
