@@ -77,8 +77,9 @@ export async function savePushToken(pushToken: string) {
   try {
     const authToken = await getToken()
     if (!authToken) {
-      // console.log("User not authenticated, cannot save push token")
-      return false
+      throw new Error(
+        "Please sign in to receive notifications about your orders"
+      )
     }
 
     const response = await fetch(`${url}/api/notification/pushToken`, {
