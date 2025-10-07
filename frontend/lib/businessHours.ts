@@ -17,7 +17,13 @@ export const fallbackStoreHours: StoreHours = {
 }
 
 export function isOutsideBusinessHours(date: Date, storeHours: StoreHours) {
+  if (!date) {
+    return true
+  }
   const dayName = date.toLocaleDateString("en-NZ", { weekday: "long" }) // e.g., "Monday"
+  if (!storeHours[dayName]) {
+    return true
+  }
   const [openStr, closeStr] = storeHours[dayName]
 
   const [openHour, openMinute, openPeriod] = parseTime(openStr)
