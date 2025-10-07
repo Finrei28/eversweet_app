@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast, { BaseToast } from "react-native-toast-message"
 import { useEffect, useRef, useState } from "react"
+import * as Notifications from "expo-notifications"
 import { useLoyaltyStore } from "@/store/points"
 import { getToken } from "@/services/authToken"
 import {
@@ -23,11 +24,17 @@ import { Announcements } from "@/utils/types"
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-  const notificationListener = useRef<{ unsubscribe: () => void } | null>(null)
+  const notificationResponseListener =
+    useRef<Notifications.EventSubscription | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcements>([])
   const [showAnnounceModal, setShowAnnounceModal] = useState(false)
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true) // mark that the router layout is mounted
+  }, [])
 
   useEffect(() => {
     // Check if user is authenticated
@@ -77,21 +84,25 @@ export default function RootLayout() {
       registerPushNotifications()
 
       // Set up notification listeners
-      notificationListener.current = setupNotificationListeners(
-        (notification) =>
-          handleNotification(notification, (path) =>
-            router.replace(path as Parameters<typeof router.replace>[0])
-          )
-      )
+      notificationResponseListener.current =
+        Notifications.addNotificationResponseReceivedListener((response) => {
+          const notification = response.notification
+          handleNotification(notification, (path) => {
+            // wait for router to mount before navigating
+            if (mounted) {
+              router.replace(path as Parameters<typeof router.replace>[0])
+            }
+          })
+        })
     }
 
     // Clean up listeners when component unmounts
     return () => {
-      if (notificationListener.current) {
-        notificationListener.current?.unsubscribe()
+      if (notificationResponseListener.current) {
+        notificationResponseListener.current?.remove()
       }
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, mounted])
 
   const toastConfig = {
     error: (props: any) => (
