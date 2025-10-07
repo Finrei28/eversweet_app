@@ -300,6 +300,7 @@ export const getCartItems = async (req: Request, res: Response) => {
             where: {
               offerId: item.offerId,
               membershipId: membership.id,
+              used: { gt: 0 },
             },
             data: {
               used: { decrement: 1 },
@@ -327,6 +328,7 @@ export const getCartItems = async (req: Request, res: Response) => {
               where: {
                 offerId: item.offerId,
                 membershipId: membership.id,
+                used: { gt: 0 },
               },
               data: {
                 used: { decrement: 1 },
@@ -343,7 +345,7 @@ export const getCartItems = async (req: Request, res: Response) => {
 
         if (deletedItems.count > 0) {
           warning =
-            "One or more items in your cart required an active membership. These items have been removed from your cart."
+            "One or more items in your cart requires an active membership. These items have been removed from your cart."
         }
       }
     }
@@ -434,6 +436,7 @@ export const clearCart = async (req: Request, res: Response) => {
           where: {
             offerId: item.offerId,
             membershipId: membership.id,
+            used: { gt: 0 },
           },
           data: {
             used: { decrement: 1 },
@@ -489,6 +492,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         where: {
           offerId: cartItem.offerId,
           membershipId: membership.id,
+          used: { gt: 0 },
         },
         data: {
           used: { decrement: 1 },
