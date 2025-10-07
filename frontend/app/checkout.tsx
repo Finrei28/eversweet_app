@@ -477,11 +477,11 @@ function CheckoutContent() {
     const totalItems = getTotalItems()
 
     const pickUpNowTime = getEstimatedPickUpTime(totalItems)
-    const notOpenYet =
-      isOutsideBusinessHours(pickUpNowTime, storeHours) ||
-      (eatIn
-        ? isOutsideBusinessHours(eatInDate, storeHours)
-        : isOutsideBusinessHours(pickupDate, storeHours))
+    const notOpenYet = pickupNow
+      ? isOutsideBusinessHours(pickUpNowTime, storeHours)
+      : eatIn
+      ? isOutsideBusinessHours(eatInDate, storeHours)
+      : isOutsideBusinessHours(pickupDate, storeHours)
     if (notOpenYet && pickupNow) {
       Alert.alert(
         "We're closed or are not open yet. Please pick a suitable pick up time."
