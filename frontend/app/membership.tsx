@@ -62,6 +62,7 @@ function MembershipContent() {
   const [membershipDetails, setMembershipDetails] =
     useState<MembershipDetails | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
 
   // Fetch saved cards when component mounts
   useFocusEffect(
@@ -81,6 +82,15 @@ function MembershipContent() {
     const membershipDetails = await getMembershipDetails()
     setMembershipDetails(membershipDetails)
     setLoadingMembershipDetails(false)
+  }
+
+  const handlePaymentSheet = async () => {
+    setLoadingPaymentSheet(true)
+    await openPaymentSheetForSetup(
+      { initPaymentSheet, presentPaymentSheet },
+      fetchSavedCards
+    )
+    setLoadingPaymentSheet(false)
   }
 
   const fetchSavedCards = async () => {
@@ -331,13 +341,9 @@ function MembershipContent() {
                     No payment methods found
                   </Text>
                   <TouchableOpacity
-                    onPress={() =>
-                      openPaymentSheetForSetup(
-                        { initPaymentSheet, presentPaymentSheet },
-                        fetchSavedCards
-                      )
-                    }
+                    onPress={handlePaymentSheet}
                     className="mt-3 bg-primary py-2 px-4 rounded-lg"
+                    disabled={loadingPaymentSheet}
                   >
                     <Text className="text-white">Add Payment Method</Text>
                   </TouchableOpacity>
@@ -347,13 +353,9 @@ function MembershipContent() {
               {showAddCard && (
                 <View className="mt-4">
                   <TouchableOpacity
-                    onPress={() =>
-                      openPaymentSheetForSetup(
-                        { initPaymentSheet, presentPaymentSheet },
-                        fetchSavedCards
-                      )
-                    }
+                    onPress={handlePaymentSheet}
                     className="bg-primary py-3 rounded-lg items-center"
+                    disabled={loadingPaymentSheet}
                   >
                     <Text className="text-white font-medium">Add New Card</Text>
                   </TouchableOpacity>

@@ -51,11 +51,7 @@ function PaymentMethodsContent() {
   const { token, loading: loadingToken } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
-  const [showAddCard, setShowAddCard] = useState(false)
-  const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(
-    null
-  )
-  const [processingCard, setProcessingCard] = useState(false)
+  const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
 
   // Fetch saved cards when component mounts
   useEffect(() => {
@@ -77,6 +73,15 @@ function PaymentMethodsContent() {
     } finally {
       setLoadingCards(false)
     }
+  }
+
+  const handlePaymentSheet = async () => {
+    setLoadingPaymentSheet(true)
+    await openPaymentSheetForSetup(
+      { initPaymentSheet, presentPaymentSheet },
+      fetchSavedCards
+    )
+    setLoadingPaymentSheet(false)
   }
 
   const handleDeleteCard = async (paymentMethodId: string) => {
@@ -127,20 +132,15 @@ function PaymentMethodsContent() {
       <ScrollView className="flex-1 px-4">
         <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Payment Methods</Text>
-          {!showAddCard && (
-            <TouchableOpacity
-              onPress={() =>
-                openPaymentSheetForSetup(
-                  { initPaymentSheet, presentPaymentSheet },
-                  fetchSavedCards
-                )
-              }
-              className="flex-row items-center"
-            >
-              <Feather name="plus" size={18} color="#6B7280" />
-              <Text className="ml-1 text-gray-500">Add</Text>
-            </TouchableOpacity>
-          )}
+
+          <TouchableOpacity
+            onPress={handlePaymentSheet}
+            className="flex-row items-center"
+            disabled={loadingPaymentSheet}
+          >
+            <Feather name="plus" size={18} color="#6B7280" />
+            <Text className="ml-1 text-gray-500">Add</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Add New Card Form */}
@@ -184,19 +184,15 @@ function PaymentMethodsContent() {
         )} */}
         <>
           <TouchableOpacity
-            onPress={() =>
-              openPaymentSheetForSetup(
-                { initPaymentSheet, presentPaymentSheet },
-                fetchSavedCards
-              )
-            }
+            onPress={handlePaymentSheet}
+            disabled={loadingPaymentSheet}
           >
             <View className="bg-white rounded-xl shadow-sm p-6 items-center mb-6">
               <Feather name="credit-card" size={48} color="#D1D5DB" />
               <Text className="mt-2 text-gray-500 text-center">
                 {savedCards.length > 0
                   ? "Add another payment method"
-                  : "No payment methods added yet"}
+                  : "Add a payment method"}
               </Text>
             </View>
           </TouchableOpacity>

@@ -46,7 +46,6 @@ import {
 } from "@/lib/formatters"
 import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
-import { CartItem } from "@/utils/types"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 
 // Your Stripe publishable key - should be in environment variables
@@ -71,7 +70,7 @@ function CheckoutContent() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [showAddCard, setShowAddCard] = useState(false)
-
+  const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null)
   const [orderInProgress, setOrderInProgress] = useState<string | null>(null)
   const [isCheckingStatus, setIsCheckingStatus] = useState(false)
@@ -165,6 +164,15 @@ function CheckoutContent() {
       subscription.remove()
     }
   }, [paymentIntentId, orderInProgress])
+
+  const handlePaymentSheet = async () => {
+    setLoadingPaymentSheet(true)
+    await openPaymentSheetForSetup(
+      { initPaymentSheet, presentPaymentSheet },
+      fetchSavedCards
+    )
+    setLoadingPaymentSheet(false)
+  }
 
   const handleAppStateChange = async (nextAppState: AppStateStatus) => {
     // App has come back to the foreground
@@ -1008,13 +1016,9 @@ function CheckoutContent() {
                     No payment methods found
                   </Text>
                   <TouchableOpacity
-                    onPress={() =>
-                      openPaymentSheetForSetup(
-                        { initPaymentSheet, presentPaymentSheet },
-                        fetchSavedCards
-                      )
-                    }
+                    onPress={handlePaymentSheet}
                     className="mt-3 bg-primary py-2 px-4 rounded-lg"
+                    disabled={loadingPaymentSheet}
                   >
                     <Text className="text-white">Add Payment Method</Text>
                   </TouchableOpacity>
@@ -1027,13 +1031,9 @@ function CheckoutContent() {
                     Add a new card at checkout
                   </Text>
                   <TouchableOpacity
-                    onPress={() =>
-                      openPaymentSheetForSetup(
-                        { initPaymentSheet, presentPaymentSheet },
-                        fetchSavedCards
-                      )
-                    }
+                    onPress={handlePaymentSheet}
                     className="bg-primary py-3 rounded-lg items-center"
+                    disabled={loadingPaymentSheet}
                   >
                     <Text className="text-white font-medium">Add New Card</Text>
                   </TouchableOpacity>
