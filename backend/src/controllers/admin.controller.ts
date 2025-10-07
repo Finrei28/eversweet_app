@@ -583,7 +583,7 @@ export const getFutureOrders = async () => {
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
-      if (order.notified === true) return false
+      if (order.notified === true || order.source === "APP") return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
