@@ -124,6 +124,42 @@ export const paymentMethods = async (req: Request, res: Response) => {
   }
 }
 
+export const createSetupIntent = async (req: Request, res: Response) => {
+  const userId = (req as any).userId
+  if (!userId) {
+    res.status(401).json({ message: "Unauthenticated" })
+    return
+  }
+
+  try {
+    const { customerId } = await getOrCreateCustomerId(userId)
+
+    const setupIntent = await stripe.setupIntents.create({
+      customer: customerId,
+      payment_method_types: ["card"],
+    })
+
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: "2020-08-27" }
+    )
+
+    res.status(200).json({
+      setupIntent: setupIntent.client_secret,
+      ephemeralKey: ephemeralKey.secret,
+      customer: customerId,
+    })
+    return
+  } catch (error) {
+    console.error("Error saving card:", error)
+    res.status(500).json({
+      message: "Error saving card",
+      error: (error as Error).message,
+    })
+  }
+  return
+}
+
 // POST /api/stripe/save-card - Save a payment method to customer
 export const saveCard = async (req: Request, res: Response) => {
   const userId = (req as any).userId
@@ -145,18 +181,31 @@ export const saveCard = async (req: Request, res: Response) => {
       res.status(400).json({ message: "Could not find your details" })
       return
     }
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId)
+    if (paymentMethod.customer && paymentMethod.customer !== customerId) {
+      res.status(400).json({
+        message: "This payment method is already attached to another customer",
+      })
+      return
+    }
 
     // Attach the payment method to the customer
     await stripe.paymentMethods.attach(paymentMethodId, {
       customer: customerId,
     })
+    const customer = await stripe.customers.retrieve(customerId)
+    let defaultPaymentMethod: string | undefined = undefined
+    defaultPaymentMethod = (customer as Stripe.Customer).invoice_settings
+      ?.default_payment_method as string | undefined
 
     // Set as the default payment method if desired
-    await stripe.customers.update(customerId, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    })
+    if (!defaultPaymentMethod) {
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      })
+    }
 
     res.status(200).json({ success: true })
     return
