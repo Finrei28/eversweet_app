@@ -23,9 +23,7 @@ export const pushToken = async (req: Request, res: Response) => {
       return
     }
 
-    // In a real app, you would save this token to your database
-    // Example: await db.collection('users').updateOne({ _id: userId }, { $set: { pushToken } })
-    const token = await db.user.update({
+    await db.user.update({
       where: { id: userId },
       data: {
         pushToken,

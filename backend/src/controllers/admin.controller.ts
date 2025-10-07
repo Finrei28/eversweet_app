@@ -316,6 +316,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         status: newStatus,
         pickedUpAt: newStatus === "PICKED_UP" ? new Date() : null,
         completedAt: newStatus === "READY" ? new Date() : null,
+        notified: true,
       },
       select: {
         tempOrderId: true,
@@ -493,29 +494,6 @@ export const getOverview = async (req: Request, res: Response) => {
   }
 }
 
-export const setOrderNotified = async (req: Request, res: Response) => {
-  const userId = (req as any).userId
-  const role = (req as any).role
-
-  const { orderId } = req.body
-
-  if (!userId && role !== "ADMIN") {
-    res.status(403).json({ message: "You're unauthorised to access this!" })
-    return
-  }
-  try {
-    await db.order.update({
-      where: { id: orderId },
-      data: { notified: true }, // set this on the frontend receive this to know any missed order alerts
-    })
-  } catch (error) {
-    res.status(500).json({
-      message: "Error updaing order notifier",
-      error: (error as Error).message,
-    })
-  }
-}
-
 // Get future orders where pickUpTime is more than 15 minutes from when the order was created
 export const getFutureOrders = async () => {
   try {
@@ -525,9 +503,6 @@ export const getFutureOrders = async () => {
       where: {
         status: "PENDING",
         notified: false,
-        pickUpTime: {
-          gt: now, // future orders
-        },
       },
       select: {
         id: true,
@@ -583,7 +558,7 @@ export const getFutureOrders = async () => {
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
       const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
-      if (order.notified === true || order.source === "APP") return false
+      if (order.notified === true) return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
