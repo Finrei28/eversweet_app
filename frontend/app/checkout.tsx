@@ -47,6 +47,7 @@ import {
 import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { CartItem } from "@/utils/types"
+import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -55,7 +56,7 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 
 function CheckoutContent() {
   const router = useRouter()
-  const { confirmPayment } = useStripe()
+  const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
   const {
     token,
     loading: loadingToken,
@@ -1007,7 +1008,12 @@ function CheckoutContent() {
                     No payment methods found
                   </Text>
                   <TouchableOpacity
-                    onPress={() => router.push("/payment-methods")}
+                    onPress={() =>
+                      openPaymentSheetForSetup(
+                        { initPaymentSheet, presentPaymentSheet },
+                        fetchSavedCards
+                      )
+                    }
                     className="mt-3 bg-primary py-2 px-4 rounded-lg"
                   >
                     <Text className="text-white">Add Payment Method</Text>
@@ -1022,10 +1028,10 @@ function CheckoutContent() {
                   </Text>
                   <TouchableOpacity
                     onPress={() =>
-                      router.push({
-                        pathname: "/payment-methods",
-                        params: { returnToCheckout: "true" },
-                      })
+                      openPaymentSheetForSetup(
+                        { initPaymentSheet, presentPaymentSheet },
+                        fetchSavedCards
+                      )
                     }
                     className="bg-primary py-3 rounded-lg items-center"
                   >
@@ -1068,7 +1074,10 @@ function CheckoutContent() {
 
 export default function CheckoutWithStripe() {
   return (
-    <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
+    <StripeProvider
+      publishableKey={STRIPE_PUBLISHABLE_KEY}
+      urlScheme="eversweet"
+    >
       <CheckoutContent />
     </StripeProvider>
   )

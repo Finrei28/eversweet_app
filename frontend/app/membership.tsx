@@ -26,8 +26,21 @@ import { MembershipDetails } from "@/utils/types"
 import { formatCurrency, formatShortDate } from "@/lib/formatters"
 import ShowOffers from "@/_components/showOffersToMembers"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
+import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
+import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 
-export default function MembershipContent() {
+export default function MembershipPage() {
+  return (
+    <StripeProvider
+      publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!}
+      urlScheme="eversweet"
+    >
+      <MembershipContent />
+    </StripeProvider>
+  )
+}
+
+function MembershipContent() {
   const router = useRouter()
   const {
     token,
@@ -35,6 +48,7 @@ export default function MembershipContent() {
     usersMembership,
     refetchUsersMembership,
   } = useAuth()
+  const { initPaymentSheet, presentPaymentSheet } = useStripe()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [showAddCard, setShowAddCard] = useState(false)
@@ -317,7 +331,12 @@ export default function MembershipContent() {
                     No payment methods found
                   </Text>
                   <TouchableOpacity
-                    onPress={() => router.push("/payment-methods")}
+                    onPress={() =>
+                      openPaymentSheetForSetup(
+                        { initPaymentSheet, presentPaymentSheet },
+                        fetchSavedCards
+                      )
+                    }
                     className="mt-3 bg-primary py-2 px-4 rounded-lg"
                   >
                     <Text className="text-white">Add Payment Method</Text>
@@ -329,9 +348,10 @@ export default function MembershipContent() {
                 <View className="mt-4">
                   <TouchableOpacity
                     onPress={() =>
-                      router.push({
-                        pathname: "/payment-methods",
-                      })
+                      openPaymentSheetForSetup(
+                        { initPaymentSheet, presentPaymentSheet },
+                        fetchSavedCards
+                      )
                     }
                     className="bg-primary py-3 rounded-lg items-center"
                   >

@@ -204,3 +204,9 @@ export type HomePageContent = {
   image: string
   category: string
 }
+
+export type SetUpIntent = {
+  setupIntent: string | null
+  ephemeralKey: string | undefined
+  customer: string | undefined
+}

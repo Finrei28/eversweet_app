@@ -1,4 +1,4 @@
-import { Stack, useRouter } from "expo-router"
+import { SplashScreen, Stack, useRouter } from "expo-router"
 import "./global.css"
 import { StatusBar } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
@@ -11,7 +11,6 @@ import { getToken } from "@/services/authToken"
 import {
   registerForPushNotificationsAsync,
   savePushToken,
-  setupNotificationListeners,
   handleNotification,
   hasMembershipPopupExpired,
 } from "@/services/notifications"

@@ -2,6 +2,7 @@
 import {
   MembershipDetails,
   MembershipStatus,
+  SetUpIntent,
   UsersMembership,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
@@ -33,6 +34,30 @@ export const getSavedCards = async (): Promise<any[]> => {
     return data.paymentMethods || []
   } catch (error) {
     console.error("Error fetching saved cards:", error)
+    throw error
+  }
+}
+
+export const createSetupIntent = async (): Promise<SetUpIntent> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const response = await fetch(`${url}/api/stripe/createSetupIntent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to save card")
+    }
+    return data
+  } catch (error) {
+    console.error("Error saving card:", error)
     throw error
   }
 }

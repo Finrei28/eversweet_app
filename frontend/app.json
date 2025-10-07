@@ -18,7 +18,12 @@
       "bundleIdentifier": "nz.co.eversweet",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message."
+        "NSCameraUsageDescription": "This app includes camera-related libraries. We do not use the camera, but Apple requires this message.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": ["eversweet"]
+          }
+        ]
       },
       "icon": "./assets/images/ios-light.png"
     },
@@ -27,7 +32,19 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "nz.co.eversweet"
+      "package": "nz.co.eversweet",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "eversweet",
+              "host": "*"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
