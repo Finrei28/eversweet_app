@@ -6,10 +6,12 @@ import { StatusUpdateModal } from "@/components/status-update-modal"
 import { formatCurrency, formatDate } from "@/lib/formatters"
 import { OrderStatus } from "@/lib/types"
 import { useOrderContext } from "@/providers/order-provider"
+import usePrintReceipt from "@/services/printer-service"
 import { Ionicons } from "@expo/vector-icons"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
 import { Image, ScrollView, Text, TouchableOpacity, View } from "react-native"
+import Toast from "react-native-toast-message"
 
 const getScreenOptions = () => ({
   title: ` Order details`,
@@ -23,6 +25,7 @@ export default function OrderDetails() {
   const router = useRouter()
   const { findOrderById, updateOrderStatus } = useOrderContext()
   const [statusModalVisible, setStatusModalVisible] = useState(false)
+  const { isPrinting, handlePrintReceipt } = usePrintReceipt()
 
   const order = findOrderById(id)
 
@@ -40,6 +43,29 @@ export default function OrderDetails() {
     } catch (error) {
       console.error("Failed to update order status:", error)
       // Optionally show a toast/snackbar or error message
+    }
+  }
+
+  const printReceipt = async () => {
+    try {
+      await handlePrintReceipt(order)
+      Toast.show({
+        type: "success",
+        text1: `Order has been printed`,
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: true,
+        bottomOffset: 60,
+      })
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: `${error.message}`,
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: true,
+        bottomOffset: 60,
+      })
     }
   }
 
@@ -99,14 +125,7 @@ export default function OrderDetails() {
             )}
 
             <View className="flex-row justify-between mt-4">
-              <TouchableOpacity
-                className="flex-1 mr-2 bg-indigo-600 py-3 rounded-lg items-center justify-center"
-                onPress={() => setStatusModalVisible(true)}
-              >
-                <Text className="text-white font-medium">Update Status</Text>
-              </TouchableOpacity>
-
-              {order.status === "PENDING" && (
+              {order.status === "PENDING" ? (
                 <View className="flex-row flex-1">
                   <TouchableOpacity
                     className="flex-1 mr-1 bg-green-500 py-3 rounded-lg items-center justify-center"
@@ -122,13 +141,25 @@ export default function OrderDetails() {
                     <Text className="text-white font-medium">Decline</Text>
                   </TouchableOpacity> */}
                 </View>
+              ) : (
+                <TouchableOpacity
+                  className="flex-1 bg-indigo-600 py-3 rounded-lg items-center justify-center"
+                  onPress={() => setStatusModalVisible(true)}
+                >
+                  <Text className="text-white font-medium">Update Status</Text>
+                </TouchableOpacity>
               )}
             </View>
           </View>
 
           {/* Order Items */}
           <View className="bg-white mt-4 p-4">
-            <Text className="text-lg font-semibold mb-4">Order Items</Text>
+            <View className="justify-between flex-row items-center">
+              <Text className="text-lg font-semibold mb-4">Order Items</Text>
+              <TouchableOpacity onPress={printReceipt} disabled={isPrinting}>
+                <Ionicons name="print-outline" size={30} color="#3B82F6" />
+              </TouchableOpacity>
+            </View>
 
             {order.desserts.map((item, index) => (
               <View
