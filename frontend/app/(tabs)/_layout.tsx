@@ -38,7 +38,7 @@ export default function _layout() {
           tabBarInactiveTintColor: "#999999", // optional: inactive color
           tabBarIcon: ({ size, focused }) => (
             <Image
-              source={require("../../assets/images/eversweet_bowl.png")}
+              source={require("../../assets/images/eversweet_bowl_1024.png")}
               style={{
                 width: size ?? 24,
                 height: size ?? 24,

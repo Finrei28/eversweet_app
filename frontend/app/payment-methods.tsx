@@ -25,11 +25,13 @@ import {
   saveCard,
   removeCard,
   createSetupIntent,
+  getCurrentSubscriptionPaymentMethodID,
 } from "@/services/stripe-api"
 import { getUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
+import Toast from "react-native-toast-message"
 
 // Your Stripe publishable key - should be in environment variables
 
@@ -52,6 +54,7 @@ function PaymentMethodsContent() {
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
+  const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null)
 
   // Fetch saved cards when component mounts
   useEffect(() => {
@@ -66,6 +69,8 @@ function PaymentMethodsContent() {
     try {
       setLoadingCards(true)
       const cards = await getSavedCards()
+      const id = await getCurrentSubscriptionPaymentMethodID()
+      setPaymentMethodId(id)
       setSavedCards(cards)
     } catch (error) {
       console.error("Failed to fetch saved cards:", error)
@@ -110,6 +115,21 @@ function PaymentMethodsContent() {
       ]
     )
   }
+
+  const handleSamePaymentCard = () => {
+    Toast.show({
+      type: "error",
+      text1: `That card is currently active`,
+      position: "bottom",
+      visibilityTime: 3000,
+      autoHide: true,
+      bottomOffset: 60,
+      props: {
+        text1NumberOfLines: 0,
+        text2NumberOfLines: 0, // allow wrapping
+      },
+    })
+  } //show a pop up or a toast indicating the card is currently active hence cannot be deleted
 
   const formatCardBrand = (brand: string) => {
     return brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase()
@@ -232,9 +252,17 @@ function PaymentMethodsContent() {
                         </Text>
                       </View>
                     </View>
-                    <TouchableOpacity onPress={() => handleDeleteCard(card.id)}>
-                      <Feather name="trash-2" size={18} color="#EF4444" />
-                    </TouchableOpacity>
+                    {paymentMethodId === card.id ? (
+                      <TouchableOpacity onPress={() => handleSamePaymentCard()}>
+                        <Feather name="trash-2" size={18} color="#9CA3AF" />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => handleDeleteCard(card.id)}
+                      >
+                        <Feather name="trash-2" size={18} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               ))}

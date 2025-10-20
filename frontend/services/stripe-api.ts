@@ -348,3 +348,38 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
     throw new Error(error?.message || "Something went wrong.")
   }
 }
+
+export const getCurrentSubscriptionPaymentMethodID =
+  async (): Promise<string> => {
+    const token = await SecureStore.getItemAsync("token")
+    if (!token) {
+      throw new Error("Unauthenticated")
+    }
+    try {
+      const res = await fetch(
+        `${url}/api/stripe/getCurrentSubscriptionPaymentMethodID`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+      if (res.status === 404) {
+        return null
+      }
+      if (res.status === 401) {
+        throw new Error("Unauthenticated")
+      }
+      if (!res.ok) {
+        throw new Error(`Error: ${data.message}`)
+      }
+
+      return data.paymentMethodId
+    } catch (error: any) {
+      throw new Error(error?.message || "Something went wrong.")
+    }
+  }
