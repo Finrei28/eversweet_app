@@ -349,7 +349,7 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
   }
 }
 
-export const getCurrentSubscriptionPaymentMethodID =
+export const getCurrentSubscriptionPaymentMethodId =
   async (): Promise<string> => {
     const token = await SecureStore.getItemAsync("token")
     if (!token) {
@@ -357,7 +357,7 @@ export const getCurrentSubscriptionPaymentMethodID =
     }
     try {
       const res = await fetch(
-        `${url}/api/stripe/getCurrentSubscriptionPaymentMethodID`,
+        `${url}/api/stripe/getCurrentSubscriptionPaymentMethodId`,
         {
           method: "GET",
           headers: {

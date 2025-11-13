@@ -25,7 +25,7 @@ import {
   saveCard,
   removeCard,
   createSetupIntent,
-  getCurrentSubscriptionPaymentMethodID,
+  getCurrentSubscriptionPaymentMethodId,
 } from "@/services/stripe-api"
 import { getUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
@@ -69,7 +69,7 @@ function PaymentMethodsContent() {
     try {
       setLoadingCards(true)
       const cards = await getSavedCards()
-      const id = await getCurrentSubscriptionPaymentMethodID()
+      const id = await getCurrentSubscriptionPaymentMethodId()
       setPaymentMethodId(id)
       setSavedCards(cards)
     } catch (error) {
