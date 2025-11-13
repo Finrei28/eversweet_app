@@ -20,6 +20,7 @@ import {
   GestureHandlerRootView,
   PanGesture,
 } from "react-native-gesture-handler"
+import DancingStar from "@/_components/dancingStar"
 
 // This is needed for the order history screen to properly import FontAwesome
 export { FontAwesome }
@@ -71,9 +72,13 @@ export default function Index() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           {promotions?.length > 0 && (
             <>
-              <Text className=" text-4xl font-bold text-primary p-5 mt-4 text-center">
-                Promotions
-              </Text>
+              <View className="flex-row items-center justify-center p-5 mt-4 text-center gap-5">
+                <DancingStar />
+                <Text className=" text-4xl font-bold text-primary ">
+                  Promotions
+                </Text>
+                <DancingStar />
+              </View>
 
               <Carousel
                 loop={false}
