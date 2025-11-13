@@ -593,6 +593,49 @@ export const pollMembershipStatus = async (req: Request, res: Response) => {
   return
 }
 
+export const getCurrentSubscriptionPaymentMethodId = async (
+  req: Request,
+  res: Response
+) => {
+  const userId = (req as any).userId
+  if (!userId) {
+    res.status(401).json({ message: "Unauthenticated" })
+    return
+  }
+
+  try {
+    const { customerId } = await getOrCreateCustomerId(userId)
+
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      limit: 1,
+      status: "active",
+    })
+
+    const subscription = subscriptions.data[0]
+    if (!subscription) {
+      res.status(200).json({ message: "No active subscription found" })
+      return
+    }
+
+    const paymentMethodId = subscription.default_payment_method
+
+    if (!paymentMethodId) {
+      res.status(200).json({ message: "No payment method found" })
+      return
+    }
+
+    res.status(200).json({ paymentMethodId })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching current subscription payment method ID",
+      error: (error as Error).message,
+    })
+    return
+  }
+}
+
 // stripeWebhook
 
 export const stripeWebhook = async (req: Request, res: Response) => {

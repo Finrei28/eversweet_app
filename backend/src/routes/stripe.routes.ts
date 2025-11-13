@@ -6,6 +6,7 @@ import {
   createMembership,
   createPaymentIntent,
   createSetupIntent,
+  getCurrentSubscriptionPaymentMethodId,
   getMembershipDetails,
   getUsersMembership,
   paymentMethods,
@@ -27,5 +28,10 @@ router.get("/pollMembershipStatus", authenticateToken, pollMembershipStatus)
 router.get("/getMembershipDetails", authenticateToken, getMembershipDetails)
 router.get("/getUsersMembership", authenticateToken, getUsersMembership)
 router.post("/createSetupIntent", authenticateToken, createSetupIntent)
+router.get(
+  "/getCurrentSubscriptionPaymentMethodId",
+  authenticateToken,
+  getCurrentSubscriptionPaymentMethodId
+)
 
 export default router
