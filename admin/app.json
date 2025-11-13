@@ -17,7 +17,6 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to thermal printers",
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to thermal printers",
-        "NSLocationWhenInUseUsageDescription": "This app uses location access to discover nearby Bluetooth printers",
         "UIBackgroundModes": [
           "audio",
           "fetch",
@@ -38,8 +37,7 @@
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.BLUETOOTH_SCAN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.FOREGROUND_SERVICE"
+        "android.permission.BLUETOOTH_CONNECT"
       ]
     },
     "web": {
@@ -70,7 +68,8 @@
           "bluetoothAlwaysPermission": "This app uses Bluetooth to connect to thermal printers"
         }
       ],
-      ["expo-screen-orientation"]
+      ["expo-screen-orientation"],
+      "react-native-permissions"
     ],
     "experiments": {
       "typedRoutes": true
