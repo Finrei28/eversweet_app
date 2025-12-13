@@ -23,20 +23,24 @@ export const getUserIdFromToken = async (): Promise<string | null> => {
   }
 }
 
-export const isUserAuthorised = async (): Promise<boolean | null> => {
+export const isUserAuthorised = async (): Promise<boolean> => {
   try {
     const token = await SecureStore.getItemAsync("token")
-    if (!token) return null
+    if (!token) return false
 
     const decoded: JWTData = jwtDecode(token)
+    const now = Date.now() / 1000
+    if (decoded.exp && decoded.exp <= now) {
+      return false
+    }
     if (decoded.role !== "ADMIN") {
-      return null
+      return false
     }
 
     return true
   } catch (error) {
     console.error("Failed to decode token:", error.message)
-    return null
+    return false
   }
 }
 

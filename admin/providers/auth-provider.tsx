@@ -32,7 +32,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (storedToken) {
         const decoded: DecodedToken = jwtDecode(storedToken)
         const now = Date.now() / 1000
-        if (decoded.exp > now) {
+        if (decoded.exp && decoded.exp > now) {
           setAuthenticated(true)
         } else {
           await signOut()

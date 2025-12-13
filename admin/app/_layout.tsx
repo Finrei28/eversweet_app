@@ -32,7 +32,6 @@ function AppLayout() {
   })
 
   useEffect(() => {
-    // Preload the notification sound
     const init = async () => {
       try {
         const isAuthorised = await isUserAuthorised()
