@@ -15,6 +15,7 @@ import {
 } from "date-fns"
 import { emitNewOrder } from "../index"
 import { OrderType, Status } from "../types/types"
+import { Prisma } from "@prisma/client"
 const expo = new Expo()
 
 export const adminSignIn = async (req: Request, res: Response) => {
@@ -43,7 +44,7 @@ export const adminSignIn = async (req: Request, res: Response) => {
     },
     process.env.JWT_SECRET!,
     {
-      expiresIn: "60d",
+      expiresIn: "180d",
     }
   )
   res.status(200).json({ token })
@@ -494,6 +495,47 @@ export const getOverview = async (req: Request, res: Response) => {
   }
 }
 
+export const updateRestaurantStatus = async (req: Request, res: Response) => {
+  const { dineInAvailability, date } = req.body
+
+  try {
+    const data: Prisma.RestaurantStatusUpdateManyMutationInput = {
+      dineInAvailability,
+    }
+    if (date) {
+      data.dineInAvailability = false
+      data.unavailableUntil = new Date(date)
+    }
+    if (dineInAvailability === true) {
+      data.unavailableUntil = null
+    }
+
+    await db.restaurantStatus.updateMany({
+      data,
+    })
+    res.status(200).json({ message: "Restaurant status updated successfully" })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Error changing restaurant status",
+      error: (error as Error).message,
+    })
+    return
+  }
+}
+
+export const checkRestaurantStatus = async () => {
+  await db.restaurantStatus.updateMany({
+    where: {
+      unavailableUntil: { lte: new Date() },
+    },
+    data: {
+      unavailableUntil: null,
+      dineInAvailability: true,
+    },
+  })
+}
+
 // Get future orders where pickUpTime is more than 15 minutes from when the order was created
 export const getFutureOrders = async () => {
   try {
@@ -577,6 +619,7 @@ export const getFutureOrders = async () => {
 
     for (const order of filteredOrders) {
       emitNewOrder(order) // change notified to true on the frontend when the frontend accepts the order.
+      console.log("sent future order:", order)
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)

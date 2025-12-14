@@ -11,6 +11,7 @@ import { Server, Socket } from "socket.io"
 import http from "http"
 import cron from "node-cron"
 import {
+  checkRestaurantStatus,
   getFutureOrders,
   renewMochiOffer,
 } from "./controllers/admin.controller"
@@ -132,6 +133,9 @@ app.use("/api/cart", cartRoutes)
 
 try {
   cron.schedule("* * * * *", getFutureOrders, {
+    timezone: "Pacific/Auckland",
+  })
+  cron.schedule("* * * * *", checkRestaurantStatus, {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * 1", renewMochiOffer, {

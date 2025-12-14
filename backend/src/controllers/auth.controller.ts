@@ -8,7 +8,7 @@ import { Resend } from "resend"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../index"
-import { Status } from "../types/types"
+import { Status, WebOrderType } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
@@ -37,6 +37,136 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
   })
 
   return updated.points
+}
+
+export const createOrderForWebsite = async (
+  orderData: WebOrderType,
+  paymentIntentId: string
+): Promise<string> => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // Normalize to midnight
+
+  let counter = await db.tempOrderCounter.findUnique({
+    where: { date: today },
+  })
+
+  if (!counter) {
+    counter = await db.tempOrderCounter.create({
+      data: {
+        date: today,
+        counter: 6000,
+      },
+    })
+  } else {
+    counter = await db.tempOrderCounter.update({
+      where: { date: today },
+      data: { counter: counter.counter + 1 },
+    })
+  }
+
+  const newOrder = await db.order.create({
+    data: {
+      tempOrderId: counter.counter.toString(),
+      customerFirstName: orderData.customerFirstName ?? "",
+      customerLastName: orderData.customerLastName ?? "",
+      customerEmail: orderData.customerEmail,
+      customerPhoneNumber: orderData.customerPhoneNumber,
+      source: "WEBSITE",
+      priceInCents: orderData.totalPriceInCents,
+      discountedAmountInCents: 0,
+      GST: orderData.totalPriceInCents * 0.15, // GST in cents
+      pickUpTime: orderData.pickUpTime,
+      dineIn: false,
+      status: "PENDING",
+      paymentIntentId: paymentIntentId,
+      desserts: {
+        create: orderData.dessert.map((dessertItem) => ({
+          dessert: {
+            connect: {
+              id: dessertItem.dessert.id, // Ensure dessert exists before connecting
+            },
+          },
+
+          quantity: dessertItem.dessert.quantity,
+          priceInCents: dessertItem.priceInCents, // get price from order item
+          discountedAmountInCents: 0,
+          customisations: {
+            create: dessertItem.customisations.map((customisationsItem) => ({
+              customisation: {
+                connect: {
+                  id: customisationsItem.id, // Ensure customisation exists before connecting
+                },
+              },
+              quantity: customisationsItem.quantity,
+            })),
+          },
+        })),
+      },
+    },
+    select: {
+      id: true,
+      tempOrderId: true,
+      status: true,
+      createdAt: true,
+      customerFirstName: true,
+      customerLastName: true,
+      customerEmail: true,
+      customerPhoneNumber: true,
+      priceInCents: true,
+      discountedAmountInCents: true,
+      pickUpTime: true,
+      dineIn: true,
+      pickedUpAt: true,
+      GST: true,
+      notified: true,
+      desserts: {
+        select: {
+          orderId: true,
+          id: true,
+          quantity: true,
+          priceInCents: true,
+          discountedAmountInCents: true,
+          dessert: {
+            select: {
+              id: true,
+              name: true,
+              chineseName: true,
+              imagePath: true,
+            },
+          },
+          customisations: {
+            select: {
+              id: true,
+              quantity: true,
+              customisation: {
+                select: {
+                  id: true,
+                  name: true,
+                  chineseName: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  await resend.emails.send({
+    from: '"Eversweet" <eversweet@eversweet.co.nz>',
+    to: orderData.customerEmail,
+    subject: "Order Confirmation",
+    react: EmailOrderConfirmation({ order: newOrder }),
+  })
+  if (
+    newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
+      1000 * 60 * 15 &&
+    !newOrder.notified
+  ) {
+    emitNewOrder(newOrder)
+  }
+
+  return newOrder.id
 }
 
 export const signUp = async (req: Request, res: Response) => {
@@ -123,7 +253,7 @@ export const signIn = async (req: Request, res: Response) => {
     },
     process.env.JWT_SECRET!,
     {
-      expiresIn: "60d",
+      expiresIn: "90d",
     }
   )
   res.status(200).json({ token, name: user.firstName ?? "" })
@@ -512,7 +642,6 @@ export const createOrder = async (req: Request, res: Response) => {
         dineIn: true,
         pickedUpAt: true,
         GST: true,
-        appUserId: true,
         notified: true,
         desserts: {
           select: {

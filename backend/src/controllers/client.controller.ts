@@ -232,6 +232,9 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
 }
 
 export const getPromotions = (req: Request, res: Response) => {
+  const allOffers = {
+    
+  }
   res.status(200).json(promotions)
   return
 }

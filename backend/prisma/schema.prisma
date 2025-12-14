@@ -301,6 +301,9 @@ model CartItem {
   dessertId                   String
   itemPriceInCents            Int
   discountedAmountInCents     Int                       @default(0)
+  isPromotionItem             Boolean                   @default(false)
+  promotionType               String?
+  createdAt                   DateTime                  @default(now())
   quantity                    Int
   loyaltyPointsUsed           Int?
   cartId                      String
@@ -309,6 +312,8 @@ model CartItem {
   dessert                     Dessert                   @relation(fields: [dessertId], references: [id])
   offer                       Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
   customisations              CustomisationInCartItem[]
+
+  @@unique([cartId, promotionType, dessertId])
 }
 
 model CustomisationInCartItem {

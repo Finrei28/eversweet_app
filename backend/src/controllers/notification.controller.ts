@@ -4,6 +4,58 @@ import { Expo } from "expo-server-sdk"
 
 const expo = new Expo()
 
+export const sendOfferNotifications = async (
+  title: string,
+  body: string,
+  isMembersOffer: boolean
+) => {
+  try {
+    // 1. Load all push tokens
+    const users = await db.user.findMany({
+      where: isMembersOffer
+        ? { membership: { isActive: true } } // only members
+        : {}, // everyone
+      select: { pushToken: true },
+    })
+
+    // 2. Filter out null / invalid tokens
+    const validTokens = users
+      .map((u) => u.pushToken)
+      .filter((token) => Expo.isExpoPushToken(token))
+
+    if (validTokens.length === 0) {
+      console.log("No valid push tokens")
+      return
+    }
+
+    // 3. Build message array
+    const messages = validTokens.map((token) => ({
+      to: token,
+      sound: "default",
+      title,
+      body,
+      data: {}, // or add custom data
+    }))
+
+    // 4. Chunk messages
+    const chunks = expo.chunkPushNotifications(messages)
+
+    const tickets = []
+    for (const chunk of chunks) {
+      try {
+        const ticketChunk = await expo.sendPushNotificationsAsync(chunk)
+        tickets.push(...ticketChunk)
+      } catch (err) {
+        console.error("Error sending push notifications", err)
+      }
+    }
+
+    console.log("Push tickets:", tickets)
+  } catch (err) {
+    console.error("Notification error:", err)
+  }
+}
+
 export const pushToken = async (req: Request, res: Response) => {
   try {
     const { pushToken } = req.body
@@ -59,10 +111,6 @@ export const sendNotification = async (req: Request, res: Response) => {
       return
     }
 
-    // In a real app, you would get the user's push token from your database
-    // Example: const user = await db.collection('users').findOne({ _id: userId })
-    // const pushToken = user.pushToken
-    // For this example, we'll assume you have the token
     const token = await db.user.findUnique({
       where: {
         id: userId,
@@ -70,7 +118,7 @@ export const sendNotification = async (req: Request, res: Response) => {
       select: {
         pushToken: true,
       },
-    }) // In a real app, get this from the database
+    })
 
     const pushToken = token?.pushToken
 

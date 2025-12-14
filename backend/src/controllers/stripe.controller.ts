@@ -2,6 +2,8 @@ import { db } from "../lib/db"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
+import { membershipBenefits } from "../lib/membership"
+import { createOrderForWebsite } from "./auth.controller"
 
 // Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
@@ -377,6 +379,7 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       id: membershipPlan.id,
       price: price.unit_amount,
       stripePriceId: membershipPlan.stripePriceId,
+      membershipBenefits,
     }
     res.status(200).json(membershipDetails)
     return
@@ -654,6 +657,25 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
   // 🔹 Handle different event types
   switch (event.type) {
+    case "payment_intent.succeeded": {
+      const paymentIntent = event.data.object
+
+      // read metadata
+      const orderData = JSON.parse(paymentIntent.metadata.orderData)
+      const webOrder = JSON.parse(paymentIntent.metadata.webOrder)
+      if (webOrder !== "true") {
+        break
+      }
+
+      // Create order in DB only once
+      const orderId = await createOrderForWebsite(orderData, paymentIntent.id)
+
+      // Optionally store orderId in the paymentIntent metadata
+      await stripe.paymentIntents.update(paymentIntent.id, {
+        metadata: { ...paymentIntent.metadata, orderId },
+      })
+      break
+    }
     case "invoice.payment_succeeded": {
       const invoice = event.data.object as Stripe.Invoice
       const subscriptionId = invoice.lines.data[0].subscription

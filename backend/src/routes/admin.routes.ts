@@ -3,6 +3,7 @@ import { authenticateToken } from "../middleware/authentication"
 import { authorizeRole } from "../middleware/authorisation"
 import {
   adminSignIn,
+  updateRestaurantStatus,
   getCurrentOrders,
   getOverview,
   getPastOrders,
@@ -46,6 +47,13 @@ router.get(
   authenticateToken,
   authorizeRole("ADMIN"),
   getOverview
+)
+
+router.patch(
+  "/updateRestaurantStatus",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  updateRestaurantStatus
 )
 
 export default router

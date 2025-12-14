@@ -57,6 +57,28 @@ export type OrderType = {
   notified: boolean
 }
 
+export type WebOrderType = {
+  dessert: {
+    dessert: {
+      id: string
+      quantity: number
+    }
+    priceInCents: number
+    customisations: {
+      id: string
+      quantity: number
+      name: string
+      chineseName: string
+    }[]
+  }[]
+  customerFirstName: string
+  customerLastName: string
+  customerEmail: string
+  customerPhoneNumber: string | null
+  totalPriceInCents: number
+  pickUpTime: Date
+}
+
 export type StatusType =
   | "PENDING"
   | "ACCEPTED"
