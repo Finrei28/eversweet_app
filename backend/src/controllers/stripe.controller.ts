@@ -662,7 +662,7 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
       // read metadata
       const orderData = JSON.parse(paymentIntent.metadata.orderData)
-      const webOrder = JSON.parse(paymentIntent.metadata.webOrder)
+      const webOrder = paymentIntent.metadata.webOrder
       if (webOrder !== "true") {
         break
       }
