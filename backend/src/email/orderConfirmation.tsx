@@ -278,7 +278,7 @@ export default function EmailOrderConfirmation({
                   <Text>Total</Text>
                 </Column>
                 <Column align="right">
-                  <Text>
+                  <Text className="font-semibold">
                     {formatCurrency(
                       (order.priceInCents - order.discountedAmountInCents) / 100
                     )}
