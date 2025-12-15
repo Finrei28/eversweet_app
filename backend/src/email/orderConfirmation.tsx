@@ -260,7 +260,14 @@ export default function EmailOrderConfirmation({
               {/* Order Summary */}
 
               <Row>
-                <Text>GST included</Text>
+                <Column className="align-bottom">
+                  <Text>GST included</Text>
+                </Column>
+                <Column align="right">
+                  <Text>
+                    {formatCurrency((order.priceInCents * 0.15) / 100)}
+                  </Text>
+                </Column>
               </Row>
               <Row>
                 <Column className="align-bottom">
