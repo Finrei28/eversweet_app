@@ -676,10 +676,9 @@ export const createOrder = async (req: Request, res: Response) => {
       },
     })
 
-    const membership = await db.membership.findUnique({ where: { userId } })
-
     // add points members and non members
     if (cart.totalPriceInCents > 0) {
+      const membership = await db.membership.findUnique({ where: { userId } })
       let earnablePoints = 0
 
       earnablePoints = cart.cartItems.reduce(
