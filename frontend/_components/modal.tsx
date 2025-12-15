@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native"
 import Modal from "react-native-modal"
-import { Dessert } from "../utils/types"
+import { CartItem, Dessert } from "../utils/types"
 import { useCartStore } from "@/store/cart"
 import { useEffect, useState, useRef } from "react"
 import { SafeAreaView } from "react-native-safe-area-context"
@@ -33,11 +33,9 @@ type CustomModalProps = {
   setSelectedDessert?: React.Dispatch<React.SetStateAction<Dessert | null>>
   type: "cents" | "points"
   state?: "add" | "edit"
-  customisations?: Customisations
   offerId?: string | null
   offerItemPrice?: number
-  editItemPrice?: number
-  editId?: string
+  cartItem?: CartItem
 }
 
 export default function CustomModal({
@@ -49,11 +47,9 @@ export default function CustomModal({
   selectedDessert,
   type,
   state = "add",
-  customisations,
   offerId,
   offerItemPrice,
-  editItemPrice,
-  editId,
+  cartItem,
 }: CustomModalProps) {
   const { usersMembership } = useAuth()
   const addItem = useCartStore((state) => state.addItem)
@@ -65,8 +61,9 @@ export default function CustomModal({
   } = useFetch(() => getAvailableCustomisations(selectedDessert.id))
   const [quantity, setQuantity] = useState(1)
   const [price, setPrice] = useState(
-    editItemPrice !== undefined && editItemPrice !== null
-      ? editItemPrice
+    cartItem?.itemPriceInCents !== undefined &&
+      cartItem?.itemPriceInCents !== null
+      ? cartItem.itemPriceInCents - cartItem.discountedAmountInCents
       : offerItemPrice !== undefined && offerItemPrice !== null
       ? offerItemPrice
       : selectedDessert.priceInCents
@@ -78,8 +75,8 @@ export default function CustomModal({
   const points = selectedDessert.priceInLoyaltyPoints
 
   useEffect(() => {
-    if (state === "edit" && customisations) {
-      const initialQuantities = customisations.map((c) => ({
+    if (state === "edit" && cartItem?.customisations) {
+      const initialQuantities = cartItem?.customisations.map((c) => ({
         id: c.id,
         name: c.name,
         chineseName: c.chineseName,
@@ -88,7 +85,7 @@ export default function CustomModal({
 
       setCustomisationQuantity(initialQuantities)
     }
-  }, [state, customisations])
+  }, [state, cartItem?.customisations])
 
   // ---------- PANRESPONDER (for outside-ScrollView swipe/tap) ----------
   // We'll attach this to the header area (above the ScrollView) and
@@ -474,7 +471,7 @@ export default function CustomModal({
                         })
                       } else {
                         await editItem({
-                          id: editId,
+                          id: cartItem?.id,
                           dessert: selectedDessert,
                           quantity,
                           loyaltyPointsUsed: type === "points" ? points : null,
@@ -482,6 +479,8 @@ export default function CustomModal({
                           itemPriceInCents: type === "points" ? 0 : price,
                           offerId: offerId ? offerId : null,
                           discountedAmountInCents: 0,
+                          isPromotionItem: cartItem?.isPromotionItem,
+                          promotionType: cartItem?.promotionType,
                         })
                       }
                       setButtonLoading(false)

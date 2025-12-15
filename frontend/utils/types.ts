@@ -112,6 +112,8 @@ export type CartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
+  isPromotionItem: Boolean
+  promotionType: String | null
   discountedAmountInCents: number
 }
 
@@ -128,6 +130,7 @@ export type MembershipDetails = {
   id: string
   price: number | null
   stripePriceId: string
+  membershipBenefits: string[]
 }
 
 export type UsersMembership = {
@@ -170,7 +173,7 @@ export type Offer = {
 // The offers array type
 export type Offers = Offer[]
 
-export type restaurantStatus = {
+export type RestaurantStatus = {
   dineInAvailability: boolean | undefined
   unavailableUntil: Date | null | undefined
 }

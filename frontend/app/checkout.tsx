@@ -47,6 +47,7 @@ import {
 import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
+import { TickAnimation } from "@/_components/tickAnimation"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -76,6 +77,8 @@ function CheckoutContent() {
   const [isCheckingStatus, setIsCheckingStatus] = useState(false)
   const appState = useRef(AppState.currentState)
   const [showEatInError, setShowEatInError] = useState(false)
+  const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [creatingOrderLoading, setCreatingOrderLoading] = useState(false)
 
   // Cart items and total
   const cartOperations = useCartStore((state) => state.cartOperations)
@@ -511,59 +514,57 @@ function CheckoutContent() {
         : pickupDate
 
       // Get payment intent client secret from your server
+      const { clientSecret, paymentIntentId } = await createPaymentIntent(
+        totalAmount,
+        "nzd",
+        selectedCardId
+      )
+      setPaymentIntentId(paymentIntentId)
 
-      if (totalAmount > 0) {
-        const { clientSecret, paymentIntentId } = await createPaymentIntent(
-          totalAmount,
-          "nzd",
-          selectedCardId
-        )
-        setPaymentIntentId(paymentIntentId)
+      // Confirm the payment with Stripe
+      const { error, paymentIntent } = await confirmPayment(clientSecret, {
+        paymentMethodType: "Card",
+        paymentMethodData: {
+          paymentMethodId: selectedCardId,
+        },
+      })
 
-        // Confirm the payment with Stripe
-        const { error, paymentIntent } = await confirmPayment(clientSecret, {
-          paymentMethodType: "Card",
-          paymentMethodData: {
-            paymentMethodId: selectedCardId,
-          },
-        })
-
-        if (error) {
-          throw new Error(error.message)
-        }
-
-        if (paymentIntent.status !== "Succeeded") {
-          throw new Error(`Payment failed with status: ${paymentIntent.status}`)
-        }
-
-        // Payment succeeded, now create the order in your system
-
-        const orderResponse = await createOrder(
-          paymentMethodId,
-          pickupNow,
-          pickUpTime,
-          eatIn,
-          paymentIntent.id
-        )
-        // Try to extract the order ID if it exists in the error response
-        if (!orderResponse) {
-          throw new Error("Failed to create order")
-        }
-        setOrderInProgress(orderResponse.id)
-      } else {
-        // handle orders paid with points
-        const orderResponse = await createOrder(
-          null,
-          pickupNow,
-          pickUpTime,
-          eatIn,
-          null
-        )
-        if (!orderResponse) {
-          throw new Error("Failed to create order")
-        }
-        setOrderInProgress(orderResponse.id)
+      if (error) {
+        throw new Error(error.message)
       }
+
+      if (paymentIntent.status !== "Succeeded") {
+        throw new Error(`Payment failed with status: ${paymentIntent.status}`)
+      }
+
+      // Payment succeeded, now create the order in the database
+      setPaymentSuccess(true)
+      // Start order creation immediately
+      const orderPromise =
+        totalAmount > 0
+          ? createOrder(
+              paymentMethodId,
+              pickupNow,
+              pickUpTime,
+              eatIn,
+              paymentIntent.id
+            )
+          : createOrder(null, pickupNow, pickUpTime, eatIn, null)
+
+      // Delay showing loading UI
+      const loadingTimeout = setTimeout(() => {
+        setCreatingOrderLoading(true)
+      }, 1500) // enough time for tick animation to feel smooth
+
+      const orderResponse = await orderPromise
+
+      // Stop delayed loading if it hasn’t shown yet
+      clearTimeout(loadingTimeout)
+      if (!orderResponse) {
+        throw new Error("Failed to create order")
+      }
+      setCreatingOrderLoading(false)
+      setOrderInProgress(orderResponse.id)
 
       // If total amount is 0, refresh loyalty points
       if (totalAmount === 0) {
@@ -571,7 +572,7 @@ function CheckoutContent() {
       }
 
       // Clear cart
-      await processOrder()
+      processOrder()
 
       router.replace("/orders")
     } catch (error: any) {
@@ -643,6 +644,22 @@ function CheckoutContent() {
       new Date(restaurantStatus?.unavailableUntil) > nextValidTime
       ? roundToNearest5(new Date(restaurantStatus?.unavailableUntil))
       : roundToNearest5(nextValidTime)
+  }
+
+  if (creatingOrderLoading) {
+    return (
+      <View className="flex-1 bg-background">
+        <CustomHeader />
+        <View className="flex-1 items-center justify-center">
+          <View className="flex-row items-center justify-center gap-2">
+            <Text className="text-primary font-semibold">
+              Sending your order to the kitchen
+            </Text>
+            <BouncingLoader />
+          </View>
+        </View>
+      </View>
+    )
   }
 
   if (loadingToken || loadingCards || cartOperations > 0 || loading) {
@@ -1043,19 +1060,34 @@ function CheckoutContent() {
           )}
 
           {/* Place Order Button */}
-          <TouchableOpacity
-            onPress={handlePlaceOrder}
-            className="bg-primary py-4 rounded-lg items-center"
-            disabled={
-              isProcessingPayment || cartItems.length === 0 || !nextValidTime
-            }
-          >
-            {isProcessingPayment ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text className="text-white font-bold text-lg">Place Order</Text>
+          <View className="relative">
+            <TouchableOpacity
+              onPress={handlePlaceOrder}
+              className="bg-primary h-14 rounded-lg items-center justify-center"
+              disabled={
+                isProcessingPayment || cartItems.length === 0 || !nextValidTime
+              }
+              activeOpacity={0.8}
+            >
+              {!paymentSuccess && (
+                <>
+                  {isProcessingPayment ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text className="text-white font-bold text-lg">
+                      Place Order
+                    </Text>
+                  )}
+                </>
+              )}
+            </TouchableOpacity>
+
+            {paymentSuccess && (
+              <View className="absolute inset-0 items-center justify-center">
+                <TickAnimation />
+              </View>
             )}
-          </TouchableOpacity>
+          </View>
 
           {/* Stripe Information */}
           <View className="mt-4">

@@ -98,7 +98,7 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
               )}
               {offer.itemPriceInCents != null ? (
                 <Text className="text-gray-800 font-medium">
-                  {formatCurrency(offer.itemPriceInCents)}
+                  {formatCurrency(offer.itemPriceInCents / 100)}
                 </Text>
               ) : (
                 <Text className="text-primary font-medium">

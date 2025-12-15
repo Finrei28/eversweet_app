@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity } from "react-native"
+import { View, Text, FlatList, TouchableOpacity, Platform } from "react-native"
 import { useCartStore } from "@/store/cart"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import {
@@ -7,7 +7,7 @@ import {
   useRoute,
 } from "@react-navigation/native"
 import { useCallback, useEffect, useState } from "react"
-import { Customisations, Dessert } from "@/utils/types"
+import { CartItem, Customisations, Dessert } from "@/utils/types"
 import CustomModal from "@/_components/modal"
 import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
@@ -15,26 +15,25 @@ import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
+import BouncingLoader from "@/_components/loader"
 
 export default function CartPage() {
   const navigation = useNavigation()
   const route = useRoute()
   const { usersMembership } = useAuth()
   const cartItems = useCartStore((state) => state.items)
+  const cartOperations = useCartStore((state) => state.cartOperations)
   const clearCart = useCartStore((state) => state.clearCart)
   const removeItem = useCartStore((state) => state.removeItem)
   const incrementItem = useCartStore((state) => state.incrementItem)
   const decrementItem = useCartStore((state) => state.decrementItem)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
   const getEarnablePoints = useCartStore((state) => state.getEarnablePoints)
-  const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
-  const [selectedDessertCustomisations, setSelectedDessertCustomisations] =
-    useState<Customisations | null>(null)
-  const [selectedDessertPriceInCents, setSelectedDessertPriceInCents] =
-    useState<number | null>(null)
+  const [selectedCartItem, setSelectedCartItem] = useState<CartItem | null>(
+    null
+  )
   const [modalVisible, setModalVisible] = useState(false)
   const [type, setType] = useState<"points" | "cents">("cents")
-  const [editId, setEditId] = useState<string | null>(null)
   const [earnablePoints, setEarnablePoints] = useState<number | null>(null)
   const total = getTotalCost()
 
@@ -55,6 +54,17 @@ export default function CartPage() {
     }
     fetchPoints()
   }, [usersMembership, totalCost])
+
+  // if (cartOperations === 1) {
+  //   return (
+  //     <View className="flex-1 bg-background">
+  //       <CustomHeader />
+  //       <View className="flex-1 justify-center items-center mb-24">
+  //         <BouncingLoader />
+  //       </View>
+  //     </View>
+  //   )
+  // }
 
   return (
     <>
@@ -79,7 +89,11 @@ export default function CartPage() {
                     <View className="flex-1 pr-2">
                       <Text className="text-lg font-semibold ">
                         {item.dessert.name}{" "}
-                        {item.offerId ? "(Members Offer)" : ""}
+                        {item.offerId
+                          ? "(Members Offer)"
+                          : item.isPromotionItem
+                          ? "(Promotion)"
+                          : ""}
                       </Text>
                       {item.customisations.map((customisation) => {
                         return (
@@ -110,11 +124,8 @@ export default function CartPage() {
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => {
-                          setSelectedDessert(item.dessert)
-                          setSelectedDessertCustomisations(item.customisations)
-                          setSelectedDessertPriceInCents(item.itemPriceInCents)
+                          setSelectedCartItem(item)
                           setType(item.loyaltyPointsUsed ? "points" : "cents")
-                          setEditId(item.id)
                           setModalVisible(true)
                         }}
                       >
@@ -185,12 +196,10 @@ export default function CartPage() {
               <CustomModal
                 modalVisible={modalVisible}
                 setModalVisible={setModalVisible}
-                selectedDessert={selectedDessert}
+                selectedDessert={selectedCartItem.dessert}
                 type={type}
                 state="edit"
-                customisations={selectedDessertCustomisations}
-                editItemPrice={selectedDessertPriceInCents}
-                editId={editId}
+                cartItem={selectedCartItem}
               />
             )}
           </>

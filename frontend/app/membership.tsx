@@ -232,37 +232,12 @@ function MembershipContent() {
 
           {/* Benefits list */}
           <View className="space-y-3">
-            <View className="flex-row items-center">
-              <Feather name="check-circle" size={18} color="#10B981" />
-              <Text className="ml-2 text-gray-700">
-                free weekly Mochi Series bowl ($9.99)
-              </Text>
-            </View>
-            <View className="flex-row items-center">
-              <Feather name="check-circle" size={18} color="#10B981" />
-              <Text className="ml-2 text-gray-700">
-                15% discount on all listed items
-              </Text>
-            </View>
-            <View className="flex-row items-center">
-              <Feather name="check-circle" size={18} color="#10B981" />
-              <Text className="ml-2 text-gray-700">Earn 2x loyalty points</Text>
-            </View>
-            <View className="flex-row items-center">
-              <Feather name="check-circle" size={18} color="#10B981" />
-              <Text className="ml-2 text-gray-700">
-                Exclusive member offers
-              </Text>
-            </View>
-            <View className="flex-row items-center">
-              <Feather name="check-circle" size={18} color="#10B981" />
-              <Text className="ml-2 text-gray-700">Cancel anytime</Text>
-            </View>
-            <View className="flex-row items-center">
-              <Text className=" text-gray-700">
-                More benefits to come in the future...
-              </Text>
-            </View>
+            {membershipDetails.membershipBenefits.map((benefits, index) => (
+              <View className="flex-row items-center" key={index}>
+                <Feather name="check-circle" size={18} color="#10B981" />
+                <Text className="ml-2 text-gray-700">{benefits}</Text>
+              </View>
+            ))}
           </View>
         </View>
 

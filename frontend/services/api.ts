@@ -7,12 +7,11 @@ import {
   CartItem,
   DessertCategory,
   Offers,
-  restaurantStatus,
   LoyaltyRates,
-  Promotion,
   Promotions,
   Announcements,
   HomePageContent,
+  RestaurantStatus,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -836,7 +835,7 @@ export const getStoreHours = async () => {
   }
 }
 
-export const getRestaurantStatus = async (): Promise<restaurantStatus> => {
+export const getRestaurantStatus = async (): Promise<RestaurantStatus> => {
   try {
     const res = await fetch(`${url}/api/restaurantStatus`, {
       method: "GET",

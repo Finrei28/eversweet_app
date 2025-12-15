@@ -33,8 +33,8 @@ export const DessertCard = React.memo(
         <Image
           source={{ uri: dessert.imagePath }}
           className="relative rounded-lg w-full"
-          style={{ height: height * 0.3 }}
-          resizeMode="contain"
+          style={{ height: height * 0.26 }}
+          resizeMode="cover"
         />
 
         <Text className="text-lg font-medium my-2 text-center">

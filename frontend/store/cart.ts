@@ -76,7 +76,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         i.loyaltyPointsUsed === item.loyaltyPointsUsed &&
         i.offerId === item.offerId &&
         Math.round(i.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
-        areListsEqual(i.customisations, item.customisations)
+        areListsEqual(i.customisations, item.customisations) &&
+        !i.isPromotionItem
       )
     })
 
