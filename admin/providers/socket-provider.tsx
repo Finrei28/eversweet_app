@@ -22,7 +22,7 @@ const SocketContext = createContext<SocketContextType | undefined>(undefined)
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
-  const { setPendingOrders, findOrderById } = useOrderContext()
+  const { setPendingOrders } = useOrderContext()
 
   const setupSocket = async () => {
     try {
@@ -60,14 +60,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       // Listen for new orders
       socketInstance.on("new-order", async (order: Order) => {
         // Add the order to the context
-        // console.log("New order received:", order)
-        const existingOrder = findOrderById(order.id)
-        if (existingOrder) {
-          return
-        }
-        setPendingOrders((prev) => [...prev, order])
 
-        // Play notification sound if enabled
+        setPendingOrders((prev) => {
+          const exists = prev.some((o) => o.id === order.id)
+          if (exists) return prev // skip adding duplicate
+
+          return [...prev, order]
+        })
       })
 
       setSocket(socketInstance)

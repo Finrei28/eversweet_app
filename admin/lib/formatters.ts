@@ -28,6 +28,8 @@ export const formatDate = (dateString: string) => {
 
 export const formatTime = (date: Date) => {
   const time = new Intl.DateTimeFormat("en-NZ", {
+    month: "numeric",
+    day: "numeric",
     hour: "numeric",
     minute: "numeric",
   }).format(date)

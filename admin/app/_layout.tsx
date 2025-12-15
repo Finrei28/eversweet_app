@@ -3,11 +3,9 @@ import { AuthProvider, useAuth } from "@/providers/auth-provider"
 import { OrderProvider } from "@/providers/order-provider"
 import { SocketProvider } from "@/providers/socket-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
-import { isUserAuthorised } from "@/services/auth"
 import { Ionicons } from "@expo/vector-icons"
 import { useFonts } from "expo-font"
 import { Stack, useRouter } from "expo-router"
-import * as SecureStore from "expo-secure-store"
 import { StatusBar } from "expo-status-bar"
 import { useEffect } from "react"
 import {
@@ -30,25 +28,6 @@ function AppLayout() {
     "Inter-SemiBold": require("../assets/fonts/Inter-SemiBold.ttf"),
     "Inter-Bold": require("../assets/fonts/Inter-Bold.ttf"),
   })
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const isAuthorised = await isUserAuthorised()
-        if (isAuthorised) {
-          setAuthenticated(true)
-        } else {
-          setAuthenticated(false)
-          await SecureStore.deleteItemAsync("token")
-        }
-      } catch (e) {
-        console.error("Auth check failed", e)
-        setAuthenticated(false)
-      }
-    }
-
-    init()
-  }, [])
 
   useEffect(() => {
     if (authenticated) {
@@ -91,7 +70,7 @@ function AppLayout() {
               name="order-details/[id]"
               options={{
                 headerShown: Platform.OS === "ios" ? true : false,
-                presentation: "modal",
+                presentation: Platform.OS === "ios" ? "modal" : "formSheet",
               }}
             />
             <Stack.Screen
@@ -112,24 +91,6 @@ function AppLayout() {
                 ),
               }}
             />
-            {/* <Stack.Screen
-              name="printer-settings"
-              options={{
-                title: "Printer Settings",
-                headerShown: true,
-                headerTitleStyle: {
-                  fontFamily: "Inter-SemiBold",
-                },
-                headerLeft: () => (
-                  <TouchableOpacity
-                    onPress={() => router.back()}
-                    className="ml-2"
-                  >
-                    <Ionicons name="arrow-back" size={24} color="#000" />
-                  </TouchableOpacity>
-                ),
-              }}
-            /> */}
             <Stack.Screen
               name="printer-test"
               options={{

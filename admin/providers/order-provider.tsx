@@ -14,6 +14,7 @@ import {
   SetStateAction,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -33,6 +34,7 @@ type OrderContextType = {
   findOrderById: (id: string) => Order | undefined
   findPendingOrdersById: (id: string) => Order | undefined
   setPendingOrders: Dispatch<SetStateAction<Order[]>>
+  setAlreadyAlertingIdSafe: (id: string | null) => void
   // processNextOrderAlert: () => void
 }
 
@@ -44,6 +46,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [pendingOrders, setPendingOrders] = useState<Order[]>([])
   const [currentOrders, setCurrentOrders] = useState<Order[]>([])
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
+  const alreadyAlertingIdRef = useRef<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const { handlePrintReceipt } = usePrintReceipt()
 
@@ -57,9 +60,31 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (pendingOrders.length > 0 && currentAlertId === null) {
-      processNextOrderAlert(pendingOrders[0].id)
+      const stillPending = pendingOrders.find(
+        (order) => order.id === currentAlertId
+      )
+      if (stillPending) {
+        processNextOrderAlert(stillPending.id)
+      } else {
+        processNextOrderAlert(pendingOrders[0].id)
+      }
     }
   }, [pendingOrders, currentAlertId])
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (currentAlertId && !alreadyAlertingIdRef.current) {
+        // Trigger alert for existing pending order
+        processNextOrderAlert(currentAlertId)
+      }
+    }, 60000) // 60,000 ms = 1 minute
+
+    return () => clearInterval(intervalId)
+  }, [currentAlertId])
+
+  const setAlreadyAlertingIdSafe = (id: string | null) => {
+    alreadyAlertingIdRef.current = id
+  }
 
   // Fetch current orders
   const fetchOrders = async () => {
@@ -103,13 +128,12 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const findPendingOrdersById = (id: string): Order | undefined => {
     return pendingOrders.find((order) => order.id === id)
   }
-
   const processNextOrderAlert = (orderId: string) => {
     if (pendingOrders.length > 0) {
       setCurrentAlertId(orderId)
 
       // Show the alert for this order
-      router.push({
+      router.replace({
         pathname: "/new-order-alert/[id]",
         params: { id: orderId },
       })
@@ -201,6 +225,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         findOrderById,
         findPendingOrdersById,
         setPendingOrders,
+        setAlreadyAlertingIdSafe,
       }}
     >
       {children}

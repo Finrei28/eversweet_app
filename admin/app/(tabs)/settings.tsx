@@ -1,12 +1,16 @@
 "use client"
 
 import { DashboardHeader } from "@/components/dashboard-header"
+import { formatTime } from "@/lib/formatters"
+import { RestaurantStatus } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
+import { getRestaurantStatusAPI, updateRestaurantStatus } from "@/services/api"
 import thermalPrinter from "@/services/thermal-printer"
-import { Ionicons } from "@expo/vector-icons"
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import { useRouter } from "expo-router"
-import { useEffect, useState } from "react"
+import DateTimePicker from "@react-native-community/datetimepicker"
+import { useFocusEffect, useRouter } from "expo-router"
+import { useCallback, useEffect, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +20,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native"
+import Toast from "react-native-toast-message"
 
 export default function Settings() {
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -26,6 +31,30 @@ export default function Settings() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [bluetoothEnabled, setBluetoothEnabled] = useState(false)
   const [defaultPrinter, setDefaultPrinter] = useState<string | null>(null)
+  const [restaurantStatus, setRestaurantStatus] =
+    useState<RestaurantStatus | null>(null)
+  const [showTimePicker, setShowTimePicker] = useState(false)
+  const [selectedTime, setSelectedTime] = useState<Date>(
+    restaurantStatus?.unavailableUntil
+      ? new Date(restaurantStatus.unavailableUntil)
+      : new Date()
+  )
+
+  const getRestaurantStatus = async () => {
+    const restaurantStatus = await getRestaurantStatusAPI()
+    setRestaurantStatus(restaurantStatus)
+    setSelectedTime(
+      restaurantStatus?.unavailableUntil
+        ? new Date(restaurantStatus.unavailableUntil)
+        : new Date()
+    )
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      getRestaurantStatus()
+    }, [])
+  )
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -108,6 +137,33 @@ export default function Settings() {
     await signOut()
   }
 
+  const handleRestaurantStatusChange = async (
+    availability?: boolean,
+    date?: Date
+  ) => {
+    try {
+      await updateRestaurantStatus(availability, date)
+      await getRestaurantStatus()
+      Toast.show({
+        type: "success",
+        text1: "Restaurant status updated successfully",
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: true,
+        bottomOffset: 60,
+      })
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: `Failed to change restaurant status: ${error.message}`,
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: true,
+        bottomOffset: 60,
+      })
+    }
+  }
+
   if (loading) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
@@ -125,6 +181,114 @@ export default function Settings() {
       <DashboardHeader title="Settings" />
 
       <ScrollView className="flex-1 px-4 py-6">
+        {/* Restaurant Status Settings */}
+        <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
+          <Text className="px-4 pt-4 pb-2 text-lg font-semibold">
+            Restaurant Status
+          </Text>
+
+          <View className="border-t border-gray-100 px-4 py-4">
+            <View className="flex-row items-center mb-2">
+              <View className="w-10 h-10 bg-indigo-100 rounded-full items-center justify-center mr-4">
+                <MaterialCommunityIcons
+                  name={
+                    restaurantStatus?.dineInAvailability
+                      ? "calendar-check"
+                      : "calendar-remove"
+                  }
+                  size={20}
+                  color={
+                    restaurantStatus?.dineInAvailability ? "#10B981" : "#EF4444"
+                  }
+                  style={{ marginLeft: 1 }}
+                />
+              </View>
+              <View className="flex-1">
+                <Text className="font-medium text-base">Restaurant Status</Text>
+                <Text className="text-gray-500">
+                  {restaurantStatus?.dineInAvailability
+                    ? "Restaurant is open for dine-in"
+                    : `Eat In is unavailable ${
+                        restaurantStatus?.unavailableUntil
+                          ? `until ${formatTime(
+                              new Date(restaurantStatus?.unavailableUntil)
+                            )}`
+                          : ""
+                      }`}
+                </Text>
+              </View>
+              <View
+                className={`px-2 py-1 rounded-full ${
+                  restaurantStatus?.dineInAvailability
+                    ? "bg-green-100"
+                    : "bg-red-100"
+                }`}
+              >
+                <Text
+                  className={`text-xs ${
+                    restaurantStatus?.dineInAvailability
+                      ? "text-green-800"
+                      : "text-red-800"
+                  }`}
+                >
+                  {restaurantStatus?.dineInAvailability
+                    ? "AVAILABLE"
+                    : "UNAVAILABLE"}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              className={`${
+                restaurantStatus?.dineInAvailability
+                  ? "bg-red-600"
+                  : "bg-green-600"
+              } py-3 rounded-lg items-center mb-2`}
+              onPress={() =>
+                handleRestaurantStatusChange(
+                  !restaurantStatus?.dineInAvailability
+                )
+              }
+            >
+              <Text className="text-white font-medium">
+                {restaurantStatus?.dineInAvailability
+                  ? "Set Eat In to UNAVAILBLE"
+                  : "Set Eat In to AVAILABLE"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              className="border border-indigo-600 py-3 rounded-lg items-center mb-2"
+              onPress={() => setShowTimePicker(true)}
+            >
+              <Text className="text-indigo-600 font-medium">
+                {restaurantStatus?.dineInAvailability
+                  ? "Set Eat In unavailablitity timer"
+                  : "Change Eat In unavailability timer"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={selectedTime}
+            minimumDate={new Date()}
+            mode="time"
+            display="spinner" // iOS: spinner | clock | compact
+            onChange={(event, date) => {
+              setShowTimePicker(false)
+              if (event.type === "dismissed" || !date) {
+                return
+              }
+              if (event.type === "set" && date) {
+                handleRestaurantStatusChange(undefined, date)
+              }
+              // 👉 do something with date
+            }}
+          />
+        )}
+
         {/* Notification Settings */}
         <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
           <Text className="px-4 pt-4 pb-2 text-lg font-semibold">

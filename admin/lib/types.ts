@@ -55,3 +55,8 @@ export type Overview = {
   month: number
   todaySales: number
 }
+
+export type RestaurantStatus = {
+  dineInAvailability: boolean | undefined
+  unavailableUntil: Date | null | undefined
+}

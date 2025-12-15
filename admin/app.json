@@ -69,7 +69,17 @@
         }
       ],
       ["expo-screen-orientation"],
-      "react-native-permissions"
+      [
+        "react-native-permissions",
+        {
+          "ios": ["BluetoothAlways", "BluetoothPeripheral"],
+          "android": [
+            "BLUETOOTH_CONNECT",
+            "ACCESS_FINE_LOCATION",
+            "BLUETOOTH_SCAN"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

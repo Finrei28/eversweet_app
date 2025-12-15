@@ -55,9 +55,11 @@ export default function PastOrders() {
 
   const onDateChange = (event: any, date?: Date) => {
     setShowDatePicker(false)
-    if (date) {
-      setSelectedDate(date)
+    if (event.type === "dismissed" || !date) {
+      return
     }
+
+    setSelectedDate(date)
   }
 
   const clearFilters = () => {

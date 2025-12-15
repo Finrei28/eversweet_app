@@ -2,7 +2,7 @@ import { formatTime, getCollectionTime } from "@/lib/formatters"
 import { Order } from "@/lib/types"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { Buffer } from "buffer"
-import EventEmitter from "events"
+import EventEmitter from "eventemitter3"
 import { Platform } from "react-native"
 import {
   BleManager,

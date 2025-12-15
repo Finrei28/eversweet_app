@@ -10,7 +10,14 @@ import usePrintReceipt from "@/services/printer-service"
 import { Ionicons } from "@expo/vector-icons"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
-import { Image, ScrollView, Text, TouchableOpacity, View } from "react-native"
+import {
+  Image,
+  Platform,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native"
 import Toast from "react-native-toast-message"
 
 const getScreenOptions = () => ({
@@ -104,7 +111,11 @@ export default function OrderDetails() {
       <View className="flex-1">
         <ScrollView>
           {/* Order Header */}
-          <View className="bg-white p-4">
+          <View
+            className={`bg-white p-4 ${
+              Platform.OS === "android" ? "pt-10" : "pt-0"
+            }`}
+          >
             <View className="flex-row justify-between items-center mb-2">
               <Text className="text-2xl font-bold">
                 Order #{order.tempOrderId}

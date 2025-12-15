@@ -19,8 +19,12 @@ import {
 export default function NewOrderAlert() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { findPendingOrdersById, updateOrderStatus, pendingOrders } =
-    useOrderContext()
+  const {
+    findPendingOrdersById,
+    updateOrderStatus,
+    pendingOrders,
+    setAlreadyAlertingIdSafe,
+  } = useOrderContext()
   const fadeAnim = useRef(new Animated.Value(0)).current
   const windowHeight = Dimensions.get("window").height
   const order = findPendingOrdersById(id)
@@ -51,6 +55,8 @@ export default function NewOrderAlert() {
       }
       checkSoundAndPlay()
 
+      setAlreadyAlertingIdSafe(id)
+
       // Set up the listener for the looping logic
       // player.addListener("playbackStatusUpdate", async (status) => {
       //   const soundEnabled = await AsyncStorage.getItem("soundEnabled")
@@ -76,7 +82,7 @@ export default function NewOrderAlert() {
       if (autoAccept === "true" && order) {
         setTimeout(() => {
           handleAccept()
-        }, 5000) // Auto-accept after 5 seconds
+        }, 3000) // Auto-accept after 3 seconds
       }
     }
 
@@ -99,6 +105,7 @@ export default function NewOrderAlert() {
     hasAccepted.current = true
     // Fade out animation before closing
     await updateOrderStatus(order.id, "ACCEPTED")
+    setAlreadyAlertingIdSafe(null)
     Animated.timing(fadeAnim, {
       toValue: 0,
       duration: 200,

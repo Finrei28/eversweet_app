@@ -1,4 +1,4 @@
-import { Order, OrderStatus, Overview } from "@/lib/types"
+import { Order, OrderStatus, Overview, RestaurantStatus } from "@/lib/types"
 import { getToken, isUserAuthorised } from "./auth"
 
 const url = process.env.EXPO_PUBLIC_SERVER_URL!
@@ -195,5 +195,59 @@ export const getOverviewAPI = async (): Promise<Overview> => {
     return data
   } catch (error) {
     throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const getRestaurantStatusAPI = async (): Promise<RestaurantStatus> => {
+  try {
+    const res = await fetch(`${url}/api/restaurantStatus`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data.restaurantStatus
+  } catch (error) {
+    throw new Error(error?.message || "Could not get restaurant status")
+  }
+}
+
+export const updateRestaurantStatus = async (
+  availability?: boolean,
+  date?: Date
+): Promise<void> => {
+  try {
+    const token = await getToken()
+    const isAuthorised = await isUserAuthorised()
+    if (!isAuthorised) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const res = await fetch(`${url}/api/admin/updateRestaurantStatus`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ dineInAvailability: availability, date }),
+    })
+
+    const data = await res.json()
+
+    if (res.status === 403) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.message || "Server error. Please try again later.")
+    }
+  } catch (error) {
+    throw new Error(error?.message || "Could not update the restaurant status")
   }
 }
