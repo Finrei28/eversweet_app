@@ -69,7 +69,7 @@ export type Order = {
   completedAt: Date | null
   pickedUpAt: Date | null
   pickUpTime: Date
-  dineIn: Boolean
+  dineIn: boolean
   appUserId: string
   status: OrderStatus // Assuming $Enums.Status refers to an enum for order status
   desserts: {
@@ -112,8 +112,8 @@ export type CartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
-  isPromotionItem: Boolean
-  promotionType: String | null
+  isPromotionItem: boolean
+  promotionType: string | null
   discountedAmountInCents: number
 }
 

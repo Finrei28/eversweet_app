@@ -145,7 +145,8 @@ export default function CartPage() {
                         disabled={
                           !!item.loyaltyPointsUsed ||
                           item.quantity <= 1 ||
-                          !!item.offerId
+                          !!item.offerId ||
+                          item.isPromotionItem
                         }
                       >
                         <Text className="text-xl font-bold">-</Text>
@@ -162,7 +163,11 @@ export default function CartPage() {
                             ? "bg-gray-300"
                             : "bg-secondary"
                         }`}
-                        disabled={!!item.loyaltyPointsUsed || !!item.offerId}
+                        disabled={
+                          !!item.loyaltyPointsUsed ||
+                          !!item.offerId ||
+                          item.isPromotionItem
+                        }
                       >
                         <Text className="text-xl font-bold">+</Text>
                       </TouchableOpacity>
