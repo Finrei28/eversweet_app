@@ -661,11 +661,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
       const paymentIntent = event.data.object
 
       // read metadata
-      const orderData = JSON.parse(paymentIntent.metadata.orderData)
       const webOrder = paymentIntent.metadata.webOrder
       if (webOrder !== "true") {
         break
       }
+      const orderData = JSON.parse(paymentIntent.metadata.orderData)
 
       // Create order in DB only once
       const orderId = await createOrderForWebsite(orderData, paymentIntent.id)
