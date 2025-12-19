@@ -2,11 +2,10 @@ import { Router } from "express"
 import {
   addItemToCart,
   clearCart,
-  decrementCartItem,
   getCartItems,
-  incrementCartItem,
   removeItemFromCart,
   updateCartItem,
+  updateCartItemQuantity,
 } from "../controllers/cart.controller"
 import { authenticateToken } from "../middleware/authentication"
 
@@ -17,7 +16,10 @@ router.delete("/removeItemFromCart/:id", authenticateToken, removeItemFromCart)
 router.delete("/clearCart", authenticateToken, clearCart)
 router.patch("/updateCartItem", authenticateToken, updateCartItem)
 router.get("/getCartItems", authenticateToken, getCartItems)
-router.patch("/incrementCartItem", authenticateToken, incrementCartItem)
-router.patch("/decrementCartItem", authenticateToken, decrementCartItem)
+router.patch(
+  "/updateCartItemQuantity",
+  authenticateToken,
+  updateCartItemQuantity
+)
 
 export default router

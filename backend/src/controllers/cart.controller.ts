@@ -1,6 +1,8 @@
 import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
+import { Prisma, PrismaClient } from "@prisma/client"
+import { DefaultArgs } from "@prisma/client/runtime/binary"
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -11,110 +13,115 @@ import { cartItemSchema, dessertSchema } from "../utils/schema"
 //   return date
 // }
 
-const CheckMochiPromotion = async (cartId: string, dessertId: string) => {
+const CheckMochiPromotion = async (
+  cartId: string,
+  dessertId: string,
+  dessertPriceInCents: number,
+  tx: Omit<
+    PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
+    "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+  >
+) => {
   try {
-    const totalMochiItems = await db.cartItem.findMany({
+    const totalMochiItems = await tx.cartItem.aggregate({
       where: {
         cartId,
-        isPromotionItem: false, // only real items
+        isPromotionItem: false,
+        dessert: { category: { name: "Mochi Series" } },
+      },
+      _sum: { quantity: true },
+    })
+
+    const totalPaid = totalMochiItems._sum.quantity ?? 0
+    const allowedPromotions = Math.floor(totalPaid / 4)
+    const totalDiscountedItems = await tx.cartItem.findMany({
+      where: {
+        cartId,
+        isPromotionItem: true, // only discounted items
         dessert: {
           category: { name: "Mochi Series" },
         },
       },
-      select: { quantity: true },
+      orderBy: { createdAt: "desc" },
+      select: { quantity: true, dessertId: true },
     })
-    const totalDiscountedItems = await db.cartItem.findMany({
-      where: {
-        cartId,
-        isPromotionItem: true, // only real items
-        dessert: {
-          category: { name: "Mochi Series" },
-        },
-      },
-      select: { id: true, quantity: true },
-    })
-    const totalMochiCount = totalMochiItems.reduce(
-      (acc, item) => acc + item.quantity,
-      0
-    )
-    const allowedPromotions = Math.floor(totalMochiCount / 4)
+
     const totalDiscountedCount = totalDiscountedItems.reduce(
-      (acc, item) => acc + item.quantity,
+      (sum, item) => sum + item.quantity,
       0
     )
-    console.log(totalMochiCount)
-    console.log(allowedPromotions)
-    console.log(totalDiscountedCount)
-    if (totalMochiCount >= 4 && allowedPromotions > totalDiscountedCount) {
-      // valid for mochi promotional discount
-      await db.cartItem.upsert({
+    const eligiblePromotions = allowedPromotions - totalDiscountedCount
+
+    if (allowedPromotions === 0) {
+      // remove all promo rows
+      await tx.cartItem.deleteMany({
+        where: {
+          cartId,
+          promotionType: "MOCHI_4_PACK",
+          isPromotionItem: true,
+        },
+      })
+      return false
+    } else if (totalDiscountedCount < allowedPromotions) {
+      // if allowed promotions more than existing, add more
+      await tx.cartItem.upsert({
         where: {
           cartId_promotionType_dessertId: {
             cartId,
             promotionType: "MOCHI_4_PACK",
-            dessertId,
+            dessertId: dessertId,
           },
         },
         create: {
-          cartId: cartId,
+          cartId,
           dessertId,
           isPromotionItem: true,
           promotionType: "MOCHI_4_PACK",
-          quantity: 1,
-          itemPriceInCents: 999,
-          discountedAmountInCents: 999,
+          quantity: eligiblePromotions,
+          itemPriceInCents: dessertPriceInCents,
+          discountedAmountInCents: dessertPriceInCents,
         },
         update: {
-          quantity: { increment: 1 },
+          quantity: { increment: eligiblePromotions },
         },
       })
-      return { upserted: true }
-    } else if (totalMochiCount < 4) {
-      await db.cartItem.deleteMany({
-        where: {
-          cartId: cartId,
-          promotionType: "MOCHI_4_PACK",
-          isPromotionItem: true,
-        },
-      })
+      return true
     } else if (totalDiscountedCount > allowedPromotions) {
-      let excess = totalDiscountedCount - Math.floor(totalMochiCount / 4)
-
-      if (excess > 0) {
-        // Get promo items sorted oldest-first for consistent removal
-        const promoItems = await db.cartItem.findMany({
-          where: {
-            cartId,
-            promotionType: "MOCHI_4_PACK",
-            isPromotionItem: true,
-          },
-          orderBy: { createdAt: "asc" },
-          select: { id: true, quantity: true },
-        })
-
-        for (const item of promoItems) {
-          if (excess <= 0) break
-
-          if (item.quantity > excess) {
-            // Case 1: Decrement quantity
-            await db.cartItem.update({
-              where: { id: item.id },
-              data: { quantity: item.quantity - excess },
-            })
-
-            excess = 0 // fully applied
-          } else {
-            // Case 2: Quantity is <= excess → delete the whole row
-            await db.cartItem.delete({
-              where: { id: item.id },
-            })
-
-            excess -= item.quantity // reduce by deleted quantity
-          }
+      // if less, remove the extra ones
+      let toRemove = totalDiscountedCount - allowedPromotions
+      for (const item of totalDiscountedItems) {
+        if (toRemove <= 0) break
+        if (item.quantity <= toRemove) {
+          await tx.cartItem.delete({
+            where: {
+              cartId_promotionType_dessertId: {
+                cartId,
+                promotionType: "MOCHI_4_PACK",
+                dessertId: item.dessertId,
+              },
+            },
+          })
+          toRemove -= item.quantity
+        } else {
+          await tx.cartItem.update({
+            where: {
+              cartId_promotionType_dessertId: {
+                cartId,
+                promotionType: "MOCHI_4_PACK",
+                dessertId: item.dessertId,
+              },
+            },
+            data: {
+              quantity: { decrement: toRemove },
+            },
+          })
+          break
         }
       }
+      return false
+    } else {
+      return false
     }
-    return { upserted: false }
   } catch (error) {
     throw new Error("failed to Check Mochi Promotion")
   }
@@ -174,6 +181,15 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     const cartItem = parsedBody.data
+
+    const dessert = await db.dessert.findUnique({
+      where: { id: cartItem.dessertId },
+    })
+
+    if (!dessert) {
+      res.status(404).json({ message: "Dessert not found" })
+      return
+    }
 
     const membership = await db.membership.findUnique({ where: { userId } })
     if (cartItem.offerId) {
@@ -313,11 +329,18 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
     } else {
       // create new cart item
-      const { upserted } = await CheckMochiPromotion(
-        cart.id,
-        cartItem.dessertId
-      )
-      if (!upserted) {
+      let promotionEligible = false
+      await db.$transaction(async (tx) => {
+        if (cart) {
+          promotionEligible = await CheckMochiPromotion(
+            cart.id,
+            cartItem.dessertId,
+            dessert.priceInCents,
+            tx
+          )
+        }
+      })
+      if (!promotionEligible) {
         cart = await db.cart.update({
           where: { userId },
           data: {
@@ -612,6 +635,8 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         itemPriceInCents: true,
         offerId: true,
         dessertId: true,
+        isPromotionItem: true,
+        dessert: { select: { priceInCents: true } },
       },
     })
 
@@ -651,7 +676,16 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       },
     })
 
-    await CheckMochiPromotion(updatedCart.id, cartItem.dessertId)
+    if (!cartItem.isPromotionItem) {
+      await db.$transaction(async (tx) => {
+        await CheckMochiPromotion(
+          updatedCart.id,
+          cartItem.dessertId,
+          cartItem.dessert.priceInCents,
+          tx
+        )
+      })
+    }
 
     const newCartItems = await db.cartItem.findMany({
       where: { cartId: updatedCart.id },
@@ -687,6 +721,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       })
     }
     // delete cart if empty
+
     if (newCartItems && newCartItems.length === 0) {
       await db.cart.delete({ where: { id: updatedCart.id } })
     }
@@ -868,14 +903,14 @@ export const updateCartItem = async (req: Request, res: Response) => {
   }
 }
 
-export const incrementCartItem = async (req: Request, res: Response) => {
+export const updateCartItemQuantity = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
     if (!userId) {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { id } = req.body
+    const { id, quantity } = req.body
     if (!id) {
       res.status(400).json({ message: "cartItemId is required" })
       return
@@ -889,6 +924,12 @@ export const incrementCartItem = async (req: Request, res: Response) => {
         quantity: true,
         dessertId: true,
         offerId: true,
+        dessert: {
+          select: {
+            category: { select: { name: true } },
+            priceInCents: true,
+          },
+        },
       },
     })
     if (!cartItem) {
@@ -897,17 +938,11 @@ export const incrementCartItem = async (req: Request, res: Response) => {
     }
 
     if (cartItem.offerId) {
-      res.status(404).json({ message: "Cannot increment offers" })
+      res.status(404).json({ message: "Cannot change offer quantity" })
       return
     }
-
-    const { upserted } = await CheckMochiPromotion(
-      cartItem.cartId,
-      cartItem.dessertId
-    )
-
-    if (!upserted) {
-      await db.cart.update({
+    await db.$transaction(async (tx) => {
+      await tx.cart.update({
         where: { userId },
         data: {
           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
@@ -919,104 +954,22 @@ export const incrementCartItem = async (req: Request, res: Response) => {
             update: {
               where: { id },
               data: {
-                quantity: { increment: 1 },
+                quantity: quantity,
               },
             },
           },
         },
       })
-    }
 
-    const newCartItems = await db.cartItem.findMany({
-      where: { cartId: cartItem.cartId },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-          },
-        },
-        customisations: { include: { customisation: true } },
-      },
-      orderBy: { createdAt: "asc" },
+      if (cartItem.dessert.category.name === "Mochi Series") {
+        await CheckMochiPromotion(
+          cartItem.cartId,
+          cartItem.dessertId,
+          cartItem.dessert.priceInCents,
+          tx
+        )
+      }
     })
-    const cartItems = newCartItems.map((item) => ({
-      ...item,
-      dessert: {
-        ...item.dessert,
-        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
-      },
-      customisations: item.customisations.map((c) => ({
-        ...c.customisation,
-        quantity: c.quantity,
-      })),
-    }))
-    console.log(cartItems)
-    res.status(200).json({ success: true, cartItems })
-    return
-  } catch (error) {
-    console.error(error)
-    res.status(500).json({ success: false, message: "Internal server error" })
-    return
-  }
-}
-
-export const decrementCartItem = async (req: Request, res: Response) => {
-  try {
-    const userId = (req as any).userId
-    if (!userId) {
-      res.status(401).json({ message: "Unauthorised" })
-      return
-    }
-    const { id } = req.body
-    if (!id) {
-      res.status(400).json({ message: "cartItemId is required" })
-      return
-    }
-    const cartItem = await db.cartItem.findUnique({
-      where: { id },
-      select: {
-        cartId: true,
-        dessertId: true,
-        quantity: true,
-        itemPriceInCents: true,
-        loyaltyPointsUsed: true,
-      },
-    })
-    if (!cartItem) {
-      res.status(404).json({ message: "Cart item not found" })
-      return
-    }
-    if (cartItem.quantity <= 1) {
-      res.status(400).json({ message: "Quantity cannot be less than 1" })
-      return
-    }
-    const updatedCart = await db.cart.update({
-      where: { userId },
-      data: {
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-        totalLoyaltyPointsUsed: {
-          decrement: cartItem?.loyaltyPointsUsed ?? 0,
-        },
-        totalPriceInCents: { decrement: cartItem?.itemPriceInCents ?? 0 },
-        cartItems: {
-          update: {
-            where: { id },
-            data: {
-              quantity: { decrement: 1 },
-            },
-          },
-        },
-      },
-    })
-
-    await CheckMochiPromotion(cartItem.cartId, cartItem.dessertId)
 
     const newCartItems = await db.cartItem.findMany({
       where: { cartId: cartItem.cartId },
@@ -1049,11 +1002,202 @@ export const decrementCartItem = async (req: Request, res: Response) => {
         quantity: c.quantity,
       })),
     }))
+
     res.status(200).json({ success: true, cartItems })
     return
   } catch (error) {
     console.error(error)
-    res.status(500).json({ success: false, message: "Internal server error" })
+    res.status(500).json({ success: false, message: error })
     return
   }
 }
+
+// export const incrementCartItem = async (req: Request, res: Response) => {
+//   try {
+//     const userId = (req as any).userId
+//     if (!userId) {
+//       res.status(401).json({ message: "Unauthorised" })
+//       return
+//     }
+//     const { id } = req.body
+//     if (!id) {
+//       res.status(400).json({ message: "cartItemId is required" })
+//       return
+//     }
+//     const cartItem = await db.cartItem.findUnique({
+//       where: { id },
+//       select: {
+//         cartId: true,
+//         itemPriceInCents: true,
+//         loyaltyPointsUsed: true,
+//         quantity: true,
+//         dessertId: true,
+//         offerId: true,
+//       },
+//     })
+//     if (!cartItem) {
+//       res.status(404).json({ message: "Cart item not found" })
+//       return
+//     }
+
+//     if (cartItem.offerId) {
+//       res.status(404).json({ message: "Cannot increment offers" })
+//       return
+//     }
+
+//     const { upserted } = await CheckMochiPromotion(
+//       cartItem.cartId,
+//       cartItem.dessertId
+//     )
+
+//     if (!upserted) {
+//       await db.cart.update({
+//         where: { userId },
+//         data: {
+//           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+//           totalLoyaltyPointsUsed: {
+//             increment: cartItem?.loyaltyPointsUsed ?? 0,
+//           },
+//           totalPriceInCents: { increment: cartItem?.itemPriceInCents ?? 0 },
+//           cartItems: {
+//             update: {
+//               where: { id },
+//               data: {
+//                 quantity: { increment: 1 },
+//               },
+//             },
+//           },
+//         },
+//       })
+//     }
+
+//     const newCartItems = await db.cartItem.findMany({
+//       where: { cartId: cartItem.cartId },
+//       include: {
+//         dessert: {
+//           select: {
+//             id: true,
+//             name: true,
+//             chineseName: true,
+//             description: true,
+//             priceInCents: true,
+//             priceInLoyaltyPoints: true,
+//             imagePath: true,
+//             ingredients: { include: { ingredient: true } },
+//           },
+//         },
+//         customisations: { include: { customisation: true } },
+//       },
+//       orderBy: { createdAt: "asc" },
+//     })
+//     const cartItems = newCartItems.map((item) => ({
+//       ...item,
+//       dessert: {
+//         ...item.dessert,
+//         ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+//       },
+//       customisations: item.customisations.map((c) => ({
+//         ...c.customisation,
+//         quantity: c.quantity,
+//       })),
+//     }))
+//     console.log(cartItems)
+//     res.status(200).json({ success: true, cartItems })
+//     return
+//   } catch (error) {
+//     console.error(error)
+//     res.status(500).json({ success: false, message: "Internal server error" })
+//     return
+//   }
+// }
+
+// export const decrementCartItem = async (req: Request, res: Response) => {
+//   try {
+//     const userId = (req as any).userId
+//     if (!userId) {
+//       res.status(401).json({ message: "Unauthorised" })
+//       return
+//     }
+//     const { id } = req.body
+//     if (!id) {
+//       res.status(400).json({ message: "cartItemId is required" })
+//       return
+//     }
+//     const cartItem = await db.cartItem.findUnique({
+//       where: { id },
+//       select: {
+//         cartId: true,
+//         dessertId: true,
+//         quantity: true,
+//         itemPriceInCents: true,
+//         loyaltyPointsUsed: true,
+//       },
+//     })
+//     if (!cartItem) {
+//       res.status(404).json({ message: "Cart item not found" })
+//       return
+//     }
+//     if (cartItem.quantity <= 1) {
+//       res.status(400).json({ message: "Quantity cannot be less than 1" })
+//       return
+//     }
+//     const updatedCart = await db.cart.update({
+//       where: { userId },
+//       data: {
+//         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+//         totalLoyaltyPointsUsed: {
+//           decrement: cartItem?.loyaltyPointsUsed ?? 0,
+//         },
+//         totalPriceInCents: { decrement: cartItem?.itemPriceInCents ?? 0 },
+//         cartItems: {
+//           update: {
+//             where: { id },
+//             data: {
+//               quantity: { decrement: 1 },
+//             },
+//           },
+//         },
+//       },
+//     })
+
+//     await CheckMochiPromotion(cartItem.cartId, cartItem.dessertId)
+
+//     const newCartItems = await db.cartItem.findMany({
+//       where: { cartId: cartItem.cartId },
+//       include: {
+//         dessert: {
+//           select: {
+//             id: true,
+//             name: true,
+//             chineseName: true,
+//             description: true,
+//             priceInCents: true,
+//             priceInLoyaltyPoints: true,
+//             imagePath: true,
+//             ingredients: { include: { ingredient: true } },
+//           },
+//         },
+//         customisations: { include: { customisation: true } },
+//       },
+//       orderBy: { createdAt: "asc" },
+//     })
+
+//     const cartItems = newCartItems.map((item) => ({
+//       ...item,
+//       dessert: {
+//         ...item.dessert,
+//         ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+//       },
+//       customisations: item.customisations.map((c) => ({
+//         ...c.customisation,
+//         quantity: c.quantity,
+//       })),
+//     }))
+//     res.status(200).json({ success: true, cartItems })
+//     return
+//   } catch (error) {
+//     console.error(error)
+//     res.status(500).json({ success: false, message: "Internal server error" })
+//     return
+//   }
+// }
