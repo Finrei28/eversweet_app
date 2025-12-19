@@ -1,21 +1,19 @@
-import { View, Text, FlatList, TouchableOpacity, Platform } from "react-native"
+import { View, Text, FlatList, TouchableOpacity } from "react-native"
 import { useCartStore } from "@/store/cart"
-import AntDesign from "@expo/vector-icons/AntDesign"
 import {
   useFocusEffect,
   useNavigation,
   useRoute,
 } from "@react-navigation/native"
 import { useCallback, useEffect, useState } from "react"
-import { CartItem, Customisations, Dessert } from "@/utils/types"
+import { CartItem } from "@/utils/types"
 import CustomModal from "@/_components/modal"
-import Toast from "react-native-toast-message"
 import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
-import { Ionicons } from "@expo/vector-icons"
 import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
 import BouncingLoader from "@/_components/loader"
+import { CartItems } from "@/_components/cartitems"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -24,14 +22,13 @@ export default function CartPage() {
   const cartItems = useCartStore((state) => state.items)
   const cartOperations = useCartStore((state) => state.cartOperations)
   const clearCart = useCartStore((state) => state.clearCart)
-  const removeItem = useCartStore((state) => state.removeItem)
-  const incrementItem = useCartStore((state) => state.incrementItem)
-  const decrementItem = useCartStore((state) => state.decrementItem)
+
   const getTotalCost = useCartStore((state) => state.getTotalCost)
   const getEarnablePoints = useCartStore((state) => state.getEarnablePoints)
   const [selectedCartItem, setSelectedCartItem] = useState<CartItem | null>(
     null
   )
+  const [debounceActive, setDebounceActive] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [type, setType] = useState<"points" | "cents">("cents")
   const [earnablePoints, setEarnablePoints] = useState<number | null>(null)
@@ -68,7 +65,7 @@ export default function CartPage() {
 
   return (
     <>
-      <CustomHeader />
+      <CustomHeader disableBack={debounceActive} />
       <View className="flex-1 bg-background pt-5 px-5 pb-10">
         <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
 
@@ -84,96 +81,13 @@ export default function CartPage() {
               data={cartItems}
               keyExtractor={(item, index) => `${item.id}-${index}`}
               renderItem={({ item }) => (
-                <View className="py-3 border-b border-gray-200">
-                  <View className="flex-row justify-between py-3">
-                    <View className="flex-1 pr-2">
-                      <Text className="text-lg font-semibold ">
-                        {item.dessert.name}{" "}
-                        {item.offerId
-                          ? "(Members Offer)"
-                          : item.isPromotionItem
-                          ? "(Promotion)"
-                          : ""}
-                      </Text>
-                      {item.customisations.map((customisation) => {
-                        return (
-                          <Text key={customisation.id}>{`${
-                            customisation.quantity === 0 ? `- ` : `+ `
-                          } ${customisation.name} ${
-                            customisation.quantity > 1
-                              ? `x${customisation.quantity}`
-                              : ``
-                          }`}</Text>
-                        )
-                      })}
-                    </View>
-                    <Text className="text-lg font-semibold">
-                      {formatCurrency(
-                        Number(
-                          item.itemPriceInCents - item.discountedAmountInCents
-                        ) / 100
-                      )}
-                    </Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <View className="flex-row items-center ml-2 gap-10">
-                      <TouchableOpacity
-                        onPress={async () => await removeItem(item.id)}
-                      >
-                        <Ionicons name="trash" size={24} color="red" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setSelectedCartItem(item)
-                          setType(item.loyaltyPointsUsed ? "points" : "cents")
-                          setModalVisible(true)
-                        }}
-                      >
-                        <Text className="text-primary font-bold text-xl">
-                          Edit
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    <View className="flex-row items-center gap-4">
-                      <TouchableOpacity
-                        onPress={async () => await decrementItem(item.id)}
-                        className={`w-10 h-10 rounded-full justify-center items-center ${
-                          item.loyaltyPointsUsed
-                            ? "bg-gray-300"
-                            : "bg-secondary"
-                        }`}
-                        disabled={
-                          !!item.loyaltyPointsUsed ||
-                          item.quantity <= 1 ||
-                          !!item.offerId ||
-                          item.isPromotionItem
-                        }
-                      >
-                        <Text className="text-xl font-bold">-</Text>
-                      </TouchableOpacity>
-
-                      <Text className="text-lg font-semibold">
-                        {item.quantity}
-                      </Text>
-
-                      <TouchableOpacity
-                        onPress={async () => await incrementItem(item.id)}
-                        className={`w-10 h-10 rounded-full justify-center items-center ${
-                          item.loyaltyPointsUsed
-                            ? "bg-gray-300"
-                            : "bg-secondary"
-                        }`}
-                        disabled={
-                          !!item.loyaltyPointsUsed ||
-                          !!item.offerId ||
-                          item.isPromotionItem
-                        }
-                      >
-                        <Text className="text-xl font-bold">+</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
+                <CartItems
+                  item={item}
+                  setSelectedCartItem={setSelectedCartItem}
+                  setType={setType}
+                  setModalVisible={setModalVisible}
+                  setDebounceActive={setDebounceActive}
+                />
               )}
             />
 
@@ -193,6 +107,7 @@ export default function CartPage() {
               <TouchableOpacity
                 onPress={() => router.push("/checkout")}
                 className="mt-4 bg-primary py-3 rounded-lg items-center"
+                disabled={debounceActive}
               >
                 <Text className="text-white font-bold">Checkout</Text>
               </TouchableOpacity>

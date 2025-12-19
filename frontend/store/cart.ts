@@ -9,10 +9,9 @@ import {
 import {
   addItemToCart,
   clearCart,
-  decrementCartItem,
+  updateCartItemQuantity,
   getCartItems,
   getLoyaltyRates,
-  incrementCartItem,
   removeItemFromCart,
   updateCartItem,
 } from "@/services/api"
@@ -25,6 +24,7 @@ interface CartState {
   items: CartItem[]
   cartOperations: number
   error: string | null
+  lastRequestId?: number
   fetchCart: () => Promise<void>
   getTotalMembershipDiscount: () => number
   addItem: (item: AddCartItem) => Promise<void>
@@ -34,6 +34,7 @@ interface CartState {
   processOrder: () => Promise<void>
   incrementItem: (id: string) => Promise<void>
   decrementItem: (id: string) => Promise<void>
+  updateCartItemQuantity: (id: string, quantity: number) => Promise<void>
   setError: (error: string | null) => void
   getTotalItems: () => number
   getTotalCost: () => number
@@ -96,7 +97,10 @@ export const useCartStore = create<CartState>((set, get) => ({
     // }
     try {
       if (existing) {
-        const updatedCart = await incrementCartItem(existing.id)
+        const updatedCart = await updateCartItemQuantity(
+          existing.id,
+          existing.quantity + 1
+        )
         set({ items: updatedCart })
       } else {
         const updatedCart = await addItemToCart(item)
@@ -374,49 +378,31 @@ export const useCartStore = create<CartState>((set, get) => ({
       items: get().items.map((i) =>
         i.id === id ? { ...i, quantity: i.quantity + 1 } : i
       ),
-      cartOperations: get().cartOperations + 1,
     })
-
-    try {
-      const updatedCart = await incrementCartItem(id)
-      set({
-        cartOperations: get().cartOperations - 1,
-      })
-
-      if (get().cartOperations === 0) {
-        set({ items: updatedCart })
-      }
-    } catch (error) {
-      console.error("Failed to increment cart item:", error)
-      set({
-        cartOperations: get().cartOperations - 1,
-      })
-    }
   },
   decrementItem: async (id) => {
     set({
       items: get().items.map((i) =>
         i.id === id ? { ...i, quantity: i.quantity - 1 } : i
       ),
-      cartOperations: get().cartOperations + 1,
     })
+  },
+  updateCartItemQuantity: async (id, quantity) => {
+    const requestId = Date.now() // or incrementing counter
+    set({ lastRequestId: requestId })
     try {
-      const updatedCart = await decrementCartItem(id)
-      set({
-        cartOperations: get().cartOperations - 1,
-      })
+      const updatedCart = await updateCartItemQuantity(id, quantity)
 
-      if (get().cartOperations === 0) {
-        set({ items: updatedCart })
-      }
-    } catch (error) {
-      console.error("Failed to decrement cart item:", error)
+      // ❗ Ignore stale responses
+      if (get().lastRequestId !== requestId) return
+
       set({
-        cartOperations: get().cartOperations - 1,
+        items: updatedCart,
       })
+    } catch (error) {
+      console.error("Failed to update cart item:", error)
     }
   },
-
   setError: (error) => set({ error }), // Action to set error
   getTotalItems: () =>
     get().items.reduce((acc, item) => acc + item.quantity, 0),

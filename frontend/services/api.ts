@@ -648,61 +648,91 @@ export const clearCart = async () => {
   }
 }
 
-export const incrementCartItem = async (
-  itemId: string
+// export const incrementCartItem = async (
+//   itemId: string
+// ): Promise<CartItem[]> => {
+//   const token = await SecureStore.getItemAsync("token")
+//   if (!token) {
+//     throw new Error("Please sign in to add item to cart")
+//   }
+
+//   try {
+//     const res = await fetch(`${url}/api/cart/incrementCartItem`, {
+//       method: "PATCH",
+//       headers: {
+//         "Content-Type": "application/json",
+//         Authorization: `Bearer ${token}`,
+//       },
+//       body: JSON.stringify({ id: itemId }),
+//     })
+
+//     const data = await res.json()
+//     if (!res.ok) {
+//       throw new Error(data?.message || "Failed to increment cart item")
+//     }
+
+//     return data.cartItems
+//   } catch (error) {
+//     console.error("Error incrementing cart item:", error)
+//     throw new Error(error?.message || "Something went wrong.")
+//   }
+// }
+
+// export const decrementCartItem = async (
+//   itemId: string
+// ): Promise<CartItem[]> => {
+//   const token = await SecureStore.getItemAsync("token")
+//   if (!token) {
+//     throw new Error("Please sign in to take away an item from cart")
+//   }
+//   try {
+//     const res = await fetch(`${url}/api/cart/decrementCartItem`, {
+//       method: "PATCH",
+//       headers: {
+//         "Content-Type": "application/json",
+//         Authorization: `Bearer ${token}`,
+//       },
+//       body: JSON.stringify({ id: itemId }),
+//     })
+
+//     const data = await res.json()
+//     if (!res.ok) {
+//       throw new Error(data?.message || "Failed to decrement cart item")
+//     }
+
+//     return data.cartItems
+//   } catch (error) {
+//     console.error("Error decrementing cart item:", error)
+//     throw new Error(error?.message || "Something went wrong.")
+//   }
+// }
+
+export const updateCartItemQuantity = async (
+  itemId: string,
+  quantity: number
 ): Promise<CartItem[]> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
-    throw new Error("Please sign in to add item to cart")
+    throw new Error("Please sign in to update item quantity in cart")
   }
-
   try {
-    const res = await fetch(`${url}/api/cart/incrementCartItem`, {
+    const res = await fetch(`${url}/api/cart/updateCartItemQuantity`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ id: itemId }),
+      body: JSON.stringify({ id: itemId, quantity }),
     })
 
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to increment cart item")
+      throw new Error(data?.message || "Failed to update cart item")
     }
 
     return data.cartItems
   } catch (error) {
-    console.error("Error incrementing cart item:", error)
-    throw new Error(error?.message || "Something went wrong.")
-  }
-}
-
-export const decrementCartItem = async (
-  itemId: string
-): Promise<CartItem[]> => {
-  const token = await SecureStore.getItemAsync("token")
-  if (!token) {
-    throw new Error("Please sign in to take away an item from cart")
-  }
-  try {
-    const res = await fetch(`${url}/api/cart/decrementCartItem`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ id: itemId }),
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data?.message || "Failed to decrement cart item")
-    }
-
-    return data.cartItems
-  } catch (error) {
-    console.error("Error decrementing cart item:", error)
+    console.error("Error updating cart item:", error)
     throw new Error(error?.message || "Something went wrong.")
   }
 }

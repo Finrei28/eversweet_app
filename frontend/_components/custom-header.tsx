@@ -5,7 +5,11 @@ import { useRouter, usePathname } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import { Platform } from "react-native"
 
-export default function CustomHeader() {
+export default function CustomHeader({
+  disableBack,
+}: {
+  disableBack?: boolean
+}) {
   const router = useRouter()
   const pathname = usePathname()
 
@@ -29,6 +33,7 @@ export default function CustomHeader() {
           <TouchableOpacity
             onPress={handleBack}
             className="p-1 absolute left-6"
+            disabled={disableBack}
           >
             <Feather name="arrow-left" size={24} color="#000" />
           </TouchableOpacity>
