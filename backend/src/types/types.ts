@@ -79,6 +79,13 @@ export type WebOrderType = {
   pickUpTime: Date
 }
 
+export type CartItemCustomisation = {
+  quantity: number
+  name: string
+  id: string
+  chineseName: string
+}
+
 export type StatusType =
   | "PENDING"
   | "ACCEPTED"

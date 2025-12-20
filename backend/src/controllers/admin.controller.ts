@@ -619,7 +619,6 @@ export const getFutureOrders = async () => {
 
     for (const order of filteredOrders) {
       emitNewOrder(order) // change notified to true on the frontend when the frontend accepts the order.
-      console.log("sent future order:", order)
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)

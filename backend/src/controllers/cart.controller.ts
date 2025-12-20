@@ -3,6 +3,7 @@ import { db } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
 import { Prisma, PrismaClient } from "@prisma/client"
 import { DefaultArgs } from "@prisma/client/runtime/binary"
+import { CartItemCustomisation } from "../types/types"
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -17,6 +18,8 @@ const CheckMochiPromotion = async (
   cartId: string,
   dessertId: string,
   dessertPriceInCents: number,
+  cartItemPriceInCents: number,
+  cartItemCustomisations: CartItemCustomisation[],
   tx: Omit<
     PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
     "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
@@ -78,8 +81,18 @@ const CheckMochiPromotion = async (
           isPromotionItem: true,
           promotionType: "MOCHI_4_PACK",
           quantity: eligiblePromotions,
-          itemPriceInCents: dessertPriceInCents,
+          itemPriceInCents: cartItemPriceInCents,
           discountedAmountInCents: dessertPriceInCents,
+          customisations: {
+            create: cartItemCustomisations.map((customisation) => ({
+              customisation: {
+                connect: {
+                  id: customisation.id, // Ensure customisation exists before connecting
+                },
+              },
+              quantity: customisation.quantity,
+            })),
+          },
         },
         update: {
           quantity: { increment: eligiblePromotions },
@@ -336,6 +349,8 @@ export const addItemToCart = async (req: Request, res: Response) => {
             cart.id,
             cartItem.dessertId,
             dessert.priceInCents,
+            cartItem.itemPriceInCents,
+            cartItem.customisations,
             tx
           )
         }
@@ -637,8 +652,21 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         dessertId: true,
         isPromotionItem: true,
         dessert: { select: { priceInCents: true } },
+        customisations: {
+          select: {
+            customisation: {
+              select: { id: true, name: true, chineseName: true },
+            },
+            quantity: true,
+          },
+        },
       },
     })
+
+    const cartItemCustomisation = cartItem?.customisations.map((c) => ({
+      ...c.customisation,
+      quantity: c.quantity,
+    }))
 
     if (!cartItem) {
       res.status(404).json({ message: "cart item not found" })
@@ -682,6 +710,8 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
           updatedCart.id,
           cartItem.dessertId,
           cartItem.dessert.priceInCents,
+          cartItem.itemPriceInCents,
+          cartItemCustomisation ?? [],
           tx
         )
       })
@@ -930,8 +960,21 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
             priceInCents: true,
           },
         },
+        customisations: {
+          select: {
+            customisation: {
+              select: { id: true, name: true, chineseName: true },
+            },
+            quantity: true,
+          },
+        },
       },
     })
+
+    const cartItemCustomisation = cartItem?.customisations.map((c) => ({
+      ...c.customisation,
+      quantity: c.quantity,
+    }))
     if (!cartItem) {
       res.status(404).json({ message: "Cart item not found" })
       return
@@ -966,6 +1009,8 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
           cartItem.cartId,
           cartItem.dessertId,
           cartItem.dessert.priceInCents,
+          cartItem.itemPriceInCents,
+          cartItemCustomisation ?? [],
           tx
         )
       }
