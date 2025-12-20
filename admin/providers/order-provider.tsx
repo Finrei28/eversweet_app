@@ -133,7 +133,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       setCurrentAlertId(orderId)
 
       // Show the alert for this order
-      router.replace({
+      router.push({
         pathname: "/new-order-alert/[id]",
         params: { id: orderId },
       })
