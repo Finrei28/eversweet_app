@@ -195,6 +195,7 @@ export default function EmailOrderConfirmation({
                     <Column align="left" className="h-20 w-20">
                       <Img
                         src={
+                          item.dessert.imagePath ??
                           "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1757935847/products/products/1d1e48faa59e9416678b39dccd72a73197335d11.jpg"
                         }
                         alt={item.dessert.name}
