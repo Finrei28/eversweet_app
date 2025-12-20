@@ -1,15 +1,8 @@
 import React from "react"
 import {
-  formatCurrency,
-  formatDate,
-  getCollectionTime,
-} from "../lib/formatters"
-import {
   Html,
-  Button,
   Tailwind,
   Img,
-  Preview,
   Head,
   Body,
   Section,

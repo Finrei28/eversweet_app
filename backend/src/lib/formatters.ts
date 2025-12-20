@@ -1,7 +1,7 @@
 const Currency_Formatter = new Intl.NumberFormat("en-NZ", {
   style: "currency",
   currency: "NZD",
-  minimumFractionDigits: 0,
+  minimumFractionDigits: 2,
 })
 
 export function formatCurrency(amount: number) {
