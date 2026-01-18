@@ -73,10 +73,6 @@ export const createOrderForWebsite = async (
       customerPhoneNumber: orderData.customerPhoneNumber,
       source: "WEBSITE",
       priceInCents: orderData.totalPriceInCents,
-      discountedAmountInCents: orderData.dessert.reduce(
-        (total, item) => total + item.discountedAmountInCents,
-        0,
-      ),
       GST: orderData.totalPriceInCents * 0.15, // GST in cents
       pickUpTime: orderData.pickUpTime,
       dineIn: false,
