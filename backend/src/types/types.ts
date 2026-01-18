@@ -64,6 +64,7 @@ export type WebOrderType = {
       quantity: number
     }
     priceInCents: number
+    discountedAmountInCents: number
     customisations: {
       id: string
       quantity: number

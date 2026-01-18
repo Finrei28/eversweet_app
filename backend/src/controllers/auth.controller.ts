@@ -41,7 +41,7 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
 
 export const createOrderForWebsite = async (
   orderData: WebOrderType,
-  paymentIntentId: string
+  paymentIntentId: string,
 ): Promise<string> => {
   const today = new Date()
   today.setHours(0, 0, 0, 0) // Normalize to midnight
@@ -73,7 +73,10 @@ export const createOrderForWebsite = async (
       customerPhoneNumber: orderData.customerPhoneNumber,
       source: "WEBSITE",
       priceInCents: orderData.totalPriceInCents,
-      discountedAmountInCents: 0,
+      discountedAmountInCents: orderData.dessert.reduce(
+        (total, item) => total + item.discountedAmountInCents,
+        0,
+      ),
       GST: orderData.totalPriceInCents * 0.15, // GST in cents
       pickUpTime: orderData.pickUpTime,
       dineIn: false,
@@ -89,7 +92,7 @@ export const createOrderForWebsite = async (
 
           quantity: dessertItem.dessert.quantity,
           priceInCents: dessertItem.priceInCents, // get price from order item
-          discountedAmountInCents: 0,
+          discountedAmountInCents: dessertItem.discountedAmountInCents,
           customisations: {
             create: dessertItem.customisations.map((customisationsItem) => ({
               customisation: {
@@ -254,7 +257,7 @@ export const signIn = async (req: Request, res: Response) => {
     process.env.JWT_SECRET!,
     {
       expiresIn: "90d",
-    }
+    },
   )
   res.status(200).json({ token, name: user.firstName ?? "" })
   return
@@ -298,7 +301,7 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
       process.env.JWT_SECRET!,
       {
         expiresIn: "60d",
-      }
+      },
     )
 
     res.status(200).json({
@@ -578,7 +581,7 @@ export const createOrder = async (req: Request, res: Response) => {
 
     const discountedAmountInCents = cart.cartItems.reduce(
       (total, item) => total + item.discountedAmountInCents * item.quantity,
-      0
+      0,
     )
 
     newOrder = await db.order.create({
@@ -690,9 +693,9 @@ export const createOrder = async (req: Request, res: Response) => {
               item.quantity *
               (membership?.isActive
                 ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
-                : (loyaltyRates.modifier ?? 1))
+                : (loyaltyRates.modifier ?? 1)),
           ),
-        0
+        0,
       )
 
       await incrementLoyaltyPoints(userId, earnablePoints)
