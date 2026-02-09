@@ -138,23 +138,25 @@ model VerificationToken {
 }
 
 model Dessert {
-  id                     String              @id @default(cuid())
-  name                   String
-  chineseName            String
-  description            String?
-  priceInCents           Int
-  imagePath              String
-  imagePublicId          String
-  isAvailableForPurchase Boolean             @default(false)
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-  categoryId             String
-  priceInLoyaltyPoints   Int                 @default(500)
-  cartItems              CartItem[]
-  category               Category            @relation(fields: [categoryId], references: [id])
-  ingredients            DessertIngredient[]
-  offers                 Offer[]
-  orders                 OrderDessert[]
+  id                       String              @id @default(cuid())
+  name                     String
+  chineseName              String
+  description              String?
+  priceInCents             Int
+  imagePath                String
+  imagePublicId            String
+  isAvailableForPurchase   Boolean             @default(false)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  categoryId               String
+  priceInLoyaltyPoints     Int                 @default(500)
+  cartItems                CartItem[]
+  category                 Category            @relation(fields: [categoryId], references: [id])
+  ingredients              DessertIngredient[]
+  offers                   Offer[]
+  orders                   OrderDessert[]
+  promoId                  String?
+  promo                    Promo?             @relation(fields: [promoId], references: [id])
 }
 
 model Category {
@@ -165,6 +167,21 @@ model Category {
   customisations CategoryCustomisation[]
   desserts       Dessert[]
   offers         Offer[]
+  promoId        String?
+  promo          Promo?                 @relation(fields: [promoId], references: [id])
+}
+
+model Promo {
+  id        String      @id @default(cuid())
+  name      String
+  type      PromoType
+  value     Int
+  isActive  Boolean     @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+
+  desserts  Dessert[]
+  categories Category[]
 }
 
 model Ingredient {
@@ -249,6 +266,7 @@ model OrderDessert {
   quantity          Int
   priceInCents      Int                         @default(0)
   discountedAmountInCents  Int                  @default(0)
+  promoId                  String?
   loyaltyPointsUsed Int?
   dessert           Dessert                     @relation(fields: [dessertId], references: [id])
   order             Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -331,6 +349,11 @@ model RestaurantStatus {
   id                  String    @id @default(cuid())
   dineInAvailability  Boolean
   unavailableUntil    DateTime?
+}
+
+enum PromoType {
+  PERCENTAGE
+  FIXED_AMOUNT
 }
 
 enum PaymentStatus {
