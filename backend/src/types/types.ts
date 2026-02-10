@@ -65,6 +65,7 @@ export type WebOrderType = {
     }
     priceInCents: number
     discountedAmountInCents: number
+    promoId: string | null
     customisations: {
       id: string
       quantity: number

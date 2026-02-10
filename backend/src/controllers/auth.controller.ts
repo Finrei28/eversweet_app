@@ -89,6 +89,7 @@ export const createOrderForWebsite = async (
           quantity: dessertItem.dessert.quantity,
           priceInCents: dessertItem.priceInCents, // get price from order item
           discountedAmountInCents: dessertItem.discountedAmountInCents,
+          promoId: dessertItem.promoId,
           customisations: {
             create: dessertItem.customisations.map((customisationsItem) => ({
               customisation: {
