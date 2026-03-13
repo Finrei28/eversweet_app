@@ -58,7 +58,7 @@ export type OrderType = {
 }
 
 export type WebOrderType = {
-  dessert: {
+  desserts: {
     dessert: {
       id: string
       quantity: number

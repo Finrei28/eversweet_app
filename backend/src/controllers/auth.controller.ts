@@ -79,7 +79,7 @@ export const createOrderForWebsite = async (
       status: "PENDING",
       paymentIntentId: paymentIntentId,
       desserts: {
-        create: orderData.dessert.map((dessertItem) => ({
+        create: orderData.desserts.map((dessertItem) => ({
           dessert: {
             connect: {
               id: dessertItem.dessert.id, // Ensure dessert exists before connecting
