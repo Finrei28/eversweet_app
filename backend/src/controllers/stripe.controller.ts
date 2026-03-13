@@ -9,7 +9,7 @@ import { createOrderForWebsite } from "./auth.controller"
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
 export function getInvoicePaymentIntent(
-  invoice: Stripe.Invoice
+  invoice: Stripe.Invoice,
 ): string | null {
   // New format: payments list
   if (invoice.payments && invoice.payments.data.length > 0) {
@@ -143,7 +143,7 @@ export const createSetupIntent = async (req: Request, res: Response) => {
 
     const ephemeralKey = await stripe.ephemeralKeys.create(
       { customer: customerId },
-      { apiVersion: "2020-08-27" }
+      { apiVersion: "2020-08-27" },
     )
 
     res.status(200).json({
@@ -475,7 +475,7 @@ export const createMembership = async (req: Request, res: Response) => {
     })
 
     const hasSameSub = existingSubs.data.some((sub) =>
-      sub.items.data.some((item) => item.price.id === stripePriceId)
+      sub.items.data.some((item) => item.price.id === stripePriceId),
     )
 
     if (hasSameSub) {
@@ -548,7 +548,7 @@ export const cancelMembership = async (req: Request, res: Response) => {
       membership.stripeSubscriptionId,
       {
         cancel_at_period_end: true,
-      }
+      },
     )
 
     if (!subscription.cancel_at) {
@@ -598,7 +598,7 @@ export const pollMembershipStatus = async (req: Request, res: Response) => {
 
 export const getCurrentSubscriptionPaymentMethodId = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const userId = (req as any).userId
   if (!userId) {
@@ -662,10 +662,10 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
       // read metadata
       const webOrder = paymentIntent.metadata.webOrder
-      if (webOrder !== "true") {
+      const orderData = JSON.parse(paymentIntent.metadata.orderData)
+      if (webOrder !== "true" || !orderData) {
         break
       }
-      const orderData = JSON.parse(paymentIntent.metadata.orderData)
 
       // Create order in DB only once
       const orderId = await createOrderForWebsite(orderData, paymentIntent.id)
