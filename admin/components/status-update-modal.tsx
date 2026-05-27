@@ -1,4 +1,5 @@
 "use client"
+import { OrderStatus } from "@/lib/types"
 import { Ionicons } from "@expo/vector-icons"
 import {
   Modal,
@@ -10,9 +11,9 @@ import {
 
 type StatusUpdateModalProps = {
   visible: boolean
-  currentStatus: string
+  currentStatus: OrderStatus
   onClose: () => void
-  onStatusUpdate: (status: string) => void
+  onStatusUpdate: (status: OrderStatus) => void
 }
 
 export function StatusUpdateModal({
@@ -85,7 +86,7 @@ export function StatusUpdateModal({
                         ? "bg-gray-100 border border-gray-200"
                         : "border border-gray-200"
                     }`}
-                    onPress={() => onStatusUpdate(option.value)}
+                    onPress={() => onStatusUpdate(option.value as OrderStatus)}
                     disabled={option.value === currentStatus}
                   >
                     <View

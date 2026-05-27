@@ -45,7 +45,7 @@ export const adminSignIn = async (req: Request, res: Response) => {
     process.env.JWT_SECRET!,
     {
       expiresIn: "180d",
-    }
+    },
   )
   res.status(200).json({ token })
   return
@@ -472,16 +472,16 @@ export const getOverview = async (req: Request, res: Response) => {
     eachDayOfInterval({ start: weekStart, end: weekEnd }).forEach(
       (day, index) => {
         const ordersForDay = thisWeeksOrders.filter((order: OrderType) =>
-          isSameDay(new Date(order.createdAt), day)
+          isSameDay(new Date(order.createdAt), day),
         )
         overview[index].value = ordersForDay.length
-      }
+      },
     )
 
     const todaySales =
       todaysOrders.reduce(
         (total: number, order: OrderType) => total + order.priceInCents,
-        0
+        0,
       ) / 100
 
     res.status(200).json({ overview, today, week, month, todaySales })
@@ -604,14 +604,14 @@ export const getFutureOrders = async () => {
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
-        0
+        0,
       )
       let minutesBefore = 16 // default to item count >= 6, taking 15 minutes to prepare
       if (count < 3) minutesBefore = 6
       else if (count < 6) minutesBefore = 11
 
       const thresholdTime = new Date(
-        order.pickUpTime.getTime() - minutesBefore * 60 * 1000
+        order.pickUpTime.getTime() - minutesBefore * 60 * 1000,
       )
 
       return thresholdTime <= new Date() // Ready to fetch
@@ -633,6 +633,59 @@ export const renewMochiOffer = async () => {
       },
     })
   } catch (error) {
-    throw new Error(`Failed to renew mochi offer: ${error}`)
+    throw new Error(
+      `Failed to renew mochi offer: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+export const updateDailySpecial = async () => {
+  try {
+    const id = "2026"
+    const existingPromo = await db.promo.findUnique({
+      where: { id },
+    })
+    if (existingPromo) {
+      await db.promo.delete({
+        where: { id },
+      })
+    }
+    const currentDay = new Date().getDay()
+    const todaysSpecialDessert = (() => {
+      switch (currentDay) {
+        case 0:
+          return "cm91cydht002yaijdqyk4vlne"
+        case 1:
+          return "cm95ldibs0008fvj0xwyqc8wn"
+        case 2:
+          return "cm91cztpc002zaijdftaxxtyh"
+        case 3:
+          return "cm91d0qrx0030aijd73z48s50"
+        case 4:
+          return "cm95lelj80009fvj0nhq7fvg6"
+        case 5:
+          return "cm91cuuk0002xaijd7wv313nz"
+        case 6:
+          return "cm91co2xv002waijdlfb067ei"
+        default:
+          return "cm91co2xv002waijdlfb067ei"
+      }
+    })()
+    await db.promo.create({
+      data: {
+        name: "Daily Special: 20% off on selected items",
+        type: "PERCENTAGE",
+        value: 20,
+        startsAt: new Date(),
+        endsAt: new Date(new Date().getTime() + 24 * 60 * 60 * 1000), // Ends in 24 hours
+        desserts: {
+          connect: [{ id: todaysSpecialDessert }],
+        },
+      },
+    })
+  } catch (error) {
+    throw new Error(
+      `Failed to update daily special: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 }

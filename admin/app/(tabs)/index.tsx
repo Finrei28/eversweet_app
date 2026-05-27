@@ -121,7 +121,11 @@ export default function Dashboard() {
 
           <SummaryCard
             title="Avg. Order Value"
-            value={formatCurrency(overview?.todaySales / overview?.today || 0)}
+            value={formatCurrency(
+              overview && overview.today && overview.today > 0
+                ? ((overview.todaySales ?? 0) / overview.today)
+                : 0
+            )}
             icon="stats-chart-outline"
             color="#EF4444"
             isLoading={loadingOverview}

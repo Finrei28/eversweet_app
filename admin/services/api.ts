@@ -68,7 +68,9 @@ export const getPendingOrders = async (): Promise<Order[]> => {
     }
     return data.orders
   } catch (error) {
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -124,7 +126,7 @@ export const getPastOrders = async (queryDate: Date): Promise<Order[]> => {
 export const updateOrderStatusAPI = async (
   orderId: string,
   newStatus: OrderStatus,
-  customerId: string | null
+  customerId: string | null,
 ) => {
   try {
     const token = await getToken()
@@ -160,7 +162,9 @@ export const updateOrderStatusAPI = async (
 
     return
   } catch (error) {
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -194,7 +198,9 @@ export const getOverviewAPI = async (): Promise<Overview> => {
 
     return data
   } catch (error) {
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -214,13 +220,17 @@ export const getRestaurantStatusAPI = async (): Promise<RestaurantStatus> => {
 
     return data.restaurantStatus
   } catch (error) {
-    throw new Error(error?.message || "Could not get restaurant status")
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Could not get restaurant status",
+    )
   }
 }
 
 export const updateRestaurantStatus = async (
   availability?: boolean,
-  date?: Date
+  date?: Date,
 ): Promise<void> => {
   try {
     const token = await getToken()
@@ -248,6 +258,10 @@ export const updateRestaurantStatus = async (
       throw new Error(data?.message || "Server error. Please try again later.")
     }
   } catch (error) {
-    throw new Error(error?.message || "Could not update the restaurant status")
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Could not update the restaurant status",
+    )
   }
 }

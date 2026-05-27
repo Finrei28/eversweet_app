@@ -25,7 +25,7 @@ export default function PastOrders() {
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [showDatePicker, setShowDatePicker] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
   const { authenticated, loading } = useAuth()
 
   const onRefresh = async () => {
@@ -64,7 +64,7 @@ export default function PastOrders() {
 
   const clearFilters = () => {
     setSearchQuery("")
-    setSelectedDate(null)
+    setSelectedDate(undefined)
   }
 
   if (loading) {

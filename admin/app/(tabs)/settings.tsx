@@ -37,7 +37,7 @@ export default function Settings() {
   const [selectedTime, setSelectedTime] = useState<Date>(
     restaurantStatus?.unavailableUntil
       ? new Date(restaurantStatus.unavailableUntil)
-      : new Date()
+      : new Date(),
   )
 
   const getRestaurantStatus = async () => {
@@ -46,14 +46,14 @@ export default function Settings() {
     setSelectedTime(
       restaurantStatus?.unavailableUntil
         ? new Date(restaurantStatus.unavailableUntil)
-        : new Date()
+        : new Date(),
     )
   }
 
   useFocusEffect(
     useCallback(() => {
       getRestaurantStatus()
-    }, [])
+    }, []),
   )
 
   useEffect(() => {
@@ -121,7 +121,7 @@ export default function Settings() {
             onPress: async () =>
               await AsyncStorage.setItem("autoAccept", "true"),
           },
-        ]
+        ],
       )
     } else {
       AsyncStorage.setItem("autoAccept", "false")
@@ -139,7 +139,7 @@ export default function Settings() {
 
   const handleRestaurantStatusChange = async (
     availability?: boolean,
-    date?: Date
+    date?: Date,
   ) => {
     try {
       await updateRestaurantStatus(availability, date)
@@ -155,7 +155,7 @@ export default function Settings() {
     } catch (error) {
       Toast.show({
         type: "error",
-        text1: `Failed to change restaurant status: ${error.message}`,
+        text1: `Failed to change restaurant status: ${error instanceof Error ? error.message : "Something went wrong"}`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
@@ -211,7 +211,7 @@ export default function Settings() {
                     : `Eat In is unavailable ${
                         restaurantStatus?.unavailableUntil
                           ? `until ${formatTime(
-                              new Date(restaurantStatus?.unavailableUntil)
+                              new Date(restaurantStatus?.unavailableUntil),
                             )}`
                           : ""
                       }`}
@@ -246,7 +246,7 @@ export default function Settings() {
               } py-3 rounded-lg items-center mb-2`}
               onPress={() =>
                 handleRestaurantStatusChange(
-                  !restaurantStatus?.dineInAvailability
+                  !restaurantStatus?.dineInAvailability,
                 )
               }
             >

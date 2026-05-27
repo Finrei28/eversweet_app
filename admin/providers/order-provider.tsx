@@ -61,7 +61,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (pendingOrders.length > 0 && currentAlertId === null) {
       const stillPending = pendingOrders.find(
-        (order) => order.id === currentAlertId
+        (order) => order.id === currentAlertId,
       )
       if (stillPending) {
         processNextOrderAlert(stillPending.id)
@@ -93,7 +93,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       const currentOrders = await getCurrentOrders()
       setCurrentOrders(currentOrders)
     } catch (error) {
-      Alert.alert("Error", error.message)
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Failed to fetch orders",
+      )
       console.error("Failed to fetch orders:", error)
     } finally {
       setIsLoading(false)
@@ -102,14 +105,19 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   // Fetch completed orders
   const fetchCompletedOrders = async (date?: Date) => {
-    const queryDate = date ?? null
+    const queryDate = date ?? new Date()
     setIsLoading(true)
     try {
       //fetch past orders
       const completedOrders = await getPastOrders(queryDate)
       setCompletedOrders(completedOrders)
     } catch (error) {
-      Alert.alert("Error", error.message)
+      Alert.alert(
+        "Error",
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch completed orders",
+      )
       console.error("Failed to fetch completed orders:", error)
     } finally {
       setIsLoading(false)
@@ -148,6 +156,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       // update order status
       const existingOrder = findOrderById(orderId)
 
+      if (!existingOrder) {
+        return
+      }
+
       await updateOrderStatusAPI(orderId, newStatus, existingOrder.appUserId)
 
       // For demo, update state directly
@@ -168,7 +180,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             status: newStatus,
           }
           setCurrentOrders((prev) =>
-            prev.map((o) => (o.id === orderId ? updatedOrder : o))
+            prev.map((o) => (o.id === orderId ? updatedOrder : o)),
           )
         }
         await handlePrintReceipt(existingOrder)
@@ -194,15 +206,15 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           prev.map((order) =>
             order.id === orderId
               ? { ...order, status: newStatus as OrderStatus }
-              : order
-          )
+              : order,
+          ),
         )
       }
     } catch (error) {
       console.error("Failed to update order status:", error)
       Toast.show({
         type: "error",
-        text1: `${error.message}`,
+        text1: error instanceof Error ? error.message : "Something went wrong",
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,

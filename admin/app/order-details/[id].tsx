@@ -38,6 +38,9 @@ export default function OrderDetails() {
 
   const handleStatusUpdate = async (newStatus: OrderStatus) => {
     try {
+      if (!order) {
+        return
+      }
       await updateOrderStatus(order.id, newStatus)
 
       // First hide the modal
@@ -55,6 +58,9 @@ export default function OrderDetails() {
 
   const printReceipt = async () => {
     try {
+      if (!order) {
+        return
+      }
       await handlePrintReceipt(order)
       Toast.show({
         type: "success",
@@ -67,7 +73,7 @@ export default function OrderDetails() {
     } catch (error) {
       Toast.show({
         type: "error",
-        text1: `${error.message}`,
+        text1: error instanceof Error ? error.message : "Something went wrong",
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
@@ -77,7 +83,7 @@ export default function OrderDetails() {
   }
 
   const hasCustomizations = order?.desserts?.some(
-    (item) => item?.customisations && item?.customisations?.length > 0
+    (item) => item?.customisations && item?.customisations?.length > 0,
   )
 
   if (!order) {
@@ -197,7 +203,8 @@ export default function OrderDetails() {
                     </Text>
                     <Text className="font-medium">
                       {formatCurrency(
-                        (item.priceInCents - item.discountedAmountInCents) / 100
+                        (item.priceInCents - item.discountedAmountInCents) /
+                          100,
                       )}
                     </Text>
                   </View>
@@ -233,7 +240,7 @@ export default function OrderDetails() {
                 <Text className="font-bold text-base">Total</Text>
                 <Text className="font-bold text-base">
                   {formatCurrency(
-                    (order.priceInCents - order.discountedAmountInCents) / 100
+                    (order.priceInCents - order.discountedAmountInCents) / 100,
                   )}
                 </Text>
               </View>

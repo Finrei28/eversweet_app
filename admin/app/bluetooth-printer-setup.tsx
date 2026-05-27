@@ -46,7 +46,7 @@ export default function BluetoothPrinterSetup() {
       }
     }
 
-    setPermissionStatus(result)
+    setPermissionStatus(result?.toString() || null)
   }
 
   const requestPermissions = async () => {
@@ -91,7 +91,7 @@ export default function BluetoothPrinterSetup() {
       Alert.alert(
         "Bluetooth is Off",
         "Please turn on Bluetooth to scan for printers.",
-        [{ text: "OK" }]
+        [{ text: "OK" }],
       )
       return
     }
@@ -114,7 +114,7 @@ export default function BluetoothPrinterSetup() {
       Alert.alert(
         "Scan Error",
         "There was an error scanning for Bluetooth devices. Please make sure Bluetooth is enabled.",
-        [{ text: "OK" }]
+        [{ text: "OK" }],
       )
     }
   }
@@ -147,13 +147,13 @@ export default function BluetoothPrinterSetup() {
                 loadSavedPrinters()
               },
             },
-          ]
+          ],
         )
       } else {
         Alert.alert(
           "Connection Failed",
           `Could not connect to ${device.name || "printer"}. Please try again.`,
-          [{ text: "OK" }]
+          [{ text: "OK" }],
         )
       }
     } catch (error) {
@@ -161,7 +161,7 @@ export default function BluetoothPrinterSetup() {
       Alert.alert(
         "Connection Error",
         "There was an error connecting to the printer. Please try again.",
-        [{ text: "OK" }]
+        [{ text: "OK" }],
       )
     }
   }
@@ -173,7 +173,7 @@ export default function BluetoothPrinterSetup() {
     Alert.alert(
       "Default Printer Set",
       "This printer has been set as your default printer.",
-      [{ text: "OK" }]
+      [{ text: "OK" }],
     )
   }
 
@@ -194,7 +194,7 @@ export default function BluetoothPrinterSetup() {
             loadSavedPrinters()
           },
         },
-      ]
+      ],
     )
   }
 
@@ -208,7 +208,7 @@ export default function BluetoothPrinterSetup() {
         Alert.alert(
           "Connection Failed",
           "Could not connect to the printer. Please try again.",
-          [{ text: "OK" }]
+          [{ text: "OK" }],
         )
       }
     } catch (error) {
@@ -216,7 +216,7 @@ export default function BluetoothPrinterSetup() {
       Alert.alert(
         "Connection Error",
         "There was an error connecting to the printer. Please try again.",
-        [{ text: "OK" }]
+        [{ text: "OK" }],
       )
     }
   }

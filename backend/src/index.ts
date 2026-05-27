@@ -14,6 +14,7 @@ import {
   checkRestaurantStatus,
   getFutureOrders,
   renewMochiOffer,
+  updateDailySpecial,
 } from "./controllers/admin.controller"
 import jwt from "jsonwebtoken"
 import bodyParser from "body-parser"
@@ -87,7 +88,7 @@ export const emitNewOrder = (order) => {
 interface CorsOptions {
   origin: (
     origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
+    callback: (err: Error | null, allow?: boolean) => void,
   ) => void
   methods: string
   credentials: boolean
@@ -97,7 +98,7 @@ interface CorsOptions {
 const corsOptions: CorsOptions = {
   origin: function (
     origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
+    callback: (err: Error | null, allow?: boolean) => void,
   ): void {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true) // Allow
@@ -113,7 +114,7 @@ const corsOptions: CorsOptions = {
 app.post(
   "/api/stripe/webhook",
   bodyParser.raw({ type: "application/json" }),
-  stripeWebhook
+  stripeWebhook,
 )
 
 app.use(cors(corsOptions))
@@ -139,6 +140,9 @@ try {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * 1", renewMochiOffer, {
+    timezone: "Pacific/Auckland",
+  })
+  cron.schedule("0 0 * * *", updateDailySpecial, {
     timezone: "Pacific/Auckland",
   })
 } catch (err) {
