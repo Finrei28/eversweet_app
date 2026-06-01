@@ -673,6 +673,7 @@ export const updateDailySpecial = async () => {
     })()
     await db.promo.create({
       data: {
+        id,
         name: "Daily Special: 20% off on selected items",
         type: "PERCENTAGE",
         value: 20,
