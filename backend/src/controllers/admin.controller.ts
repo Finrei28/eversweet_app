@@ -650,7 +650,13 @@ export const updateDailySpecial = async () => {
         where: { id },
       })
     }
-    const currentDay = new Date().getDay()
+    const nzDate = new Date(
+      new Date().toLocaleString("en-US", {
+        timeZone: "Pacific/Auckland",
+      }),
+    )
+
+    const currentDay = nzDate.getDay()
     const todaysSpecialDessert = (() => {
       switch (currentDay) {
         case 0:
