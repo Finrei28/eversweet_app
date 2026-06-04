@@ -249,7 +249,12 @@ export const getHomepageCards = (req: Request, res: Response) => {
 
 export const showOfferForClient = async (req: Request, res: Response) => {
   try {
-    const offers = await db.offer.findMany({})
+    const offers = await db.offer.findMany({
+      include: {
+        dessert: { select: { imagePath: true } },
+        category: { select: { desserts: { select: { imagePath: true } } } },
+      },
+    })
     res.status(200).json({ offers })
     return
   } catch (error) {
