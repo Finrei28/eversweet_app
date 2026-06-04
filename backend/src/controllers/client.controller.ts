@@ -52,7 +52,7 @@ export const getMenu = async (req: Request, res: Response) => {
 
 export const getAvailableCustomisations = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   try {
     const { id } = req.params
@@ -232,9 +232,7 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
 }
 
 export const getPromotions = (req: Request, res: Response) => {
-  const allOffers = {
-    
-  }
+  const allOffers = {}
   res.status(200).json(promotions)
   return
 }
@@ -247,4 +245,15 @@ export const getAnnouncements = (req: Request, res: Response) => {
 export const getHomepageCards = (req: Request, res: Response) => {
   res.status(200).json(homepageCards)
   return
+}
+
+export const showOfferForClient = async (req: Request, res: Response) => {
+  try {
+    const offers = await db.offer.findMany({})
+    res.status(200).json(offers)
+    return
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch offers" })
+    return
+  }
 }

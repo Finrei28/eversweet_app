@@ -11,6 +11,7 @@ import {
   getPromotions,
   getAnnouncements,
   getHomepageCards,
+  showOfferForClient,
 } from "../controllers/client.controller"
 
 const router = Router()
@@ -26,5 +27,6 @@ router.get("/getLoyaltyRates", getLoyaltyRates)
 router.get("/getPromotions", getPromotions)
 router.get("/getAnnouncements", getAnnouncements)
 router.get("/getHomepageCards", getHomepageCards)
+router.get("/showOfferForClient", showOfferForClient)
 
 export default router
