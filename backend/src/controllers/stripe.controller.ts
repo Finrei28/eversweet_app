@@ -415,6 +415,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
         planId: true,
         isActive: true,
         cancel: true,
+        plan: true,
       },
     })
     if (!membership) {
