@@ -23,6 +23,7 @@ export type FullOrderType = {
       name: string
       chineseName: string
       imagePath: string
+      categoryId: string
     }
     customisations: {
       id: string

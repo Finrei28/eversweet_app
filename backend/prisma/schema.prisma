@@ -83,11 +83,14 @@ model Membership {
 model Offer {
   id               String            @id @default(cuid())
   name             String
+  description      String?
+  image            String?
   dessertId        String?
   categoryId       String?
   itemPriceInCents Int?
   discountAmount   Decimal?
   limit            Int               @default(1)
+  requirements     OfferRequirement[]
   cartItems        CartItem[]
   category         Category?         @relation(fields: [categoryId], references: [id])
   dessert          Dessert?          @relation(fields: [dessertId], references: [id])
@@ -95,12 +98,30 @@ model Offer {
   orderDessert     OrderDessert[]
 }
 
+model OfferRequirement {
+  id          String   @id @default(cuid())
+
+  offerId     String
+
+  dessertId   String?
+  categoryId  String?
+
+  quantity    Int
+
+  offer       Offer @relation(fields: [offerId], references: [id])
+
+  dessert     Dessert? @relation(fields: [dessertId], references: [id])
+  category    Category? @relation(fields: [categoryId], references: [id])
+}
+
 model OfferRedemption {
   id           String     @id @default(cuid())
   offerId      String
   membershipId String
-  redeemedAt   DateTime   @default(now())
+  unlockedAt   DateTime   @default(now())
+  redeemedAt   DateTime? 
   renewsAt     DateTime?
+  status       OfferStatus
   used         Int        @default(0)
   membership   Membership @relation(fields: [membershipId], references: [id])
   offer        Offer      @relation(fields: [offerId], references: [id], onDelete: Cascade)
@@ -109,10 +130,11 @@ model OfferRedemption {
 }
 
 model MembershipPlan {
-  id            String       @id @default(cuid())
-  name          String
-  stripePriceId String       @unique
-  memberships   Membership[]
+  id                 String       @id @default(cuid())
+  name               String
+  stripePriceId      String       @unique
+  membershipDiscount Int          @default(10)
+  memberships        Membership[]
 }
 
 model Authenticator {
@@ -154,21 +176,23 @@ model Dessert {
   category                 Category            @relation(fields: [categoryId], references: [id])
   ingredients              DessertIngredient[]
   offers                   Offer[]
+  offerRequirements        OfferRequirement[]
   orders                   OrderDessert[]
   promoId                  String?
   promo                    Promo?             @relation(fields: [promoId], references: [id])
 }
 
 model Category {
-  id             String                  @id @default(cuid())
-  name           String
-  chineseName    String
-  sortOrder      Int?
-  customisations CategoryCustomisation[]
-  desserts       Dessert[]
-  offers         Offer[]
-  promoId        String?
-  promo          Promo?                 @relation(fields: [promoId], references: [id])
+  id                       String                  @id @default(cuid())
+  name                     String
+  chineseName              String
+  sortOrder                Int?
+  customisations           CategoryCustomisation[]
+  desserts                 Dessert[]
+  offers                   Offer[]
+  offerRequirements        OfferRequirement[]
+  promoId                  String?
+  promo                    Promo?                 @relation(fields: [promoId], references: [id])
 }
 
 model Promo {
@@ -349,6 +373,12 @@ model RestaurantStatus {
   id                  String    @id @default(cuid())
   dineInAvailability  Boolean
   unavailableUntil    DateTime?
+}
+
+enum OfferStatus {
+  AVAILABLE
+  REDEEMED
+  EXPIRED
 }
 
 enum PromoType {

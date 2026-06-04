@@ -132,6 +132,7 @@ export const createOrderForWebsite = async (
               name: true,
               chineseName: true,
               imagePath: true,
+              categoryId: true,
             },
           },
           customisations: {
@@ -656,6 +657,7 @@ export const createOrder = async (req: Request, res: Response) => {
                 name: true,
                 chineseName: true,
                 imagePath: true,
+                categoryId: true,
               },
             },
             customisations: {
@@ -686,7 +688,7 @@ export const createOrder = async (req: Request, res: Response) => {
           acc +
           Math.floor(
             ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
-              (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
+              (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 10 points per dollar
               item.quantity *
               (membership?.isActive
                 ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
@@ -696,7 +698,70 @@ export const createOrder = async (req: Request, res: Response) => {
       )
 
       await incrementLoyaltyPoints(userId, earnablePoints)
+
+      // unlock membership offer if there is any
+      if (membership && membership.isActive) {
+        const lockedOffers = await db.offer.findMany({
+          where: {
+            AND: [
+              {
+                redemptions: {
+                  none: {
+                    membershipId: membership?.id,
+                  },
+                },
+              },
+              {
+                requirements: {
+                  some: {}, // ensures at least 1 requirement exists
+                },
+              },
+            ],
+          },
+          include: {
+            requirements: true,
+          },
+        })
+        // count desserts and categories in the order for offer eligibility check
+        const dessertCounts: Record<string, number> = {}
+        const categoryCounts: Record<string, number> = {}
+        for (const item of newOrder.desserts) {
+          const id = item.dessert.id
+          dessertCounts[id] = (dessertCounts[id] ?? 0) + item.quantity
+          const categoryId = item.dessert.categoryId
+          categoryCounts[categoryId] =
+            (categoryCounts[categoryId] ?? 0) + item.quantity
+        }
+
+        // offer requirements check
+        const eligibleOffers = lockedOffers.filter((offer) => {
+          return offer.requirements.every((req) => {
+            if (req.dessertId) {
+              return (dessertCounts[req.dessertId] ?? 0) >= req.quantity
+            }
+
+            if (req.categoryId) {
+              return (categoryCounts[req.categoryId] ?? 0) >= req.quantity
+            }
+
+            return false
+          })
+        })
+        // unlock eligible offers for members
+        for (const offer of eligibleOffers) {
+          await db.offerRedemption.create({
+            data: {
+              offerId: offer.id,
+              membershipId: membership?.id,
+              unlockedAt: new Date(),
+              status: "AVAILABLE",
+            },
+          })
+        }
+      }
     }
+
+    // delete cart and send email and emit order
 
     await db.cart.delete({ where: { userId } })
 
@@ -840,6 +905,7 @@ export const showOffers = async (req: Request, res: Response) => {
             },
           },
         },
+        requirements: true,
         redemptions: {
           where: { membershipId: membership.id },
         },

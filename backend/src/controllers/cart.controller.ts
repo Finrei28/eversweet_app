@@ -23,7 +23,7 @@ const CheckMochiPromotion = async (
   tx: Omit<
     PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
     "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
-  >
+  >,
 ) => {
   try {
     const totalMochiItems = await tx.cartItem.aggregate({
@@ -51,7 +51,7 @@ const CheckMochiPromotion = async (
 
     const totalDiscountedCount = totalDiscountedItems.reduce(
       (sum, item) => sum + item.quantity,
-      0
+      0,
     )
     const eligiblePromotions = allowedPromotions - totalDiscountedCount
 
@@ -140,9 +140,41 @@ const CheckMochiPromotion = async (
   }
 }
 
+export const unlockOfferForMembership = async (
+  membershipId: string,
+  offerId: string,
+) => {
+  const offer = await db.offer.findUnique({ where: { id: offerId } })
+  try {
+    if (!offer) throw new Error("Offer does not exist")
+    const existing = await db.offerRedemption.findUnique({
+      where: {
+        offerId_membershipId: { offerId, membershipId },
+      },
+    })
+    if (existing) {
+      return await db.offerRedemption.update({
+        where: { id: existing.id },
+        data: { unlockedAt: new Date(), status: "AVAILABLE" },
+      })
+    } else {
+      return await db.offerRedemption.create({
+        data: {
+          offerId,
+          membershipId,
+          unlockedAt: new Date(),
+          status: "AVAILABLE",
+        },
+      })
+    }
+  } catch (error) {
+    throw new Error("Failed to unlock offer for membership")
+  }
+}
+
 export const redeemOfferForMembership = async (
   membershipId: string,
-  offerId: string
+  offerId: string,
 ) => {
   const offer = await db.offer.findUnique({ where: { id: offerId } })
   if (!offer) throw new Error("Offer does not exist")
@@ -159,7 +191,11 @@ export const redeemOfferForMembership = async (
 
     return await db.offerRedemption.update({
       where: { id: existing.id },
-      data: { used: { increment: 1 }, redeemedAt: new Date() },
+      data: {
+        used: { increment: 1 },
+        redeemedAt: new Date(),
+        status: "REDEEMED",
+      },
     })
   }
 
@@ -170,6 +206,7 @@ export const redeemOfferForMembership = async (
       membershipId,
       used: 1,
       redeemedAt: new Date(),
+      status: "REDEEMED",
     },
   })
 }
@@ -244,10 +281,10 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     const wantsNoGlutinous = cartItem.customisations.some(
-      (c) => c.name === "Glutinous Balls" && c.quantity === 0
+      (c) => c.name === "Glutinous Balls" && c.quantity === 0,
     )
     const wantsNoMochi = cartItem.customisations.some(
-      (c) => c.name === "Mochi" && c.quantity === 0
+      (c) => c.name === "Mochi" && c.quantity === 0,
     )
 
     let isMochiBowl = false
@@ -351,7 +388,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
             dessert.priceInCents,
             cartItem.itemPriceInCents,
             cartItem.customisations,
-            tx
+            tx,
           )
         }
       })
@@ -712,7 +749,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
           cartItem.dessert.priceInCents,
           cartItem.itemPriceInCents,
           cartItemCustomisation ?? [],
-          tx
+          tx,
         )
       })
     }
@@ -810,18 +847,18 @@ export const updateCartItem = async (req: Request, res: Response) => {
     }
 
     const wantsNoGlutinous = cartItem.customisations.some(
-      (c) => c.name === "Glutinous Balls" && c.quantity === 0 // user does not want balls
+      (c) => c.name === "Glutinous Balls" && c.quantity === 0, // user does not want balls
     )
     const wantsNoMochi = cartItem.customisations.some(
       // user does not want mochi
-      (c) => c.name === "Mochi" && c.quantity === 0
+      (c) => c.name === "Mochi" && c.quantity === 0,
     )
 
     const existingCartHasNoBalls = existingCartItem.customisations.some(
-      (c) => c.customisation.name === "Glutinous Balls" && c.quantity === 0
+      (c) => c.customisation.name === "Glutinous Balls" && c.quantity === 0,
     ) // existing mochi has no balls
     const existingCartHasNoMochi = existingCartItem.customisations.some(
-      (c) => c.customisation.name === "Mochi" && c.quantity === 0
+      (c) => c.customisation.name === "Mochi" && c.quantity === 0,
     ) // existing mochi has no mochi
 
     let isMochiBowl = false
@@ -1011,7 +1048,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
           cartItem.dessert.priceInCents,
           cartItem.itemPriceInCents,
           cartItemCustomisation ?? [],
-          tx
+          tx,
         )
       }
     })
