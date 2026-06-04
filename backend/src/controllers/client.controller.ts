@@ -250,7 +250,7 @@ export const getHomepageCards = (req: Request, res: Response) => {
 export const showOfferForClient = async (req: Request, res: Response) => {
   try {
     const offers = await db.offer.findMany({})
-    res.status(200).json(offers)
+    res.status(200).json({ offers })
     return
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch offers" })
