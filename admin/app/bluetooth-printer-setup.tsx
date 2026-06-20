@@ -143,8 +143,14 @@ export default function BluetoothPrinterSetup() {
             {
               text: "Yes",
               onPress: async () => {
-                await thermalPrinter.savePrinter(device)
-                loadSavedPrinters()
+                const success = await thermalPrinter.savePrinter(device)
+
+                if (success) {
+                  loadSavedPrinters()
+                  await setAsDefault(device.id)
+                } else {
+                  Alert.alert("Error", "Failed to save printer")
+                }
               },
             },
           ],
