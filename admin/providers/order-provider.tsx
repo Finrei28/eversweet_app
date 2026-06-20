@@ -6,7 +6,7 @@ import {
   getPastOrders,
   updateOrderStatusAPI,
 } from "@/services/api"
-import usePrintReceipt from "@/services/printer-service"
+import printerService, { addJob } from "@/services/printer-service"
 import { useRouter } from "expo-router"
 import {
   createContext,
@@ -48,10 +48,26 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
   const alreadyAlertingIdRef = useRef<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const { handlePrintReceipt } = usePrintReceipt()
 
   // Add these new state variables after the existing state declarations
   const [currentAlertId, setCurrentAlertId] = useState<string | null>(null)
+
+  // Fetch current orders
+  const fetchOrders = async () => {
+    setIsLoading(true)
+    try {
+      const currentOrders = await getCurrentOrders()
+      setCurrentOrders(currentOrders)
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Failed to fetch orders",
+      )
+      console.error("Failed to fetch orders:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Fetch orders on mount
   useEffect(() => {
@@ -84,23 +100,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   const setAlreadyAlertingIdSafe = (id: string | null) => {
     alreadyAlertingIdRef.current = id
-  }
-
-  // Fetch current orders
-  const fetchOrders = async () => {
-    setIsLoading(true)
-    try {
-      const currentOrders = await getCurrentOrders()
-      setCurrentOrders(currentOrders)
-    } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "Failed to fetch orders",
-      )
-      console.error("Failed to fetch orders:", error)
-    } finally {
-      setIsLoading(false)
-    }
   }
 
   // Fetch completed orders
@@ -164,6 +163,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
       // For demo, update state directly
       if (newStatus === "ACCEPTED") {
+        // store the order for printing
+        await addJob(existingOrder)
         // Find the order
         const newOrder = pendingOrders.find((order) => order.id === orderId)
         // Delete from pending
@@ -183,7 +184,12 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             prev.map((o) => (o.id === orderId ? updatedOrder : o)),
           )
         }
-        await handlePrintReceipt(existingOrder)
+        printerService.enqueue({
+          id: existingOrder.id,
+          order: existingOrder,
+          createdAt: new Date().toISOString(),
+          status: "pending",
+        })
 
         // } else if (newStatus === "DECLINED") {
       } else if (newStatus === "PICKED_UP") {

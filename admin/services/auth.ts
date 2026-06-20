@@ -18,7 +18,10 @@ export const getUserIdFromToken = async (): Promise<string | null> => {
     const decoded: JWTData = jwtDecode(token)
     return decoded.userId
   } catch (error) {
-    console.error("Failed to decode token:", error)
+    console.error(
+      "Failed to decode token:",
+      error instanceof Error ? error.message : "Something went wrong",
+    )
     return null
   }
 }
@@ -39,7 +42,10 @@ export const isUserAuthorised = async (): Promise<boolean> => {
 
     return true
   } catch (error) {
-    console.error("Failed to decode token:", error.message)
+    console.error(
+      "Failed to decode token:",
+      error instanceof Error ? error.message : "Something went wrong",
+    )
     return false
   }
 }
@@ -49,7 +55,10 @@ export async function getToken(): Promise<string | null> {
     const token = await SecureStore.getItemAsync("token")
     return token
   } catch (error) {
-    console.error("Error fetching token from SecureStore:", error)
+    console.error(
+      "Error fetching token from SecureStore:",
+      error instanceof Error ? error.message : "Something went wrong",
+    )
     return null
   }
 }
@@ -58,7 +67,10 @@ export async function removeToken() {
   try {
     await SecureStore.deleteItemAsync("token")
   } catch (error) {
-    console.error("Error removing token from SecureStore:", error)
+    console.error(
+      "Error removing token from SecureStore:",
+      error instanceof Error ? error.message : "Something went wrong",
+    )
     return null
   }
 }

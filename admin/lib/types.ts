@@ -32,10 +32,12 @@ export type Order = {
     customisations: {
       id: string
       quantity: number
+      discountedAmountInCents: number
       customisation: {
         id: string
         name: string
         chineseName: string
+        priceInCents: number
       }
     }[]
   }[]
@@ -59,4 +61,11 @@ export type Overview = {
 export type RestaurantStatus = {
   dineInAvailability: boolean | undefined
   unavailableUntil: Date | null | undefined
+}
+
+export type PrintJob = {
+  id: string
+  order: Order
+  createdAt: string
+  status: "pending"
 }

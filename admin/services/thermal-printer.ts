@@ -77,6 +77,11 @@ class ThermalPrinterService {
     this.setupBleListener()
   }
 
+  async cleanup() {
+    await this.disconnectPrinter()
+    this.bleManager.destroy()
+  }
+
   private setupBleListener() {
     // Listen for state changes
     this.bleManager.onStateChange((state) => {
@@ -90,6 +95,10 @@ class ThermalPrinterService {
 
   private emitScanStateChange() {
     this.eventEmitter.emit("scanStateChange", this.isScanning)
+  }
+
+  onPrinterConnected(callback: () => void) {
+    this.eventEmitter.on("printerConnected", callback)
   }
 
   /**
@@ -112,7 +121,7 @@ class ThermalPrinterService {
       if (Platform.Version >= 31) {
         const scanResult = await request(PERMISSIONS.ANDROID.BLUETOOTH_SCAN)
         const connectResult = await request(
-          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT
+          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
         )
         return (
           scanResult === RESULTS.GRANTED && connectResult === RESULTS.GRANTED
@@ -171,7 +180,7 @@ class ThermalPrinterService {
             this.discoveredDevices.set(device.id, device)
             // console.log("Found device:", device.name, device.id)
           }
-        }
+        },
       )
 
       // Stop scan after 10 seconds to save battery
@@ -300,7 +309,7 @@ class ThermalPrinterService {
 
       await AsyncStorage.setItem(
         PRINTERS_STORAGE_KEY,
-        JSON.stringify(updatedPrinters)
+        JSON.stringify(updatedPrinters),
       )
 
       // If this was the default printer, clear the default
@@ -347,7 +356,7 @@ class ThermalPrinterService {
 
       await AsyncStorage.setItem(
         PRINTERS_STORAGE_KEY,
-        JSON.stringify(updatedPrinters)
+        JSON.stringify(updatedPrinters),
       )
       await AsyncStorage.setItem(DEFAULT_PRINTER_KEY, printerId)
 
@@ -395,7 +404,7 @@ class ThermalPrinterService {
 
         // Check if this service matches any known printer service UUIDs
         const isKnownService = PRINTER_SERVICE_UUIDS.some((uuid) =>
-          serviceUuid.includes(uuid.toLowerCase())
+          serviceUuid.includes(uuid.toLowerCase()),
         )
 
         if (isKnownService) {
@@ -413,7 +422,7 @@ class ThermalPrinterService {
               // Check if this is a known printer characteristic
               const charUuid = characteristic.uuid.toLowerCase()
               const isKnownChar = PRINTER_CHARACTERISTIC_UUIDS.some((uuid) =>
-                charUuid.includes(uuid.toLowerCase())
+                charUuid.includes(uuid.toLowerCase()),
               )
 
               if (isKnownChar) {
@@ -452,7 +461,7 @@ class ThermalPrinterService {
 
       if (!foundService || !foundCharacteristic) {
         console.error(
-          "Could not find a suitable service and characteristic for printing"
+          "Could not find a suitable service and characteristic for printing",
         )
         await this.bleManager.cancelDeviceConnection(device.id)
         return false
@@ -461,6 +470,8 @@ class ThermalPrinterService {
       this.connectedDevice = device
       this.writeService = foundService
       this.writeCharacteristic = foundCharacteristic
+
+      this.eventEmitter.emit("printerConnected")
 
       return true
     } catch (error) {
@@ -494,6 +505,18 @@ class ThermalPrinterService {
     return this.connectedDevice !== null && this.writeCharacteristic !== null
   }
 
+  async isPrinterConnected(): Promise<boolean> {
+    if (!this.connectedDevice) {
+      return false
+    }
+
+    try {
+      return await this.connectedDevice.isConnected()
+    } catch {
+      return false
+    }
+  }
+
   /**
    * Get the connected printer device
    */
@@ -504,6 +527,16 @@ class ThermalPrinterService {
   /**
    * Print raw text with ESC/POS commands
    */
+
+  private chunkString(str: string, size: number): string[] {
+    const chunks = []
+
+    for (let i = 0; i < str.length; i += size) {
+      chunks.push(str.slice(i, i + size))
+    }
+
+    return chunks
+  }
   async printRawText(text: string): Promise<PrintResult> {
     if (!this.isConnected()) {
       return { success: false, message: "No printer connected" }
@@ -519,13 +552,16 @@ class ThermalPrinterService {
 
       // Convert text to bytes
       const data = this.textToBytes(text)
+      const chunks = this.chunkString(data, 180)
 
       // Write to the characteristic
-      await this.connectedDevice!.writeCharacteristicWithResponseForService(
-        this.writeService.uuid,
-        this.writeCharacteristic.uuid,
-        data
-      )
+      for (const chunk of chunks) {
+        await this.connectedDevice!.writeCharacteristicWithResponseForService(
+          this.writeService.uuid,
+          this.writeCharacteristic.uuid,
+          chunk,
+        )
+      }
 
       return { success: true, message: "Text printed successfully" }
     } catch (error) {
@@ -688,8 +724,22 @@ class ThermalPrinterService {
           })
         }
 
+        const customisationPrice = item.customisations.reduce(
+          (acc, customisation) =>
+            acc +
+            (customisation.quantity > 0
+              ? (customisation.customisation.priceInCents -
+                  customisation.discountedAmountInCents) *
+                customisation.quantity
+              : 0),
+          0,
+        )
+
         const pricePerItem =
-          (item.priceInCents - item.discountedAmountInCents) / 100
+          (item.priceInCents -
+            item.discountedAmountInCents +
+            customisationPrice) /
+          100
 
         // Add item price
         receiptText += ALIGN_RIGHT
@@ -702,24 +752,16 @@ class ThermalPrinterService {
       receiptText += LINE_FEED
 
       // Totals
+      const total =
+        (orderData.priceInCents - orderData.discountedAmountInCents) / 100
       receiptText += ALIGN_RIGHT
-      receiptText +=
-        "Subtotal: $" +
-        (
-          (orderData.priceInCents - orderData.discountedAmountInCents) /
-          100
-        ).toFixed(2)
+      receiptText += "Subtotal: $" + total.toFixed(2)
       receiptText += LINE_FEED
       receiptText += "GST: $" + (orderData.GST / 100).toFixed(2)
       receiptText += LINE_FEED
 
       receiptText += BOLD_ON
-      receiptText +=
-        "TOTAL: $" +
-        (
-          (orderData.priceInCents - orderData.discountedAmountInCents) /
-          100
-        ).toFixed(2)
+      receiptText += "TOTAL: $" + total.toFixed(2)
       receiptText += BOLD_OFF
       receiptText += LINE_FEED + LINE_FEED
 

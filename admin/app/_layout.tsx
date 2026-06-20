@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from "@/providers/auth-provider"
 import { OrderProvider } from "@/providers/order-provider"
 import { SocketProvider } from "@/providers/socket-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
+import printerService from "@/services/printer-service"
+import thermalPrinter from "@/services/thermal-printer"
 import { Ionicons } from "@expo/vector-icons"
 import { useFonts } from "expo-font"
 import { Stack, useRouter } from "expo-router"
@@ -28,6 +30,20 @@ function AppLayout() {
     "Inter-SemiBold": require("../assets/fonts/Inter-SemiBold.ttf"),
     "Inter-Bold": require("../assets/fonts/Inter-Bold.ttf"),
   })
+
+  useEffect(() => {
+    if (!authenticated) {
+      return
+    }
+
+    printerService.retryPendingJobs() // solves for app crashes
+
+    const handleReconnect = () => {
+      printerService.retryPendingJobs()
+    }
+
+    thermalPrinter.onPrinterConnected(handleReconnect) // solves when printer goes offline
+  }, [authenticated])
 
   useEffect(() => {
     if (authenticated) {
