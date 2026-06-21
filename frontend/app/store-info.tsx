@@ -6,61 +6,78 @@ import {
   TouchableOpacity,
   ScrollView,
   Linking,
-  Platform,
+  Alert,
 } from "react-native"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
-import { parse, isAfter, isBefore } from "date-fns"
-import { StoreHours } from "@/lib/businessHours"
 import { useAuth } from "@/store/authProvider"
-
-export const isStoreOpenNow = (storeHours: StoreHours): boolean => {
-  const now = new Date()
-  const dayName = now.toLocaleDateString("en-NZ", { weekday: "long" })
-  const hours = storeHours[dayName as keyof typeof storeHours]
-
-  if (!hours) {
-    return false
-  }
-
-  const [startStr, endStr] = hours
-
-  const start = parse(startStr, "hh:mm a", now)
-  const end = parse(endStr, "hh:mm a", now)
-
-  return isAfter(now, start) && isBefore(now, end)
-}
+import useFetch from "@/services/use_fetch"
+import { getStoreInfo } from "@/services/api"
+import BouncingLoader from "@/_components/loader"
 
 export default function StoreInfo() {
+  const { data: storeInfo, loading } = useFetch(getStoreInfo)
   const { storeHours } = useAuth()
 
-  const store = {
-    name: "Eversweet",
-    isOpen: isStoreOpenNow(storeHours),
-    address: "5D/119 Meadowland Drive, Somerville",
-    city: "Auckland",
-    state: "Auckland",
-    postal: "2014",
-    phone: "09 949 1050",
-  }
-
   const openMaps = (address: string) => {
-    const url = Platform.select({
-      ios: `maps:0,0?q=${address}`,
-      android: `geo:0,0?q=${address}`,
-    })
-
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      address,
+    )}`
     if (url) {
       Linking.openURL(url)
     }
   }
 
-  const callStore = (phoneNumber: string) => {
-    Linking.openURL(`tel:${phoneNumber}`)
+  const toNZInternational = (phone: string) => {
+    const cleaned = phone.replace(/[^\d+]/g, "")
+
+    if (cleaned.startsWith("+64")) {
+      return cleaned
+    }
+
+    if (cleaned.startsWith("0")) {
+      return `+64${cleaned.slice(1)}`
+    }
+
+    return cleaned
   }
 
-  const emailStore = (email: string) => {
-    Linking.openURL(`mailto:${email}`)
+  const callStore = async (phoneNumber: string) => {
+    const convertedPhoneNumber = toNZInternational(phoneNumber)
+    const url = `tel:${convertedPhoneNumber}`
+
+    const canOpen = await Linking.canOpenURL(url)
+
+    if (!canOpen) {
+      Alert.alert("Error", "Unable to make a call on this device.")
+      return
+    }
+
+    Linking.openURL(url)
+  }
+
+  const emailStore = async (email: string) => {
+    const url = `mailto:${email}`
+
+    const canOpen = await Linking.canOpenURL(url)
+
+    if (!canOpen) {
+      Alert.alert("Error", "Unable to make an email on this device.")
+      return
+    }
+
+    Linking.openURL(url)
+  }
+
+  if (loading) {
+    return (
+      <View className="flex-1 bg-background">
+        <CustomHeader />
+        <View className="flex-1 items-center justify-center">
+          <BouncingLoader />
+        </View>
+      </View>
+    )
   }
 
   return (
@@ -83,27 +100,31 @@ export default function StoreInfo() {
           <View className="flex-row items-center mb-2">
             <Feather name="globe" size={18} color="#6B7280" className="mr-2" />
             <TouchableOpacity
-              onPress={() => Linking.openURL("https://eversweet.co.nz")}
+              onPress={() =>
+                Linking.openURL(storeInfo?.website ?? "https://eversweet.co.nz")
+              }
             >
-              <Text className="text-primary ml-2">www.eversweet.co.nz</Text>
+              <Text className="text-primary ml-2">{storeInfo?.website}</Text>
             </TouchableOpacity>
           </View>
 
           <View className="flex-row items-center mb-2">
             <Feather name="mail" size={18} color="#6B7280" className="mr-2" />
             <TouchableOpacity
-              onPress={() => emailStore("eversweet@eversweet.co.nz")}
+              onPress={() =>
+                emailStore(storeInfo?.email ?? "eversweet@eversweet.co.nz")
+              }
             >
-              <Text className="text-primary ml-2">
-                eversweet@eversweet.co.nz
-              </Text>
+              <Text className="text-primary ml-2">{storeInfo?.email}</Text>
             </TouchableOpacity>
           </View>
 
           <View className="flex-row items-center">
             <Feather name="phone" size={18} color="#6B7280" className="mr-2" />
-            <TouchableOpacity onPress={() => callStore("1-800-EVERSWEET")}>
-              <Text className="text-primary ml-2">09 949 1050</Text>
+            <TouchableOpacity
+              onPress={() => callStore(storeInfo?.phone ?? "+6499491050")}
+            >
+              <Text className="text-primary ml-2">{storeInfo?.phone}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -113,8 +134,8 @@ export default function StoreInfo() {
           {/* Store Header */}
           <View className="p-4 border-b border-gray-200">
             <View className="flex-row justify-between items-center">
-              <Text className="font-bold text-lg">{store.name}</Text>
-              {store.isOpen ? (
+              <Text className="font-bold text-lg">{storeInfo?.name}</Text>
+              {storeInfo?.isOpen ? (
                 <View className="bg-green-100 px-2 py-1 rounded">
                   <Text className="text-green-800 text-xs font-medium">
                     Open Now
@@ -140,23 +161,23 @@ export default function StoreInfo() {
               style={{ marginTop: 2 }}
             />
             <View className="ml-2 flex-1">
-              <Text className="text-gray-700">{store.address}</Text>
+              <Text className="text-gray-700">{storeInfo?.address}</Text>
               <Text className="text-gray-700">
-                {store.city}, {store.state} {store.postal}
+                {storeInfo?.city}, {storeInfo?.state} {storeInfo?.postal}
               </Text>
             </View>
           </View>
 
           <View className="flex-row items-center mb-2 px-4">
             <Feather name="phone" size={18} color="#6B7280" />
-            <Text className="text-gray-700 ml-2">{store.phone}</Text>
+            <Text className="text-gray-700 ml-2">{storeInfo?.phone}</Text>
           </View>
 
           <View className="flex-row justify-between my-2 px-4">
             <TouchableOpacity
               onPress={() =>
                 openMaps(
-                  `${store.address}, ${store.city}, ${store.state} ${store.postal}`
+                  `${storeInfo?.name}, ${storeInfo?.address}, ${storeInfo?.city}, ${storeInfo?.state} ${storeInfo?.postal}`,
                 )
               }
               className="bg-primary py-2 px-4 rounded-lg flex-row items-center"

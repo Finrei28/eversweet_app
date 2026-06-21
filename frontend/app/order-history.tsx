@@ -86,7 +86,7 @@ export default function OrderHistory() {
             const orderDate = new Date(order.createdAt).toISOString()
             const totalItems = order.desserts.reduce(
               (total, item) => total + item.quantity,
-              0
+              0,
             )
             return (
               <View
@@ -106,7 +106,7 @@ export default function OrderHistory() {
                     </View>
                     <View
                       className={`px-3 py-1 rounded-full ${getStatusColor(
-                        order.status
+                        order.status,
                       )}`}
                     >
                       <Text className="text-xs font-medium">
@@ -127,7 +127,7 @@ export default function OrderHistory() {
                     <Text className="font-medium">
                       {formatCurrency(
                         (order.priceInCents - order.discountedAmountInCents) /
-                          100
+                          100,
                       )}
                     </Text>
                   </View>
@@ -137,7 +137,7 @@ export default function OrderHistory() {
                 <TouchableOpacity
                   onPress={() =>
                     setSelectedOrder(
-                      selectedOrder === order.id ? null : order.id
+                      selectedOrder === order.id ? null : order.id,
                     )
                   }
                   className="px-4 py-2 border-t border-gray-200 flex-row justify-between items-center"
@@ -161,15 +161,45 @@ export default function OrderHistory() {
                   <View className="p-4 border-t border-gray-200">
                     <Text className="font-medium mb-3">
                       Picked up on{" "}
-                      {formatDate(new Date(order.pickedUpAt).toISOString())}
+                      {order.pickedUpAt
+                        ? formatDate(new Date(order.pickedUpAt).toISOString())
+                        : "N/A"}
                     </Text>
                     {/* Order Items */}
                     <Text className="font-medium mb-3">Items</Text>
                     {order.desserts.map((item, index) => {
-                      const originalPrice = item.priceInCents / 100
+                      const originalCustomisationPrice =
+                        item.customisations.reduce(
+                          (acc, c) =>
+                            acc +
+                            (c.quantity > 0
+                              ? c.customisation.priceInCents * c.quantity
+                              : 0),
+                          0,
+                        )
+                      const originalPrice =
+                        (item.priceInCents + originalCustomisationPrice) / 100
+
+                      const customisationPriceInCents =
+                        item.customisations.reduce(
+                          (acc, c) =>
+                            acc +
+                            (c.quantity > 0
+                              ? (c.customisation.priceInCents -
+                                  c.discountedAmountInCents) *
+                                c.quantity
+                              : 0),
+                          0,
+                        )
+
+                      const itemPriceAfterDiscount =
+                        item.priceInCents - item.discountedAmountInCents
 
                       const finalPrice =
-                        (item.priceInCents - item.discountedAmountInCents) / 100
+                        (item.priceInCents -
+                          item.discountedAmountInCents +
+                          customisationPriceInCents) /
+                        100
                       return (
                         <View
                           key={index}
@@ -188,32 +218,62 @@ export default function OrderHistory() {
                             className="w-12 h-12 rounded-md mr-3"
                           />
                           <View className="flex-1 gap-1">
-                            <Text className="font-medium">
-                              {item.dessert.name}{" "}
-                              {item.offerId && `(Members Offer)`}
-                            </Text>
-                            {item.customisations.map((customisation) => (
-                              <Text key={customisation.id}>{`${
-                                customisation.quantity === 0 ? `- ` : `+ `
-                              } ${customisation.customisation.name} ${
-                                customisation.quantity > 1
-                                  ? `x${customisation.quantity}`
-                                  : ``
-                              }`}</Text>
-                            ))}
-                            <Text className="text-gray-500 text-sm">
-                              Qty: {item.quantity}×{" "}
-                              {item.discountedAmountInCents > 0 && (
-                                <Text className="text-gray-400 text-sm line-through">
-                                  {formatCurrency(originalPrice)}{" "}
-                                </Text>
-                              )}
-                              {formatCurrency(finalPrice)}
-                            </Text>
+                            <View className="flex flex-row items-center justify-between">
+                              <Text className="font-medium">
+                                {item.dessert.name}{" "}
+                                {item.offerId && `(Members Offer)`}
+                              </Text>
+                              <Text>
+                                {formatCurrency(
+                                  (item.discountedAmountInCents > 0
+                                    ? itemPriceAfterDiscount
+                                    : item.priceInCents) / 100,
+                                )}
+                              </Text>
+                            </View>
+
+                            {item.customisations.map((customisation) => {
+                              const customisationPriceAfterDiscount =
+                                (customisation.customisation.priceInCents -
+                                  customisation.discountedAmountInCents) *
+                                customisation.quantity
+                              return (
+                                <View
+                                  key={customisation.id}
+                                  className="flex flex-row items-center justify-between"
+                                >
+                                  <Text>{`${
+                                    customisation.quantity === 0 ? `- ` : `+ `
+                                  } ${customisation.customisation.name} ${
+                                    customisation.quantity > 1
+                                      ? `x${customisation.quantity}`
+                                      : ``
+                                  }`}</Text>
+                                  {customisation.quantity > 0 && ( // only show price of customisation that customers want to add and not remove
+                                    <Text className="text-sm text-muted-foreground">
+                                      {formatCurrency(
+                                        customisationPriceAfterDiscount / 100,
+                                      )}
+                                    </Text>
+                                  )}
+                                </View>
+                              )
+                            })}
+                            <View className="flex flex-row items-center justify-between border-t border-gray-500 py-2">
+                              <Text className="text-gray-500 text-sm">
+                                Qty: {item.quantity}×{" "}
+                                {item.discountedAmountInCents > 0 && (
+                                  <Text className="text-gray-400 text-sm line-through">
+                                    {formatCurrency(originalPrice)}{" "}
+                                  </Text>
+                                )}
+                                {formatCurrency(finalPrice)}
+                              </Text>
+                              <Text className="font-medium">
+                                {formatCurrency(item.quantity * finalPrice)}
+                              </Text>
+                            </View>
                           </View>
-                          <Text className="font-medium">
-                            {formatCurrency(item.quantity * finalPrice)}
-                          </Text>
                         </View>
                       )
                     })}

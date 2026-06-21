@@ -35,7 +35,7 @@ export default function forgotPassword() {
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
       })
       return
     }
@@ -46,7 +46,7 @@ export default function forgotPassword() {
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
       })
       return
     }

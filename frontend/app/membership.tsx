@@ -19,6 +19,8 @@ import {
   getMembershipDetails,
   getSavedCards,
   pollMembershipStatus,
+  resumeMembership,
+  retryPayment,
 } from "@/services/stripe-api"
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
@@ -28,6 +30,8 @@ import ShowOffers from "@/_components/showOffersToMembers"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
+import DancingStar from "@/_components/dancingStar"
+import Toast from "react-native-toast-message"
 
 export default function MembershipPage() {
   return (
@@ -63,6 +67,8 @@ function MembershipContent() {
     useState<MembershipDetails | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
+  const [isResuming, setIsResuming] = useState(false)
+  const membershipStatus = usersMembership?.paymentStatus
 
   // Fetch saved cards when component mounts
   useFocusEffect(
@@ -74,7 +80,7 @@ function MembershipContent() {
         fetchSavedCards()
         getMembershipDetail()
       }
-    }, [token, loadingToken])
+    }, [token, loadingToken]),
   )
 
   const getMembershipDetail = async () => {
@@ -88,7 +94,8 @@ function MembershipContent() {
     setLoadingPaymentSheet(true)
     await openPaymentSheetForSetup(
       { initPaymentSheet, presentPaymentSheet },
-      fetchSavedCards
+      fetchSavedCards,
+      usersMembership ? usersMembership.isActive : false,
     )
     setLoadingPaymentSheet(false)
   }
@@ -119,24 +126,26 @@ function MembershipContent() {
 
   const pollUsersMembershipStatus = async (
     interval = 2000, // 2 seconds
-    timeout = 30000 // 30 seconds max
+    timeout = 30000, // 30 seconds max
   ) => {
     const startTime = Date.now()
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<boolean>((resolve, reject) => {
       const checkStatus = async () => {
         try {
           const membershipStatus = await pollMembershipStatus() // fetch latest membership
           if (membershipStatus?.isActive) {
-            resolve() // membership active, stop polling
+            resolve(true) // membership active, stop polling
             return
           } else if (membershipStatus.paymentStatus === "FAILED") {
             reject(
-              new Error("Payment failed, please check your bank and try again.")
+              new Error(
+                `${membershipStatus.paymentFailureMessage ?? "please check your bank and try again."}`,
+              ),
             )
           } else if (Date.now() - startTime > timeout) {
             reject(
-              new Error("Membership activation timed out. Please try again.")
+              new Error("Membership activation timed out. Please try again."),
             )
             return
           }
@@ -158,14 +167,100 @@ function MembershipContent() {
       Alert.alert("Please agree to the Terms & Privacy to continue.")
       return
     }
+    if (!selectedCardId) {
+      Alert.alert("Please select a payment method to continue.")
+      return
+    }
+    if (!membershipDetails) {
+      Alert.alert("Membership details not loaded. Please try again later.")
+      return
+    }
     try {
       setIsProcessingPayment(true)
       await createMembership(selectedCardId, membershipDetails.stripePriceId)
-      await pollUsersMembershipStatus()
-      router.push("/routers/membership-success")
+      const success = await pollUsersMembershipStatus()
+      if (success) {
+        router.push("/routers/membership-success")
+      }
     } catch (error) {
-      Alert.alert("Payment Failed", error.message)
-      setPaymentError(error.message)
+      Alert.alert(
+        "Payment Failed",
+        error instanceof Error
+          ? error.message
+          : "Could not process your membership at this time. Please try again later or contact support.",
+      )
+      setPaymentError(
+        error instanceof Error
+          ? error.message
+          : "Could not process your membership at this time. Please try again later or contact support.",
+      )
+    } finally {
+      setIsProcessingPayment(false)
+    }
+  }
+
+  const handleResumeMembership = async () => {
+    setIsResuming(true)
+    try {
+      await resumeMembership()
+      // await new Promise((resolve) => setTimeout(resolve, 2000))
+    } catch (error) {
+      Alert.alert(
+        "Failed to resume your membership",
+        error instanceof Error
+          ? error.message
+          : "Could not resume your membership at this time. Please try again later or contact support.",
+      )
+    } finally {
+      setIsResuming(false)
+      Toast.show({
+        type: "success",
+        text1: `Your membership has been resumed.`,
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: true,
+        bottomOffset: 60,
+        props: {
+          text1NumberOfLines: 0,
+          text2NumberOfLines: 0, // allow wrapping
+        },
+      })
+    }
+  }
+
+  const handleRetryPayment = async () => {
+    setIsProcessingPayment(true)
+    try {
+      await retryPayment()
+      const success = await pollUsersMembershipStatus()
+      if (success) {
+        router.push("/routers/membership-success")
+      }
+    } catch (error) {
+      Alert.alert(
+        "Your payment retry has failed",
+        error instanceof Error
+          ? error.message
+          : "Please update your payment method and retry",
+        [
+          {
+            text: "Cancel",
+            style: "destructive",
+          },
+          {
+            text: "Update Payment Method",
+            style: "default",
+            onPress: async () => {
+              try {
+                await handlePaymentSheet()
+              } catch (error) {
+                console.error("Failed to update payment method:", error)
+                Alert.alert("Error", "Failed to update payment method")
+              }
+            },
+          },
+        ],
+      )
     } finally {
       setIsProcessingPayment(false)
     }
@@ -193,46 +288,111 @@ function MembershipContent() {
         {/* Membership details */}
         <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
           <View className="mb-3">
-            <View className="flex-row items-center">
+            <View className="flex-row items-center gap-1">
               <Text className="text-lg font-medium">Your Membership: </Text>
               {usersMembership?.isActive ? (
                 <Octicons name="check-circle" size={18} color="#10B981" />
               ) : (
                 <Octicons name="x-circle" size={18} color="#EF4444" />
               )}
+              <Text
+                className={`${membershipStatus === "PENDING" ? "text-yellow-400" : membershipStatus === "FAILED" ? "text-red-500" : ""}`}
+              >
+                {membershipStatus === "PENDING"
+                  ? "On Hold"
+                  : membershipStatus === "FAILED"
+                    ? "Payment Failed"
+                    : ""}
+              </Text>
             </View>
 
             <Text className="text-gray-500 text-sm mt-1">
-              Enjoy exclusive perks with your subscription
+              Enjoy exclusive perks with your membership
             </Text>
           </View>
 
           {/* Current Plan */}
-          <View className="flex-row justify-between items-center mb-4">
-            <View>
+          <View className="mb-4">
+            <View className="">
               <Text className="text-xl font-semibold">Membership Plan</Text>
               <Text className="text-gray-500">
-                {formatCurrency(membershipDetails.price / 100)} / month
+                {membershipDetails?.price
+                  ? formatCurrency(membershipDetails.price / 100)
+                  : "N/A"}{" "}
+                / month
               </Text>
-              {usersMembership?.isActive && usersMembership?.cancel && (
-                <Text className="text-gray-500">
-                  Expires on {formatShortDate(usersMembership.endDate)}
-                </Text>
-              )}
+
+              <View>
+                {usersMembership?.isActive && usersMembership?.cancel && (
+                  <View className="flex flex-row items-center justify-between">
+                    <Text className="text-gray-500">
+                      Expires on: {formatShortDate(usersMembership.endDate)}
+                    </Text>
+
+                    {usersMembership?.isActive && usersMembership?.cancel && (
+                      <TouchableOpacity
+                        onPress={handleResumeMembership}
+                        disabled={isResuming}
+                        className="bg-primary px-2 py-1 rounded-lg items-center justify-center"
+                      >
+                        <Text
+                          className={`text-white ${isResuming ? "opacity-0" : ""}`}
+                        >
+                          Re-subscribe
+                        </Text>
+
+                        {isResuming && (
+                          <ActivityIndicator
+                            color="white"
+                            className="absolute"
+                          />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+                {usersMembership?.isActive && !usersMembership?.cancel && (
+                  <View className="flex flex-row items-center justify-between">
+                    <Text
+                      className={
+                        usersMembership.paymentStatus === "SUCCESS"
+                          ? "text-gray-500"
+                          : "text-red-500"
+                      }
+                    >
+                      {usersMembership.paymentStatus === "SUCCESS"
+                        ? `${"Renews on: " + formatShortDate(usersMembership.endDate)}`
+                        : "Payment Failed"}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        usersMembership.paymentStatus === "SUCCESS"
+                          ? setCancelMembership(true)
+                          : handleRetryPayment
+                      }
+                      className={`${usersMembership.paymentStatus === "SUCCESS" ? "bg-red-500" : "bg-primary"} px-2 py-1 rounded-lg items-center justify-center`}
+                    >
+                      <Text className="text-white">
+                        {usersMembership.paymentStatus === "SUCCESS"
+                          ? "Cancel"
+                          : "Retry payment"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
-            {usersMembership?.isActive && !usersMembership?.cancel && (
-              <TouchableOpacity
-                onPress={() => setCancelMembership(true)}
-                className="bg-red-500 px-2 py-1 rounded-lg"
-              >
-                <Text className="text-white">Cancel</Text>
-              </TouchableOpacity>
+            {usersMembership?.isActive && usersMembership?.cancel && (
+              <Text className="pt-2">
+                Re-join our membership before it expires so you don't miss out
+                on these awesome benefits:
+              </Text>
             )}
           </View>
 
           {/* Benefits list */}
-          <View className="space-y-3">
-            {membershipDetails.membershipBenefits.map((benefits, index) => (
+          <View className="mr-5">
+            {membershipDetails?.membershipBenefits.map((benefits, index) => (
               <View className="flex-row items-center" key={index}>
                 <Feather name="check-circle" size={18} color="#10B981" />
                 <Text className="ml-2 text-gray-700">{benefits}</Text>
@@ -244,9 +404,37 @@ function MembershipContent() {
         {/* Payment Method */}
         {usersMembership && usersMembership.isActive ? (
           <View>
+            <View className="flex flex-row">
+              <Text className="text-lg font-medium mb-2 px-1">
+                Current Membership Discount:{" "}
+                <Text
+                  className={`${
+                    usersMembership.totalMonths *
+                      usersMembership.plan.membershipDiscount >=
+                    usersMembership.plan.maxDiscount
+                      ? "text-primary"
+                      : ""
+                  }`}
+                >
+                  {Math.min(
+                    usersMembership.plan.maxDiscount,
+                    usersMembership.totalMonths *
+                      usersMembership.plan.membershipDiscount,
+                  )}
+                </Text>
+                %
+              </Text>
+              <View className="">
+                {usersMembership.totalMonths *
+                  usersMembership.plan.membershipDiscount >=
+                  usersMembership.plan.maxDiscount && <DancingStar />}
+              </View>
+            </View>
+
             <Text className="text-xl font-medium mb-2 px-1">
               Member Offers:
             </Text>
+
             <ShowOffers usersMembership={usersMembership} />
           </View>
         ) : (
@@ -376,7 +564,7 @@ function MembershipContent() {
               )}
             </View>
 
-            {/* Place Order Button */}
+            {/* Join Membership Button */}
             {!showAddCard && (
               <TouchableOpacity
                 onPress={handleJoinMembership}

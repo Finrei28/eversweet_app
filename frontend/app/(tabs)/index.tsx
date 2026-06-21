@@ -13,14 +13,24 @@ import Carousel from "react-native-reanimated-carousel"
 import { useSharedValue } from "react-native-reanimated"
 import { SplashScreen, useRouter } from "expo-router"
 import { FontAwesome } from "@expo/vector-icons"
-import { getHomepageCards, getPromotions } from "@/services/api"
+import {
+  getHomepageCards,
+  getPromotions,
+  showOfferForClient,
+} from "@/services/api"
 import BouncingLoader from "@/_components/loader"
-import { HomePageContent, Promotions } from "@/utils/types"
+import {
+  HomePageContent,
+  offerForClient,
+  Offers,
+  Promotions,
+} from "@/utils/types"
 import {
   GestureHandlerRootView,
   PanGesture,
 } from "react-native-gesture-handler"
 import DancingStar from "@/_components/dancingStar"
+import { useAuth } from "@/store/authProvider"
 
 // This is needed for the order history screen to properly import FontAwesome
 export { FontAwesome }
@@ -28,26 +38,36 @@ export { FontAwesome }
 export default function Index() {
   const router = useRouter()
   const [promotions, setPromotions] = useState<Promotions>([])
+  const [offers, setOffers] = useState<offerForClient[]>([])
   const [homePageContents, setHomePageContents] = useState<HomePageContent[]>(
-    []
+    [],
   )
+  const { token, usersMembership } = useAuth()
   const progressValue = useSharedValue(0)
   const [activeIndex, setActiveIndex] = useState(0)
   const screen = Dimensions.get("window")
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     async function loadContents() {
-      SplashScreen.preventAutoHideAsync()
-      const homePageData = await getHomepageCards()
-      const promotionData = await getPromotions()
-      setPromotions(promotionData)
-      setHomePageContents(homePageData)
-      await SplashScreen.hideAsync()
+      try {
+        setLoading(true)
+        const homePageData = await getHomepageCards()
+        const promotionData = await getPromotions()
+        const offerData = await showOfferForClient()
+        setPromotions(promotionData)
+        setOffers(offerData)
+        setHomePageContents(homePageData)
+      } catch (error) {
+        console.error("Error loading home content", error)
+      } finally {
+        setLoading(false)
+      }
     }
     loadContents()
   }, [])
 
-  if (homePageContents?.length === 0 && promotions?.length === 0) {
+  if (loading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />
@@ -61,7 +81,6 @@ export default function Index() {
       </View>
     )
   }
-
   return (
     <View className="flex-1 bg-background">
       <PageHeader />
@@ -70,12 +89,12 @@ export default function Index() {
         nestedScrollEnabled={true}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
-          {promotions?.length > 0 && (
+          {offers?.length > 0 && (
             <>
               <View className="flex-row items-center justify-center p-5 mt-4 text-center gap-5">
                 <DancingStar />
                 <Text className=" text-4xl font-bold text-primary ">
-                  Promotions
+                  Special Offers
                 </Text>
                 <DancingStar />
               </View>
@@ -85,7 +104,7 @@ export default function Index() {
                 width={screen.width} // width of each card
                 height={450} // height of carousel
                 autoPlay={false}
-                data={promotions}
+                data={offers}
                 scrollAnimationDuration={400}
                 onProgressChange={(_, absoluteProgress) => {
                   progressValue.value = absoluteProgress
@@ -95,64 +114,79 @@ export default function Index() {
                   panGesture.activeOffsetX([-10, 10]).failOffsetY([-5, 5])
                 }}
                 style={{ alignSelf: "center" }}
-                renderItem={({ item, index }) => (
-                  <View
-                    key={item.id}
-                    className="bg-white rounded-2xl shadow-sm p-5 mx-10 mb-1"
-                    style={{
-                      backgroundColor: "#fff",
-                      alignSelf: "center", // center the card in the carousel
-                    }}
-                  >
-                    <View className="flex-1 justify-between">
-                      <Text className="text-primary font-bold text-2xl text-center mt-2">
-                        {item.title}
-                      </Text>
-                      <Text className="text-gray-500 font-semibold text-md text-center px-6 mt-2">
-                        {item.text1}
-                      </Text>
-                      {item.text2 && (
+                renderItem={({ item }) => {
+                  return (
+                    <View
+                      key={item.id}
+                      className="bg-white rounded-2xl shadow-sm p-5 mx-10 mb-1"
+                      style={{
+                        backgroundColor: "#fff",
+                        alignSelf: "center", // center the card in the carousel
+                      }}
+                    >
+                      <View className="flex-1 justify-between">
+                        <Text className="text-primary font-bold text-2xl text-center mt-2">
+                          {item.name}
+                        </Text>
+                        <Text className="text-gray-500 font-semibold text-md text-center px-6 mt-2">
+                          {item.description}
+                        </Text>
+                        {/* {item.text2 && (
                         <Text className="text-gray-500 font-semibold text-md text-center px-6 mt-1">
                           {item.text2}
                         </Text>
-                      )}
-                      {item.imagePath && (
+                      )} */}
+
                         <Image
-                          source={{ uri: item.imagePath }}
+                          source={{
+                            uri:
+                              item.image ??
+                              item.dessert?.imagePath ??
+                              item.category?.desserts?.[0]?.imagePath,
+                          }}
                           className="h-60 rounded-lg mt-4"
                           resizeMode="contain"
-                          alt={item.title}
+                          alt={item.name}
                         />
-                      )}
-                      <TouchableOpacity
-                        onPress={() =>
-                          router.replace(`/menu?categoryParam=${item.category}`)
-                        }
-                        className="bg-primary rounded-lg p-3 items-center mt-4 mx-20"
-                      >
-                        <Text className="text-white font-bold">Order Here</Text>
-                      </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() =>
+                            router.push(`${token ? "/membership" : "/signin"}`)
+                          }
+                          className="bg-primary rounded-lg p-3 items-center mt-4 mx-20"
+                        >
+                          <Text className="text-white font-bold">
+                            {usersMembership?.isActive
+                              ? "Show More"
+                              : token
+                                ? "Get Membership"
+                                : "Sign In to View"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
-                )}
+                  )
+                }}
               />
 
               {/* Dots indicator */}
-              <View className="flex-row justify-center mt-2">
-                {promotions.map((_, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 5,
-                      marginHorizontal: 4,
-                      backgroundColor:
-                        activeIndex === i ? "#F59E0B" : "#D1D5DB",
-                    }}
-                  />
-                ))}
-              </View>
+              {offers.length > 1 && (
+                <View className="flex-row justify-center mt-2">
+                  {offers.map((_, i) => (
+                    <View
+                      key={i}
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        marginHorizontal: 4,
+                        backgroundColor:
+                          activeIndex === i ? "#F59E0B" : "#D1D5DB",
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
 
               <View className="border border-gray-200 mt-8 mb-4" />
             </>
@@ -160,7 +194,7 @@ export default function Index() {
 
           <Text
             className={`text-4xl font-bold text-primary p-5 text-center ${
-              promotions?.length === 0 ? "mt-4" : ""
+              offers?.length === 0 ? "mt-4" : ""
             }`}
           >
             Our Dessert Series

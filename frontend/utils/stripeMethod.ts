@@ -1,6 +1,9 @@
 import { Alert, Platform } from "react-native"
 import { useStripe } from "@stripe/stripe-react-native"
-import { createSetupIntent } from "@/services/stripe-api"
+import {
+  createSetupIntent,
+  setCardForMembershipPayments,
+} from "@/services/stripe-api"
 
 /**
  * Opens the Stripe Payment Sheet to save a card.
@@ -40,12 +43,18 @@ export const openPaymentSheetForSetup = async (
     ReturnType<typeof useStripe>,
     "initPaymentSheet" | "presentPaymentSheet"
   >,
-  refetchCards: () => void
+  refetchCards: () => void,
+  isMembershipActive: boolean,
 ) => {
   const { initPaymentSheet, presentPaymentSheet } = stripeHooks
   try {
     // Create setup intent + ephemeral key on your backend
-    const { setupIntent, ephemeralKey, customer } = await createSetupIntent()
+    const { setupIntent, ephemeralKey, customer, setupIntentId } =
+      await createSetupIntent()
+
+    if (!setupIntent || !ephemeralKey || !customer) {
+      throw new Error("Invalid Stripe setup intent response.")
+    }
 
     // Initialize the payment sheet
     const { error: initError } = await initPaymentSheet({
@@ -68,7 +77,35 @@ export const openPaymentSheetForSetup = async (
       Alert.alert(result.error.message)
       refetchCards()
     } else {
-      Alert.alert("Success", "Card added successfully.")
+      if (isMembershipActive) {
+        Alert.alert(
+          "Success, card added successfully",
+          "Use this card for future membership payments?",
+          [
+            {
+              text: "No",
+              style: "destructive",
+            },
+            {
+              text: "Yes",
+              style: "default",
+              onPress: async () => {
+                try {
+                  await setCardForMembershipPayments(setupIntentId)
+                  // Refresh the list after deletion
+                  refetchCards()
+                } catch (error) {
+                  console.error("Failed to save card for membership:", error)
+                  Alert.alert("Error", "Failed to save card for membership")
+                }
+              },
+            },
+          ],
+        )
+      } else {
+        Alert.alert("Success", "Card added successfully.")
+      }
+
       refetchCards()
     }
   } catch (err: any) {

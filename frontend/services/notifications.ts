@@ -39,7 +39,7 @@ export async function registerForPushNotificationsAsync() {
     // If we don't have permission, return null
     if (finalStatus !== "granted") {
       Alert.alert(
-        "Please turn on notifications to receive order status changes"
+        "Please turn on notifications to receive order status changes",
       )
       return null
     }
@@ -51,7 +51,7 @@ export async function registerForPushNotificationsAsync() {
         })
       ).data
     } catch (error) {
-      console.error(error.message)
+      console.error((error as Error).message)
     }
   } else {
     console.log("Must use physical device for push notifications")
@@ -78,7 +78,7 @@ export async function savePushToken(pushToken: string) {
     const authToken = await getToken()
     if (!authToken) {
       throw new Error(
-        "Please sign in to receive notifications about your orders"
+        "Please sign in to receive notifications about your orders",
       )
     }
 
@@ -106,7 +106,7 @@ export async function savePushToken(pushToken: string) {
  * Set up notification listeners
  */
 export function setupNotificationListeners(
-  onNotification: (notification: Notifications.Notification) => void
+  onNotification: (notification: Notifications.Notification) => void,
 ) {
   // This listener is fired whenever a notification is received while the app is foregrounded
   const foregroundSubscription =
@@ -134,7 +134,7 @@ export function setupNotificationListeners(
  */
 export function handleNotification(
   notification: Notifications.Notification,
-  onNavigate: (path: string) => void
+  onNavigate: (path: string) => void,
 ) {
   const data = notification.request.content.data
 
@@ -154,7 +154,7 @@ export const setMembershipPopupExpiration = async () => {
 
   await SecureStore.setItemAsync(
     "showMembershipPopup",
-    `${expiration.getTime()}`
+    `${expiration.getTime()}`,
   )
 }
 

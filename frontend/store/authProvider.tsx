@@ -8,9 +8,8 @@ import React, {
 } from "react"
 import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
-import { UsersMembership } from "@/utils/types"
+import { StoreHours, UsersMembership } from "@/utils/types"
 import { getUsersMembership } from "@/services/stripe-api"
-import { fallbackStoreHours, StoreHours } from "@/lib/businessHours"
 import { getStoreHours } from "@/services/api"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
@@ -36,18 +35,28 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+const fallbackHours: StoreHours = {
+  Monday: ["12:30 PM", "9:30 PM"],
+  Tuesday: ["12:30 PM", "9:30 PM"],
+  Wednesday: ["12:30 PM", "9:30 PM"],
+  Thursday: ["12:30 PM", "9:30 PM"],
+  Friday: ["12:00 PM", "10:00 PM"],
+  Saturday: ["12:00 PM", "10:00 PM"],
+  Sunday: ["12:00 PM", "10:00 PM"],
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
-  const [storeHours, setStoreHours] = useState<StoreHours>(fallbackStoreHours)
+  const [storeHours, setStoreHours] = useState<StoreHours>(fallbackHours)
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
     const getStoredToken = async () => {
       const data = await getStoreHours()
-      setStoreHours({ ...fallbackStoreHours, ...data })
+      setStoreHours(data)
       const storedToken = await SecureStore.getItemAsync("token")
       if (storedToken) {
         const decoded: DecodedToken = jwtDecode(storedToken)

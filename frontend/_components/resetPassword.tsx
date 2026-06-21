@@ -57,7 +57,7 @@ export default function ResetPassword({
           position: "bottom",
           visibilityTime: 5000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -72,7 +72,7 @@ export default function ResetPassword({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -82,7 +82,7 @@ export default function ResetPassword({
     } catch (error) {
       Alert.alert(
         "Could not reset your password",
-        error?.message || "An unknown error occurred."
+        error instanceof Error ? error.message : "An unknown error occurred.",
       )
 
       return

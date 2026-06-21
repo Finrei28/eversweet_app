@@ -35,7 +35,7 @@ export default function Loyalty() {
   const cartItems = useCartStore((state) => state.items)
 
   const { data: categories, loading: categoriesLoading } = useFetch(
-    fetchCategoriesWithDesserts
+    fetchCategoriesWithDesserts,
   )
 
   const { token, loading: loadingToken } = useAuth()
@@ -63,7 +63,7 @@ export default function Loyalty() {
   useEffect(() => {
     if (categories && categories.length > 0) {
       const selectedCategory = categories.find(
-        (cat) => cat.id === activeCategory
+        (cat) => cat.id === activeCategory,
       )
       setSelectedCategory(selectedCategory || null)
       if (flatListRef.current) {
@@ -86,21 +86,21 @@ export default function Loyalty() {
           ? index < 6
             ? index * 130
             : index < 7
-            ? index * 145
-            : index * 160
+              ? index * 145
+              : index * 160
           : index < 3
-          ? index
-          : index < 4
-          ? index * 50
-          : index < 5
-          ? index * 70
-          : index < 6
-          ? index * 100
-          : index < 7
-          ? index * 120
-          : index < 8
-          ? index * 135
-          : index * 140
+            ? index
+            : index < 4
+              ? index * 50
+              : index < 5
+                ? index * 70
+                : index < 6
+                  ? index * 100
+                  : index < 7
+                    ? index * 120
+                    : index < 8
+                      ? index * 135
+                      : index * 140
       scrollViewRef.current.scrollTo({
         x: newIndex,
         animated: true,
@@ -221,7 +221,7 @@ export default function Loyalty() {
                     </Text>
                   </View>
                 )}
-                {modalVisible && (
+                {modalVisible && selectedDessert && (
                   <CustomModal
                     modalVisible={modalVisible}
                     setModalVisible={setModalVisible}

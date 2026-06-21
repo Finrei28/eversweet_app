@@ -12,6 +12,11 @@ import {
   Announcements,
   HomePageContent,
   RestaurantStatus,
+  offerForClient,
+  PrivacyPolicy,
+  TermAndConditions,
+  StoreHours,
+  StoreInfo,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -31,7 +36,7 @@ export async function fetchCategoriesWithDesserts(): Promise<Menu> {
 
   // Optionally filter if needed
   const filteredCategories = data.menu.filter(
-    (category: DessertCategory) => category.desserts.length > 0
+    (category: DessertCategory) => category.desserts.length > 0,
   )
   return filteredCategories
 }
@@ -79,7 +84,7 @@ export async function signIn(
     email: string
     password: string
   },
-  signInProvider: (token: string) => Promise<void> // pass from context
+  signInProvider: (token: string) => Promise<void>, // pass from context
 ): Promise<string> {
   if (!email || !password) {
     throw new Error("Email and password are required.")
@@ -169,7 +174,7 @@ export async function getUserLoyaltyPoints(): Promise<number> {
 }
 
 export async function getAvailableCustomisations(
-  dessertId: string
+  dessertId: string,
 ): Promise<Customisation[]> {
   try {
     const res = await fetch(
@@ -179,12 +184,12 @@ export async function getAvailableCustomisations(
         headers: {
           "Content-Type": "application/json",
         },
-      }
+      },
     )
 
     if (!res.ok) {
       throw new Error(
-        "Failed to retrieve customisations, please try again later"
+        "Failed to retrieve customisations, please try again later",
       )
     }
     const data = await res.json()
@@ -352,7 +357,7 @@ export async function createOrder(
   pickupNow: boolean,
   pickUpTime: Date,
   eatIn: boolean,
-  paymentIntentId: string | null
+  paymentIntentId: string | null,
 ) {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -390,7 +395,7 @@ export async function createOrder(
         const errorData = data
         if (errorData.orderId) {
           throw new Error(
-            "Order may have been created, please check your orders"
+            "Order may have been created, please check your orders",
           )
         }
       } catch (parseError) {
@@ -399,8 +404,8 @@ export async function createOrder(
       throw new Error(
         `${format(
           new Date(),
-          "dd/MM/yyyy"
-        )} Failed to send order to kitchen, please take a screenshot and contact support`
+          "dd/MM/yyyy",
+        )} Failed to send order to kitchen, please take a screenshot and contact support`,
       )
     }
     return data.order
@@ -412,7 +417,7 @@ export async function createOrder(
 export const sendOrderStatusNotification = async (
   orderId: string,
   orderNumber: string,
-  newStatus: string
+  newStatus: string,
 ) => {
   try {
     const token = await SecureStore.getItemAsync("token")
@@ -439,7 +444,9 @@ export const sendOrderStatusNotification = async (
     return await response.json()
   } catch (error) {
     console.error("Error sending order status notification:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -467,7 +474,9 @@ export const checkOrderStatus = async (orderId: string) => {
     return data
   } catch (error) {
     console.error("Error checking order status:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -494,7 +503,9 @@ export const getCartItems = async (): Promise<CartItem[]> => {
     }
     return data.cartItems
   } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -544,12 +555,14 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
     return data.cartItems
   } catch (error) {
     console.error("Error adding item to cart:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
 export const removeItemFromCart = async (
-  itemId: string
+  itemId: string,
 ): Promise<CartItem[]> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -573,12 +586,14 @@ export const removeItemFromCart = async (
     return data.cartItems
   } catch (error) {
     console.error("Error removing item from cart:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
 export const updateCartItem = async (
-  item: CartItem
+  item: CartItem,
 ): Promise<{ cartItems: CartItem[] }> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -592,6 +607,7 @@ export const updateCartItem = async (
     customisations,
     itemPriceInCents,
     loyaltyPointsUsed,
+    offerId,
   } = item
   const updatedItem = {
     id,
@@ -600,6 +616,7 @@ export const updateCartItem = async (
     customisations,
     itemPriceInCents,
     loyaltyPointsUsed,
+    offerId,
   }
 
   try {
@@ -621,7 +638,9 @@ export const updateCartItem = async (
     return { cartItems: data.cartItems }
   } catch (error) {
     console.error("Error updating item in cart:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -644,7 +663,9 @@ export const clearCart = async () => {
     return data
   } catch (error) {
     console.error("Error clearing cart:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -709,7 +730,7 @@ export const clearCart = async () => {
 
 export const updateCartItemQuantity = async (
   itemId: string,
-  quantity: number
+  quantity: number,
 ): Promise<CartItem[]> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -733,7 +754,9 @@ export const updateCartItemQuantity = async (
     return data.cartItems
   } catch (error) {
     console.error("Error updating cart item:", error)
-    throw new Error(error?.message || "Something went wrong.")
+    throw new Error(
+      error instanceof Error ? error.message : "Something went wrong.",
+    )
   }
 }
 
@@ -758,6 +781,26 @@ export const showOffers = async (): Promise<Offers> => {
     if (!res.ok) {
       throw new Error(`Error: ${data.message}`)
     }
+    return data.offers
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const showOfferForClient = async (): Promise<offerForClient[]> => {
+  try {
+    const res = await fetch(`${url}/api/showOfferForClient`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
     return data.offers
   } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
@@ -790,7 +833,7 @@ export const getResetPasswordCode = async (email: string) => {
 
 export const verifyResetPasswordCode = async (
   email: string,
-  verificationCode: string
+  verificationCode: string,
 ) => {
   if (!email) {
     throw new Error("Email is required")
@@ -844,7 +887,7 @@ export const resetPassword = async (email: string, newPassword: string) => {
   }
 }
 
-export const getStoreHours = async () => {
+export const getStoreHours = async (): Promise<StoreHours> => {
   try {
     const res = await fetch(`${url}/api/getStoreHours`, {
       method: "GET",
@@ -861,7 +904,28 @@ export const getStoreHours = async () => {
 
     return data
   } catch (error: any) {
-    console.error(error?.message || "Something went wrong.")
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const getStoreInfo = async (): Promise<StoreInfo> => {
+  try {
+    const res = await fetch(`${url}/api/getStoreInfo`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(`Error: Could not get store information`)
+    }
+
+    return data
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
   }
 }
 
@@ -881,7 +945,11 @@ export const getRestaurantStatus = async (): Promise<RestaurantStatus> => {
 
     return data.restaurantStatus
   } catch (error) {
-    throw new Error(error?.message || "Could not get restaurant status")
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Could not get restaurant status",
+    )
   }
 }
 
@@ -901,7 +969,9 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
 
     return data
   } catch (error) {
-    console.error(error?.message || "Could not get loyalty rates")
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get loyalty rates",
+    )
   }
 }
 
@@ -918,7 +988,9 @@ export const getPromotions = async (): Promise<Promotions> => {
 
     return data
   } catch (error) {
-    console.error(error?.message || "Could not get promotions")
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get promotions",
+    )
   }
 }
 
@@ -935,7 +1007,9 @@ export const getAnnouncements = async (): Promise<Announcements> => {
 
     return data
   } catch (error) {
-    console.error(error?.message || "Could not get announcements")
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get announcements",
+    )
   }
 }
 
@@ -952,6 +1026,50 @@ export const getHomepageCards = async (): Promise<HomePageContent[]> => {
 
     return data
   } catch (error) {
-    console.error(error?.message || "Could not get home page contents")
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Could not get home page contents",
+    )
+  }
+}
+
+export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> => {
+  try {
+    const res = await fetch(`${url}/api/getPrivacyPolicy`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get privacy policy",
+    )
+  }
+}
+
+export const getTermAndConditions = async (): Promise<TermAndConditions> => {
+  try {
+    const res = await fetch(`${url}/api/getTermAndConditions`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Could not get terms and conditions",
+    )
   }
 }

@@ -35,7 +35,7 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
         // fetch or load offers here
         getOffers()
       }
-    }, [usersMembership])
+    }, [usersMembership]),
   )
 
   const handleRedeemOffer = (offer: Offer) => {
@@ -65,9 +65,16 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
   return (
     <View className="gap-2">
       {offers.map((offer) => {
-        const redemption = offer.redemptions[0] // at most 1 per membership
+        const redemption = offer.redemptions[0] // always the membership's redemption for this offer, if it exists
+
+        // check if offer is redeemable based on redemption status and offer requirements
         const usedCount = redemption ? redemption.used : 0
-        const isRedeemable = usedCount < offer.limit
+        const isRedeemable =
+          usedCount < offer.limit &&
+          (offer.requirements.length === 0 ||
+            redemption?.status === "AVAILABLE") &&
+          usersMembership.paymentStatus === "SUCCESS"
+        const alreadyRedeemed = usedCount >= offer.limit
         const itemPriceInCents = offer.itemPriceInCents ?? null
         const discountAmount = offer.discountAmount ?? null
 
@@ -79,9 +86,10 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
             {/* Left side: Text */}
             <Image
               source={{
-                uri:
-                  offer.dessert?.imagePath ??
-                  offer.category?.desserts?.[0]?.imagePath,
+                uri: offer.image
+                  ? offer.image
+                  : (offer.dessert?.imagePath ??
+                    offer.category?.desserts?.[0]?.imagePath),
               }}
               className="w-16 h-16 rounded-lg mr-4"
               resizeMode="contain"
@@ -90,6 +98,9 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
               <Text className="text-lg font-semibold text-gray-800">
                 {offer.name}
               </Text>
+              {offer.description && (
+                <Text className="text-gray-600">{offer.description}</Text>
+              )}
               {offer.dessert && (
                 <Text className="text-gray-600">{offer.dessert.name}</Text>
               )}
@@ -108,13 +119,17 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
             </View>
 
             {/* Right side: Button */}
-            {isRedeemable ? (
+            {!alreadyRedeemed ? (
               <TouchableOpacity
                 onPress={() => handleRedeemOffer(offer)}
-                className="bg-primary px-4 py-2 rounded-lg"
+                className={`${!isRedeemable ? "bg-gray-300" : "bg-primary"} px-4 py-2 rounded-lg`}
                 disabled={!isRedeemable}
               >
-                <Text className="text-white font-bold">Redeem</Text>
+                <Text
+                  className={`${!isRedeemable ? "text-gray-700" : "text-white"} font-bold`}
+                >
+                  Redeem
+                </Text>
               </TouchableOpacity>
             ) : (
               <View className="bg-gray-300 px-4 py-2 rounded-lg">
@@ -124,7 +139,7 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
           </View>
         )
       })}
-      {offerModal && (
+      {offerModal && selectedOffer && (
         <OfferModal
           offer={selectedOffer}
           itemPriceInCents={selectedOffer.itemPriceInCents}

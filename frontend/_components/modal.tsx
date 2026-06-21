@@ -23,6 +23,11 @@ import { getAvailableCustomisations } from "@/services/api"
 import { Customisations } from "../utils/types"
 import { formatCurrency } from "@/lib/formatters"
 import { useAuth } from "@/store/authProvider"
+import {
+  calculateBestDiscountedPrice,
+  calculateMembershipDiscount,
+  calculatePriceAfterMembershipDiscount,
+} from "@/lib/priceHelper"
 
 type CustomModalProps = {
   refetchOffers?: () => Promise<void>
@@ -52,38 +57,56 @@ export default function CustomModal({
   cartItem,
 }: CustomModalProps) {
   const { usersMembership } = useAuth()
-  const addItem = useCartStore((state) => state.addItem)
+  const dessertPriceAfterBestDiscount = calculateBestDiscountedPrice(
+    selectedDessert,
+    usersMembership,
+    offerItemPrice,
+  )
+
+  const addTodessertModalTracker = useCartStore(
+    (state) => state.addTodessertModalTracker,
+  )
+
+  const removeFromDessertModalTracker = useCartStore(
+    (state) => state.removeFromDessertModalTracker,
+  )
+
   const editItem = useCartStore((state) => state.editItem)
+
+  const addItem = useCartStore((state) => state.addItem)
   const {
     data: availableCustomisations,
     error,
     loading: availableCustomisationsLoading,
   } = useFetch(() => getAvailableCustomisations(selectedDessert.id))
-  const [quantity, setQuantity] = useState(1)
-  const [price, setPrice] = useState(
-    cartItem?.itemPriceInCents !== undefined &&
-      cartItem?.itemPriceInCents !== null
-      ? cartItem.itemPriceInCents - cartItem.discountedAmountInCents
-      : offerItemPrice !== undefined && offerItemPrice !== null
-      ? offerItemPrice
-      : selectedDessert.priceInCents
+  const modalIdRef = useRef(Date.now())
+  const [customisationPrice, setCustomisationPrice] = useState(
+    cartItem?.customisations.reduce(
+      (sum, c) => sum + c.priceInCents * c.quantity,
+      0,
+    ) ?? 0,
   )
   const [buttonLoading, setButtonLoading] = useState(false)
-  const [customisationQuantity, setCustomisationQuantity] =
-    useState<Customisations>([])
+  const [customisations, setCustomisations] = useState<Customisations>([])
 
+  const price = selectedDessert.priceInCents
   const points = selectedDessert.priceInLoyaltyPoints
 
   useEffect(() => {
     if (state === "edit" && cartItem?.customisations) {
-      const initialQuantities = cartItem?.customisations.map((c) => ({
+      const initialCustomisations = cartItem?.customisations.map((c) => ({
         id: c.id,
         name: c.name,
         chineseName: c.chineseName,
+        priceInCents: c.priceInCents,
+        discountedAmountInCents: calculateMembershipDiscount(
+          c.priceInCents,
+          usersMembership,
+        ),
         quantity: c.quantity,
       }))
 
-      setCustomisationQuantity(initialQuantities)
+      setCustomisations(initialCustomisations)
     }
   }, [state, cartItem?.customisations])
 
@@ -100,7 +123,9 @@ export default function CustomModal({
       duration: 300,
       useNativeDriver: true,
     }).start(() => {
+      removeFromDessertModalTracker(modalIdRef.current)
       setModalVisible(false)
+      setButtonLoading(false)
       if (setSelectedDessert) {
         setSelectedDessert(null)
       }
@@ -136,19 +161,19 @@ export default function CustomModal({
           }).start()
         }
       },
-    })
+    }),
   ).current
 
   // --------------------------------------------------------------------
 
   const handleIncrease = (ingredientId: string) => {
     const customisation = availableCustomisations?.find(
-      (c) => c.id === ingredientId
+      (c) => c.id === ingredientId,
     )
 
     if (!customisation) return
 
-    setCustomisationQuantity((prev) => {
+    setCustomisations((prev) => {
       const existingItem = prev.find((item) => item.id === ingredientId)
 
       if (existingItem) {
@@ -161,13 +186,13 @@ export default function CustomModal({
         return prev.map((item) => {
           if (item.id === ingredientId) {
             const included = selectedDessert.ingredients.some(
-              (ingredient) => ingredient.id === ingredientId
+              (ingredient) => ingredient.id === ingredientId,
             )
 
             if (!included || item.quantity >= 1) {
               // not inclided or Increase price only if crossing 1 → 2 //
 
-              setPrice((prev) => prev + customisation.priceInCents)
+              setCustomisationPrice((prev) => prev + customisation.priceInCents)
             }
 
             return { ...item, quantity: newQuantity }
@@ -180,11 +205,16 @@ export default function CustomModal({
           id: customisation.id,
           name: customisation.name,
           chineseName: customisation.chineseName,
+          priceInCents: customisation.priceInCents,
+          discountedAmountInCents: calculateMembershipDiscount(
+            customisation.priceInCents,
+            usersMembership,
+          ),
           quantity: 1, // Set initial quantity to 1
         }
 
         // Increase price if this is the first customization
-        setPrice((prev) => prev + customisation.priceInCents)
+        setCustomisationPrice((prev) => prev + customisation.priceInCents)
 
         return [...prev, newCustomization] // Add new customization to the state
       }
@@ -193,15 +223,15 @@ export default function CustomModal({
 
   const handleDecrease = (ingredientId: string) => {
     const customisation = availableCustomisations?.find(
-      (c) => c.id === ingredientId
+      (c) => c.id === ingredientId,
     )
     if (!customisation) return
 
-    setCustomisationQuantity((prev) => {
+    setCustomisations((prev) => {
       const existingItem = prev.find((item) => item.id === ingredientId)
 
       const included = selectedDessert.ingredients.some(
-        (ingredient) => ingredient.id === ingredientId
+        (ingredient) => ingredient.id === ingredientId,
       )
 
       if (existingItem) {
@@ -209,23 +239,31 @@ export default function CustomModal({
         if (existingItem.quantity > 0) {
           const newQuantity = existingItem.quantity - 1
           if (existingItem.quantity === 1) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
+            setCustomisationPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents),
+            )
             return prev.filter((item) => item.id !== ingredientId)
           }
           if (!included) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
+            setCustomisationPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents),
+            )
             if (newQuantity === 0)
               return prev.filter((item) => item.id !== ingredientId)
           }
 
           // Decrease price only if crossing 2 → 1
           else if (existingItem.quantity > 1) {
-            setPrice((prev) => Math.max(0, prev - customisation.priceInCents))
+            setCustomisationPrice((prev) =>
+              Math.max(0, prev - customisation.priceInCents),
+            )
           }
 
           // Return the updated array with the decreased quantity
           return prev.map((item) =>
-            item.id === ingredientId ? { ...item, quantity: newQuantity } : item
+            item.id === ingredientId
+              ? { ...item, quantity: newQuantity }
+              : item,
           )
         }
       } else {
@@ -233,6 +271,11 @@ export default function CustomModal({
           id: customisation.id,
           name: customisation.name,
           chineseName: customisation.chineseName,
+          priceInCents: customisation.priceInCents,
+          discountedAmountInCents: calculateMembershipDiscount(
+            customisation.priceInCents,
+            usersMembership,
+          ),
           quantity: 0, // Set initial quantity to 0
         }
 
@@ -243,6 +286,19 @@ export default function CustomModal({
   }
 
   const insets = useSafeAreaInsets()
+  const pricebeforeDiscount =
+    Number(selectedDessert.priceInCents + customisationPrice) / 100
+  const priceAfterDiscount = // if current item is a cart item (edit mode) then show cart item price minus the discounts (including customisations) else return dessert after discount (including offer price)
+    Number(
+      (!cartItem
+        ? dessertPriceAfterBestDiscount
+        : cartItem.itemPriceInCents - cartItem.discountedAmountInCents) +
+        calculatePriceAfterMembershipDiscount(
+          customisationPrice,
+          usersMembership,
+        ),
+    ) / 100
+
   return (
     <Modal
       isVisible={modalVisible}
@@ -299,16 +355,36 @@ export default function CustomModal({
                           .map((i) => i.name)
                           .join(", ")}
                       </Text>
-                      <Text className="mt-2 font-semibold text-lg">
-                        Price:{" "}
-                        {type === "cents"
-                          ? `${formatCurrency(
-                              (Number(price) *
-                                (usersMembership?.isActive ? 0.85 : 1)) /
-                                100
-                            )}`
-                          : `${points} points`}
-                      </Text>
+                      <View className="flex flex-row items-center mt-2">
+                        <Text className="font-semibold text-lg">Price: </Text>
+                        {type === "cents" ? (
+                          usersMembership?.isActive ||
+                          selectedDessert.promo?.isActive ? (
+                            <>
+                              <View className="flex flex-row items-center gap-1">
+                                <Text className="text-red-600 line-through text-sm">
+                                  {formatCurrency(pricebeforeDiscount)}
+                                </Text>
+                                {offerId ? (
+                                  <Text className="font-bold">
+                                    {formatCurrency(priceAfterDiscount)}
+                                  </Text>
+                                ) : (
+                                  <Text className="font-bold">
+                                    {formatCurrency(priceAfterDiscount)}
+                                  </Text>
+                                )}
+                              </View>
+                            </>
+                          ) : (
+                            <Text className="font-bold">
+                              {formatCurrency(priceAfterDiscount)}
+                            </Text>
+                          )
+                        ) : (
+                          <Text className="font-bold">{points} points</Text>
+                        )}
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -321,20 +397,20 @@ export default function CustomModal({
                   {selectedDessert.ingredients
                     .filter((ingredient) =>
                       availableCustomisations?.some(
-                        (c) => c.id === ingredient.id
-                      )
+                        (c) => c.id === ingredient.id,
+                      ),
                     )
                     .map((ingredient) => {
-                      const toppingQuantity = customisationQuantity.find(
-                        (item) => item.id === ingredient.id
+                      const toppingQuantity = customisations.find(
+                        (item) => item.id === ingredient.id,
                       )?.quantity
 
                       const quantity =
-                        toppingQuantity >= 1
-                          ? toppingQuantity + 1
+                        toppingQuantity === undefined
+                          ? 1
                           : toppingQuantity === 0
-                          ? toppingQuantity
-                          : 1
+                            ? 0
+                            : toppingQuantity + 1
 
                       return (
                         <View
@@ -343,7 +419,12 @@ export default function CustomModal({
                         >
                           <View className="flex-row flex-1 items-center gap-4">
                             <View>
-                              <Text className="text-lg">{ingredient.name}</Text>
+                              <Text className="text-lg">
+                                {ingredient.name}{" "}
+                              </Text>
+                              <Text className="text-sm text-muted-foreground">
+                                {formatCurrency(ingredient.priceInCents / 100)}
+                              </Text>
                             </View>
 
                             <View className="ml-2 mr-2 bg-green-100  px-2 py-0.5 rounded-full">
@@ -399,16 +480,20 @@ export default function CustomModal({
                       ?.filter(
                         (c) =>
                           !selectedDessert.ingredients.some(
-                            (ingredient) => ingredient.id === c.id
-                          )
+                            (ingredient) => ingredient.id === c.id,
+                          ),
                       )
                       .map((c) => {
-                        const toppingQuantity = customisationQuantity.find(
-                          (item) => item.id === c.id
+                        const toppingQuantity = customisations.find(
+                          (item) => item.id === c.id,
                         )?.quantity
 
                         const quantity =
-                          toppingQuantity >= 1 ? toppingQuantity : 0
+                          toppingQuantity === undefined
+                            ? 0
+                            : toppingQuantity >= 1
+                              ? toppingQuantity
+                              : 0
 
                         return (
                           <View
@@ -418,6 +503,9 @@ export default function CustomModal({
                             <View className="flex-row flex-1 items-center gap-4">
                               <View>
                                 <Text className="text-lg">{c.name}</Text>
+                                <Text className="text-sm text-muted-foreground">
+                                  {formatCurrency(c.priceInCents / 100)}
+                                </Text>
                               </View>
                             </View>
 
@@ -459,32 +547,44 @@ export default function CustomModal({
                   <TouchableOpacity
                     disabled={buttonLoading}
                     onPress={async () => {
+                      const currentModalId = modalIdRef.current
                       setButtonLoading(true)
-                      if (state === "add") {
-                        await addItem({
-                          dessert: selectedDessert,
-                          quantity,
-                          loyaltyPointsUsed: type === "points" ? points : null,
-                          customisations: customisationQuantity,
-                          itemPriceInCents: type === "points" ? 0 : price,
-                          offerId: offerId ? offerId : null,
-                        })
-                      } else {
-                        await editItem({
-                          id: cartItem?.id,
-                          dessert: selectedDessert,
-                          quantity,
-                          loyaltyPointsUsed: type === "points" ? points : null,
-                          customisations: customisationQuantity,
-                          itemPriceInCents: type === "points" ? 0 : price,
-                          offerId: offerId ? offerId : null,
-                          discountedAmountInCents: 0,
-                          isPromotionItem: cartItem?.isPromotionItem,
-                          promotionType: cartItem?.promotionType,
-                        })
+                      addTodessertModalTracker(currentModalId)
+                      try {
+                        if (state === "edit" && cartItem) {
+                          await editItem({
+                            id: cartItem?.id,
+                            dessert: selectedDessert,
+                            quantity: 1,
+                            loyaltyPointsUsed:
+                              type === "points" ? points : null,
+                            customisations: customisations,
+                            itemPriceInCents: type === "points" ? 0 : price,
+                            offerId: offerId ? offerId : null,
+                            discountedAmountInCents: 0,
+                            isPromotionItem: cartItem?.isPromotionItem,
+                            promotionType: cartItem?.promotionType,
+                          })
+                        } else {
+                          await addItem({
+                            dessert: selectedDessert,
+                            quantity: 1,
+                            loyaltyPointsUsed:
+                              type === "points" ? points : null,
+                            customisations: customisations,
+                            itemPriceInCents: type === "points" ? 0 : price,
+                            offerId: offerId ? offerId : null,
+                          })
+                        }
+                      } finally {
+                        const modalExists = useCartStore
+                          .getState()
+                          .dessertModalTracker.includes(modalIdRef.current)
+
+                        if (modalExists) {
+                          closeWithAnimation()
+                        }
                       }
-                      setButtonLoading(false)
-                      closeWithAnimation()
                     }}
                     className="bg-primary p-3 mt-3 items-center rounded-lg"
                   >

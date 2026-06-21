@@ -46,7 +46,7 @@ export default function Orders() {
       if (!token) return
 
       refetchOrders()
-    }, [token, refetchOrders])
+    }, [token, refetchOrders]),
   )
 
   const formatPickupTime = (pickupTime: string | null) => {
@@ -194,12 +194,13 @@ export default function Orders() {
               const pickUpTime = new Date(order.pickUpTime)
               const totalItems = order.desserts.reduce(
                 (total, item) => total + item.quantity,
-                0
+                0,
               )
               const originalTotalPrice = order.priceInCents / 100
 
               const finalTotalPrice =
                 (order.priceInCents - order.discountedAmountInCents) / 100
+
               return (
                 <View
                   key={order.id}
@@ -254,7 +255,7 @@ export default function Orders() {
                   <TouchableOpacity
                     onPress={() =>
                       setExpandedOrderId(
-                        expandedOrderId === order.id ? null : order.id
+                        expandedOrderId === order.id ? null : order.id,
                       )
                     }
                     className="px-4 py-2 border-t border-gray-200 flex-row justify-between items-center"
@@ -280,10 +281,34 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const originalPrice = item.priceInCents / 100
+                        const originalCustomisationPrice =
+                          item.customisations.reduce(
+                            (acc, c) =>
+                              acc +
+                              (c.quantity > 0
+                                ? c.customisation.priceInCents * c.quantity
+                                : 0),
+                            0,
+                          )
+                        const originalPrice =
+                          (item.priceInCents + originalCustomisationPrice) / 100
+
+                        const customisationPriceInCents =
+                          item.customisations.reduce(
+                            (acc, c) =>
+                              acc +
+                              (c.quantity > 0
+                                ? (c.customisation.priceInCents -
+                                    c.discountedAmountInCents) *
+                                  c.quantity
+                                : 0),
+                            0,
+                          )
 
                         const finalPrice =
-                          (item.priceInCents - item.discountedAmountInCents) /
+                          (item.priceInCents -
+                            item.discountedAmountInCents +
+                            customisationPriceInCents) /
                           100
                         return (
                           <View
@@ -307,7 +332,10 @@ export default function Orders() {
                                 {item.offerId && `(Members Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
-                                <Text key={customisation.id}>{`${
+                                <Text
+                                  key={customisation.id}
+                                  className="text-sm"
+                                >{`${
                                   customisation.quantity === 0 ? `- ` : `+ `
                                 } ${customisation.customisation.name} ${
                                   customisation.quantity > 1
@@ -349,12 +377,13 @@ export default function Orders() {
               const pickUpTime = new Date(order.pickUpTime)
               const totalItems = order.desserts.reduce(
                 (total, item) => total + item.quantity,
-                0
+                0,
               )
               const originalTotalPrice = order.priceInCents / 100
 
               const discountedTotalPrice =
                 (order.priceInCents - order.discountedAmountInCents) / 100
+
               return (
                 <View
                   key={order.id}
@@ -409,7 +438,7 @@ export default function Orders() {
                   <TouchableOpacity
                     onPress={() =>
                       setExpandedOrderId(
-                        expandedOrderId === order.id ? null : order.id
+                        expandedOrderId === order.id ? null : order.id,
                       )
                     }
                     className="px-4 py-2 border-t border-gray-200 flex-row justify-between items-center"
@@ -435,10 +464,33 @@ export default function Orders() {
                     <View className="p-4 border-t border-gray-200">
                       <Text className="font-medium mb-3">Items</Text>
                       {order.desserts.map((item, index) => {
-                        const originalPrice = item.priceInCents / 100
+                        const originalCustomisationPrice =
+                          item.customisations.reduce(
+                            (acc, c) =>
+                              acc +
+                              (c.quantity > 0
+                                ? c.customisation.priceInCents * c.quantity
+                                : 0),
+                            0,
+                          )
+                        const originalPrice =
+                          (item.priceInCents + originalCustomisationPrice) / 100
+                        const customisationPriceInCents =
+                          item.customisations.reduce(
+                            (acc, c) =>
+                              acc +
+                              (c.quantity > 0
+                                ? (c.customisation.priceInCents -
+                                    c.discountedAmountInCents) *
+                                  c.quantity
+                                : 0),
+                            0,
+                          )
 
                         const finalPrice =
-                          (item.priceInCents - item.discountedAmountInCents) /
+                          (item.priceInCents -
+                            item.discountedAmountInCents +
+                            customisationPriceInCents) /
                           100
                         return (
                           <View
@@ -462,7 +514,10 @@ export default function Orders() {
                                 {item.offerId && `(Members Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
-                                <Text key={customisation.id}>{`${
+                                <Text
+                                  key={customisation.id}
+                                  className="text-sm"
+                                >{`${
                                   customisation.quantity === 0 ? `- ` : `+ `
                                 } ${customisation.customisation.name} ${
                                   customisation.quantity > 1

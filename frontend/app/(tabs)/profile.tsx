@@ -1,6 +1,6 @@
 "use client"
 
-import { View, Text, TouchableOpacity, ScrollView } from "react-native"
+import { View, Text, TouchableOpacity, ScrollView, Alert } from "react-native"
 import type React from "react"
 import PageHeader from "@/_components/pageheader"
 import BouncingLoader from "@/_components/loader"
@@ -20,9 +20,27 @@ export default function Profile() {
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
 
   const handleLogout = async () => {
-    await signOutProvider()
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOutProvider()
+            router.replace("/")
+          } catch (error) {
+            console.error(
+              "Error",
+              error instanceof Error ? error.message : "Failed to log you out",
+            )
+            Alert.alert("Error", "Failed to log you out.")
+          }
+        },
+      },
+    ])
+
     // Refresh the screen or navigate to home
-    router.replace("/")
   }
 
   const navigateTo = (screen: string) => {
@@ -151,6 +169,11 @@ export default function Profile() {
           />
           <ProfileMenuItem
             icon={<Feather name="file-text" size={24} color="#6B7280" />}
+            title="Terms And Conditions"
+            onPress={() => navigateTo("/terms-and-conditions")}
+          />
+          <ProfileMenuItem
+            icon={<Feather name="shield" size={24} color="#6B7280" />}
             title="Privacy Policy"
             onPress={() => navigateTo("/privacy-policy")}
             isLast={true}

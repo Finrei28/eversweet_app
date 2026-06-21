@@ -1,20 +1,6 @@
 "use client"
-import { getStoreHours } from "@/services/api"
-import { useEffect, useState } from "react"
 
-export type StoreHours = {
-  [key: string]: [string, string] | null
-}
-
-export const fallbackStoreHours: StoreHours = {
-  Monday: ["12:30 PM", "9:30 PM"],
-  Tuesday: ["12:30 PM", "9:30 PM"],
-  Wednesday: null,
-  Thursday: ["12:30 PM", "9:30 PM"],
-  Friday: ["12:00 PM", "10:00 PM"],
-  Saturday: ["12:00 PM", "10:00 PM"],
-  Sunday: ["12:00 PM", "10:00 PM"],
-}
+import { StoreHours } from "@/utils/types"
 
 export function isOutsideBusinessHours(date: Date, storeHours: StoreHours) {
   if (!date) {
@@ -36,13 +22,13 @@ export function isOutsideBusinessHours(date: Date, storeHours: StoreHours) {
   return current < open || current > close
 }
 
-function parseTime(timeStr: string) {
+function parseTime(timeStr: string): [number, number, string] {
   const [time, period] = timeStr.split(" ")
   const [hour, minute] = time.split(":").map(Number)
   return [hour, minute, period]
 }
 
-function to24HourMinutes(hour, minute, period) {
+function to24HourMinutes(hour: number, minute: number, period: string) {
   let h = hour % 12
   if (period === "PM") h += 12
   return h * 60 + minute

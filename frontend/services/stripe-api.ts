@@ -25,16 +25,18 @@ export const getSavedCards = async (): Promise<any[]> => {
         Authorization: `Bearer ${token}`,
       },
     })
-
+    const data = await response.json()
     if (!response.ok) {
-      throw new Error("Failed to fetch payment methods")
+      throw new Error("Failed to fetch payment methods: " + data.message)
     }
 
-    const data = await response.json()
     return data.paymentMethods || []
   } catch (error) {
-    console.error("Error fetching saved cards:", error)
-    throw error
+    console.error(
+      "Error fetching saved cards:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to fetch saved cards. Please try again.")
   }
 }
 
@@ -53,12 +55,75 @@ export const createSetupIntent = async (): Promise<SetUpIntent> => {
     })
     const data = await response.json()
     if (!response.ok) {
-      throw new Error(data.message || "Failed to save card")
+      throw new Error(data.message || "Failed to create setup intent")
     }
     return data
   } catch (error) {
-    console.error("Error saving card:", error)
-    throw error
+    console.error(
+      "Error creating setup intent:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to create setup intent. Please try again.")
+  }
+}
+
+export const retryPayment = async () => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const response = await fetch(`${url}/api/stripe/retryPayment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.message || "Retry payment failed")
+    }
+    return data.success
+  } catch (error) {
+    console.error(
+      "Error retrying payment:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Payment retry failed. Please try again.")
+  }
+}
+
+export const setCardForMembershipPayments = async (
+  setupIntentId: string,
+): Promise<void> => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const response = await fetch(
+      `${url}/api/stripe/setCardForMembershipPayments`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ setupIntentId }),
+      },
+    )
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.message || "Failed to save card")
+    }
+  } catch (error) {
+    console.error(
+      "Error saving card:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to save card. Please try again.")
   }
 }
 
@@ -86,8 +151,11 @@ export const saveCard = async (paymentMethodId: string): Promise<void> => {
       throw new Error(errorData.message || "Failed to save card")
     }
   } catch (error) {
-    console.error("Error saving card:", error)
-    throw error
+    console.error(
+      "Error saving card:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to save card. Please try again.")
   }
 }
 
@@ -115,15 +183,18 @@ export const removeCard = async (paymentMethodId: string): Promise<void> => {
       throw new Error(errorData.message || "Failed to remove card")
     }
   } catch (error) {
-    console.error("Error removing card:", error)
-    throw error
+    console.error(
+      "Error removing card:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to remove card. Please try again.")
   }
 }
 
 export const createPaymentIntent = async (
   amount: number,
   currency = "nzd",
-  paymentMethodId?: string
+  paymentMethodId?: string,
 ): Promise<{ clientSecret: string; paymentIntentId: string }> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -154,8 +225,11 @@ export const createPaymentIntent = async (
       paymentIntentId: data.paymentIntentId,
     }
   } catch (error) {
-    console.error("Error creating payment intent:", error)
-    throw error
+    console.error(
+      "Error creating payment intent:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to create payment intent. Please try again.")
   }
 }
 
@@ -178,7 +252,7 @@ export const checkPaymentStatus = async (paymentIntentId: string) => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-      }
+      },
     )
 
     if (!response.ok) {
@@ -189,8 +263,11 @@ export const checkPaymentStatus = async (paymentIntentId: string) => {
     const data = await response.json()
     return data
   } catch (error) {
-    console.error("Error checking payment status:", error)
-    throw error
+    console.error(
+      "Error checking payment status:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error("Failed to check payment status. Please try again.")
   }
 }
 
@@ -217,6 +294,10 @@ export const getMembershipDetails = async (): Promise<MembershipDetails> => {
     }
     return data
   } catch (error: any) {
+    console.error(
+      "Error fetching membership details:",
+      error instanceof Error ? error.message : error,
+    )
     throw new Error(error?.message || "Something went wrong.")
   }
 }
@@ -239,7 +320,7 @@ export const getUsersMembership = async (): Promise<UsersMembership> => {
 
     const data = await res.json()
     if (res.status === 404) {
-      return null
+      throw new Error("No membership found")
     }
     if (res.status === 401) {
       throw new Error("Unauthenticated")
@@ -250,13 +331,17 @@ export const getUsersMembership = async (): Promise<UsersMembership> => {
 
     return data
   } catch (error: any) {
+    console.error(
+      "Error fetching membership details:",
+      error instanceof Error ? error.message : error,
+    )
     throw new Error(error?.message || "Something went wrong.")
   }
 }
 
 export const createMembership = async (
   paymentMethodId: string,
-  stripePriceId: string
+  stripePriceId: string,
 ) => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
@@ -283,6 +368,10 @@ export const createMembership = async (
 
     return data
   } catch (error: any) {
+    console.error(
+      "Error creating membership:",
+      error instanceof Error ? error.message : error,
+    )
     throw new Error(error?.message || "Something went wrong.")
   }
 }
@@ -303,7 +392,7 @@ export const cancelMembership = async () => {
 
     const data = await res.json()
     if (res.status === 404) {
-      return null
+      throw new Error("No membership found")
     }
     if (res.status === 401) {
       throw new Error("Unauthenticated")
@@ -314,6 +403,45 @@ export const cancelMembership = async () => {
 
     return data.endDate
   } catch (error: any) {
+    console.error(
+      "Error canceling membership:",
+      error instanceof Error ? error.message : error,
+    )
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export const resumeMembership = async () => {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+  try {
+    const res = await fetch(`${url}/api/stripe/resumeMembership`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (res.status === 404) {
+      throw new Error("No membership found")
+    }
+    if (res.status === 401) {
+      throw new Error("Unauthenticated")
+    }
+    if (!res.ok) {
+      throw new Error(`Error: ${data.message}`)
+    }
+
+    return data.success
+  } catch (error: any) {
+    console.error(
+      "Error canceling membership:",
+      error instanceof Error ? error.message : error,
+    )
     throw new Error(error?.message || "Something went wrong.")
   }
 }
@@ -334,7 +462,7 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
 
     const data = await res.json()
     if (res.status === 404) {
-      return null
+      throw new Error("No membership found")
     }
     if (res.status === 401) {
       throw new Error("Unauthenticated")
@@ -345,6 +473,10 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
 
     return data
   } catch (error: any) {
+    console.error(
+      "Error fetching membership details:",
+      error instanceof Error ? error.message : error,
+    )
     throw new Error(error?.message || "Something went wrong.")
   }
 }
@@ -364,12 +496,12 @@ export const getCurrentSubscriptionPaymentMethodId =
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-        }
+        },
       )
 
       const data = await res.json()
       if (res.status === 404) {
-        return null
+        throw new Error("No subscription payment method found")
       }
       if (res.status === 401) {
         throw new Error("Unauthenticated")
@@ -380,6 +512,10 @@ export const getCurrentSubscriptionPaymentMethodId =
 
       return data.paymentMethodId
     } catch (error: any) {
+      console.error(
+        "Error fetching current subscription payment method ID:",
+        error instanceof Error ? error.message : error,
+      )
       throw new Error(error?.message || "Something went wrong.")
     }
   }

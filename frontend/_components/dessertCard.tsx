@@ -1,4 +1,5 @@
 import { formatCurrency } from "@/lib/formatters"
+import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
 import React from "react"
@@ -6,9 +7,9 @@ import { View, Image, Text, TouchableOpacity, Dimensions } from "react-native"
 
 type DessertCardProps = {
   dessert: Dessert
-  token: string
-  usersMembership: UsersMembership
-  setSelectedDessert: React.Dispatch<React.SetStateAction<Dessert>>
+  token: string | null
+  usersMembership: UsersMembership | null
+  setSelectedDessert: React.Dispatch<React.SetStateAction<Dessert | null>>
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
   router: Router
   currency: "cents" | "points"
@@ -27,13 +28,16 @@ export const DessertCard = React.memo(
     loyaltyPoints,
   }: DessertCardProps) => {
     const { height, width } = Dimensions.get("window")
-
+    const dessertPriceInCentsAfterDiscount = calculateBestDiscountedPrice(
+      dessert,
+      usersMembership,
+    )
     return (
       <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 p-5">
         <Image
           source={{ uri: dessert.imagePath }}
           className="relative rounded-lg w-full"
-          style={{ height: height * 0.26 }}
+          style={{ height: height * 0.3 }}
           resizeMode="cover"
         />
 
@@ -50,14 +54,16 @@ export const DessertCard = React.memo(
               router.push("/signin")
             }
           }}
-          disabled={loyaltyPoints < dessert.priceInLoyaltyPoints}
+          disabled={
+            loyaltyPoints ? loyaltyPoints < dessert.priceInLoyaltyPoints : false
+          }
           className="bg-primary rounded-lg p-3 items-center w-1/2  mx-auto"
         >
           {token ? (
             <View className="flex-col items-center justify-center">
               {currency === "cents" ? (
                 <>
-                  {usersMembership?.isActive ? (
+                  {usersMembership?.isActive || dessert.promo?.isActive ? (
                     <>
                       <View className="flex-row items-center gap-1">
                         <Text className="text-red-600 line-through text-sm">
@@ -65,17 +71,21 @@ export const DessertCard = React.memo(
                         </Text>
                         <Text className="text-white font-bold text-lg">
                           {formatCurrency(
-                            (Number(dessert.priceInCents) * 0.85) / 100
+                            Number(dessertPriceInCentsAfterDiscount) / 100,
                           )}
                         </Text>
                       </View>
                       <Text className="text-xs text-yellow-300">
-                        Member Price
+                        {usersMembership?.isActive
+                          ? "Member Price"
+                          : "Special Offer"}
                       </Text>
                     </>
                   ) : (
                     <Text className="text-white font-bold text-lg">
-                      {formatCurrency(Number(dessert.priceInCents) / 100)}
+                      {formatCurrency(
+                        Number(dessertPriceInCentsAfterDiscount) / 100,
+                      )}
                     </Text>
                   )}
                 </>
@@ -93,5 +103,5 @@ export const DessertCard = React.memo(
         </TouchableOpacity>
       </View>
     )
-  }
+  },
 )

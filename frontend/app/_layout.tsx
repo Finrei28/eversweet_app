@@ -17,9 +17,12 @@ import {
 import { AuthProvider } from "@/store/authProvider"
 import { useCartStore } from "@/store/cart"
 import MembershipPopup from "@/_components/membershipAd"
-import { getAnnouncements, getStoreHours } from "@/services/api"
+import { getAnnouncements } from "@/services/api"
 import AnnouncementsPopup from "@/_components/announcementModal"
 import { Announcements } from "@/utils/types"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+
+SplashScreen.preventAutoHideAsync()
 
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -30,41 +33,69 @@ export default function RootLayout() {
   const [showAnnounceModal, setShowAnnounceModal] = useState(false)
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const fetchPoints = useLoyaltyStore((state) => state.fetchPoints)
+  const fetchCart = useCartStore((state) => state.fetchCart)
 
   useEffect(() => {
     setMounted(true) // mark that the router layout is mounted
   }, [])
 
   useEffect(() => {
-    // Check if user is authenticated
-    const checkAuth = async () => {
-      const token = await getToken()
-      setIsAuthenticated(!!token)
-    }
-
-    checkAuth()
-  }, [])
-
-  useEffect(() => {
     const fetchInitialData = async () => {
-      await getStoreHours()
-      const token = await getToken()
-      const annoucementList = await getAnnouncements()
-      setAnnouncements(annoucementList)
-      if (announcements.length > 0) {
-        setShowAnnounceModal(true)
-      }
+      try {
+        const [token, announcementList] = await Promise.all([
+          getToken(),
+          getAnnouncements(),
+        ])
+        setIsAuthenticated(!!token)
+        setAnnouncements(announcementList)
+        if (announcementList.length > 0) {
+          const lastSeenAnnouncement = await AsyncStorage.getItem(
+            // get last seen announcement
+            "lastSeenAnnouncement",
+          )
 
-      if (token) {
-        const showMembershipPopup = await hasMembershipPopupExpired()
-        if (showMembershipPopup) {
-          setModalVisible(true)
+          const hasNewAnnouncements = announcements.some(
+            // check if there are any new announcements
+            (announcement) =>
+              !lastSeenAnnouncement ||
+              new Date(announcement.updatedAt) > new Date(lastSeenAnnouncement),
+          )
+          if (hasNewAnnouncements) {
+            // show new announcements
+            setShowAnnounceModal(true)
+            const latestAnnouncementDate = announcements.reduce(
+              (latest, announcement) =>
+                new Date(announcement.updatedAt) > new Date(latest)
+                  ? announcement.updatedAt
+                  : latest,
+              announcements[0].updatedAt,
+            )
+
+            await AsyncStorage.setItem(
+              // store the newly seen announcement date
+              "lastSeenAnnouncement",
+              latestAnnouncementDate,
+            )
+          }
         }
-        // Fetch loyalty points if user is authenticated
-        useLoyaltyStore.getState().fetchPoints() // load fresh points on app start
-        useCartStore.getState().fetchCart() // load cart items on app start
+
+        if (token) {
+          const showMembershipPopup = await hasMembershipPopupExpired()
+          if (showMembershipPopup) {
+            setModalVisible(true)
+          }
+          // Fetch loyalty points if user is authenticated
+          await Promise.all([fetchPoints(), fetchCart()]) // load fresh points on app start
+          // load cart items on app start
+        }
+      } catch (error) {
+        console.error("Failed to load announcements", error)
+      } finally {
+        await SplashScreen.hideAsync()
       }
     }
+
     fetchInitialData()
   }, [])
 
@@ -73,10 +104,12 @@ export default function RootLayout() {
     if (isAuthenticated) {
       // Register for push notifications
       const registerPushNotifications = async () => {
+        const storedToken = await AsyncStorage.getItem("pushToken")
         await registerForPushNotificationsAsync().then((token) => {
-          if (token) {
+          if (token && token !== storedToken) {
             // Save the token to the server
             savePushToken(token)
+            AsyncStorage.setItem("pushToken", token)
           }
         })
       }

@@ -19,14 +19,23 @@ import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
 import { isEqual } from "lodash"
 import * as Crypto from "expo-crypto"
+import {
+  calculatePriceAfterMembershipDiscount,
+  calculatePriceAfterPromo,
+} from "@/lib/priceHelper"
 
 interface CartState {
   items: CartItem[]
   cartOperations: number
+  dessertModalTracker: number[]
   error: string | null
   lastRequestId?: number
+  addTodessertModalTracker: (id: number) => void
+  removeFromDessertModalTracker: (id: number) => void
   fetchCart: () => Promise<void>
-  getTotalMembershipDiscount: () => number
+  getTotalMembershipDiscount: (
+    usersMembership: UsersMembership | null,
+  ) => number
   addItem: (item: AddCartItem) => Promise<void>
   editItem: (item: CartItem) => Promise<void>
   removeItem: (id: string) => Promise<void>
@@ -38,13 +47,30 @@ interface CartState {
   setError: (error: string | null) => void
   getTotalItems: () => number
   getTotalCost: () => number
-  getEarnablePoints: (usersMembership: UsersMembership) => Promise<number>
+  getEarnablePoints: (
+    usersMembership: UsersMembership | null,
+  ) => Promise<number>
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
   error: null,
   cartOperations: 0,
+  dessertModalTracker: [],
+  addTodessertModalTracker: (id: number) => {
+    set((state) => ({
+      dessertModalTracker: state.dessertModalTracker.includes(id)
+        ? state.dessertModalTracker
+        : [...state.dessertModalTracker, id],
+    }))
+  },
+  removeFromDessertModalTracker: (id: number) => {
+    set((state) => ({
+      dessertModalTracker: state.dessertModalTracker.filter(
+        (trackerId) => trackerId !== id,
+      ),
+    }))
+  },
   fetchCart: async () => {
     try {
       const cartItems = (await getCartItems()) ?? []
@@ -53,11 +79,30 @@ export const useCartStore = create<CartState>((set, get) => ({
       console.error("Failed to fetch cart items", error)
     }
   },
-  getTotalMembershipDiscount: () => {
-    return get().items.reduce(
-      (total, item) => total + item.discountedAmountInCents * item.quantity,
-      0
-    )
+  getTotalMembershipDiscount: (usersMembership: UsersMembership | null) => {
+    return get().items.reduce((total, item) => {
+      const dessertPrice = item.dessert.priceInCents
+      const membershipPrice = calculatePriceAfterMembershipDiscount(
+        dessertPrice,
+        usersMembership,
+      )
+      const promoPrice = calculatePriceAfterPromo(item.dessert)
+      const customisationDiscountedAmount = item.customisations.reduce(
+        (acc, c) =>
+          acc + (c.quantity > 0 ? c.discountedAmountInCents * c.quantity : 0),
+        0,
+      )
+
+      return (
+        total +
+        (!item.offerId &&
+        !item.loyaltyPointsUsed &&
+        membershipPrice <= promoPrice
+          ? item.discountedAmountInCents * item.quantity // find desserts that are not offers, loyaltlies and only if membership discount is > promo discount
+          : 0) +
+        customisationDiscountedAmount * item.quantity // find customisation discount separately because customisation is always member discounted
+      )
+    }, 0)
   },
   addItem: async (item, usersMembership?: UsersMembership) => {
     const areListsEqual = (list1: Customisations, list2: Customisations) => {
@@ -67,7 +112,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const sortedList2 = [...list2].sort((a, b) => a.id.localeCompare(b.id))
 
       return sortedList1.every((item, index) =>
-        isEqual(item, sortedList2[index])
+        isEqual(item, sortedList2[index]),
       )
     }
 
@@ -99,7 +144,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (existing) {
         const updatedCart = await updateCartItemQuantity(
           existing.id,
-          existing.quantity + 1
+          existing.quantity + 1,
         )
         set({ items: updatedCart })
       } else {
@@ -114,7 +159,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 5000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -130,7 +175,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -143,7 +188,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -157,11 +202,11 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to order with loyalty points",
-          text2: `${error.message}`,
+          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
           position: "bottom",
           visibilityTime: 4000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -172,11 +217,11 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to add item to cart",
-          text2: `${error.message}`,
+          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
           position: "bottom",
           visibilityTime: 4000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -195,34 +240,24 @@ export const useCartStore = create<CartState>((set, get) => ({
         position: "bottom",
         visibilityTime: 2000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
       })
     } catch (error) {
       console.error("Failed to edit item in cart", error)
       Toast.show({
         type: "error",
         text1: "Failed to edit item in cart",
-        text2: `${error.message}`,
+        text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
         props: {
           text1NumberOfLines: 0,
           text2NumberOfLines: 0, // allow wrapping
         },
       })
     }
-    // const now = Date.now()
-    // const existing = get().items.find((i) => i.id === item.id)
-
-    // if (!existing) return
-    // set({
-    //   items: get().items.map((i) =>
-    //     i.id === item.id ? { ...i, ...item } : i
-    //   ),
-    //   lastUpdated: now,
-    // })
   },
   removeItem: async (id) => {
     const item = get().items.find((i) => i.id === id)
@@ -237,8 +272,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (get().cartOperations === 0) {
         set({ items: updatedCart })
       }
-      // set({ items: cartItems })
-      if (item.loyaltyPointsUsed) {
+
+      if (item?.loyaltyPointsUsed) {
         useLoyaltyStore.getState().fetchPoints()
 
         Toast.show({
@@ -248,7 +283,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -261,12 +296,13 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 2000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
         })
       }
     } catch (error) {
       console.error("Failed to remove item from cart", error)
-      if (item.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
+      set({ cartOperations: get().cartOperations - 1 })
+      if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
         useLoyaltyStore.getState().fetchPoints()
         console.error("Failed to restore points", error)
         Toast.show({
@@ -276,7 +312,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 0,
           autoHide: false,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -286,11 +322,11 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to remove item from cart",
-          text2: `${error.message}`,
+          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -317,7 +353,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -330,7 +366,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
         })
       }
     } catch (error) {
@@ -338,11 +374,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       Toast.show({
         type: "error",
         text1: "Failed to clear cart",
-        text2: `${error.message}`,
+        text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
         props: {
           text1NumberOfLines: 0,
           text2NumberOfLines: 0, // allow wrapping
@@ -366,7 +402,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       position: "bottom",
       visibilityTime: 3000,
       autoHide: true,
-      bottomOffset: 60,
+      bottomOffset: 90,
       props: {
         text1NumberOfLines: 0,
         text2NumberOfLines: 0, // allow wrapping
@@ -376,14 +412,14 @@ export const useCartStore = create<CartState>((set, get) => ({
   incrementItem: async (id) => {
     set({
       items: get().items.map((i) =>
-        i.id === id ? { ...i, quantity: i.quantity + 1 } : i
+        i.id === id ? { ...i, quantity: i.quantity + 1 } : i,
       ),
     })
   },
   decrementItem: async (id) => {
     set({
       items: get().items.map((i) =>
-        i.id === id ? { ...i, quantity: i.quantity - 1 } : i
+        i.id === id ? { ...i, quantity: i.quantity - 1 } : i,
       ),
     })
   },
@@ -410,23 +446,43 @@ export const useCartStore = create<CartState>((set, get) => ({
     get().items.reduce(
       (acc, item) =>
         acc +
-        item.quantity * (item.itemPriceInCents - item.discountedAmountInCents),
-      0
+        item.quantity *
+          (item.itemPriceInCents -
+            item.discountedAmountInCents +
+            item.customisations.reduce(
+              (acc, c) =>
+                acc +
+                (c.quantity > 0
+                  ? (c.priceInCents - c.discountedAmountInCents) * c.quantity
+                  : 0),
+              0,
+            )),
+      0,
     ),
-  getEarnablePoints: async (usersMembership: UsersMembership) => {
+  getEarnablePoints: async (usersMembership: UsersMembership | null) => {
     const rates = await getLoyaltyRates()
     return get().items.reduce(
       (acc, item) =>
         acc +
         Math.floor(
-          ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
-            (rates.rate ?? 10) * // if !rates.rate ? fallback to 15 points per dollar
+          ((item.itemPriceInCents -
+            item.discountedAmountInCents +
+            item.customisations.reduce(
+              (acc, c) =>
+                acc +
+                (c.quantity > 0
+                  ? (c.priceInCents - c.discountedAmountInCents) * c.quantity
+                  : 0),
+              0,
+            )) /
+            100) * // points is calculated per dollar
+            (rates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
             item.quantity *
             (usersMembership?.isActive
-              ? (rates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
-              : rates.modifier ?? 1)
+              ? (rates.modifier ?? 1) * rates.memberRate // if !rates.modifier ? fallback to 1
+              : (rates.modifier ?? 1)),
         ),
-      0
+      0,
     )
   },
 }))

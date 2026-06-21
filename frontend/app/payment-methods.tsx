@@ -50,7 +50,7 @@ function PaymentMethodsContent() {
   const router = useRouter()
   const { createPaymentMethod, initPaymentSheet, presentPaymentSheet } =
     useStripe()
-  const { token, loading: loadingToken } = useAuth()
+  const { token, loading: loadingToken, usersMembership } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
@@ -84,7 +84,8 @@ function PaymentMethodsContent() {
     setLoadingPaymentSheet(true)
     await openPaymentSheetForSetup(
       { initPaymentSheet, presentPaymentSheet },
-      fetchSavedCards
+      fetchSavedCards,
+      usersMembership ? usersMembership.isActive : false,
     )
     setLoadingPaymentSheet(false)
   }
@@ -112,18 +113,18 @@ function PaymentMethodsContent() {
             }
           },
         },
-      ]
+      ],
     )
   }
 
   const handleSamePaymentCard = () => {
     Toast.show({
       type: "error",
-      text1: `That card is currently active`,
+      text1: `That card is currently active with a membership`,
       position: "bottom",
       visibilityTime: 3000,
       autoHide: true,
-      bottomOffset: 60,
+      bottomOffset: 90,
       props: {
         text1NumberOfLines: 0,
         text2NumberOfLines: 0, // allow wrapping
@@ -229,43 +230,62 @@ function PaymentMethodsContent() {
         ) : savedCards.length > 0 ? (
           <>
             <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
-              {savedCards.map((card, index) => (
-                <View
-                  key={card.id}
-                  className={`p-4 ${
-                    index < savedCards.length - 1
-                      ? "border-b border-gray-200"
-                      : ""
-                  }`}
-                >
-                  <View className="flex-row justify-between items-center">
-                    <View className="flex-row items-center">
-                      <Feather name="credit-card" size={24} color="#6B7280" />
-                      <View className="ml-3">
-                        <Text className="font-medium">
-                          {formatCardBrand(card.card.brand)} ••••{" "}
-                          {card.card.last4}
-                        </Text>
-                        <Text className="text-gray-500 text-sm">
-                          Expires {card.card.exp_month}/
-                          {card.card.exp_year.toString().slice(-2)}
-                        </Text>
+              {savedCards.map((card, index) => {
+                const checkIfCardExpired = () => {
+                  const currentDate = new Date()
+                  const currentYear = currentDate.getFullYear()
+                  const currentMonth = currentDate.getMonth() + 1 // getMonth is zero-indexed
+                  const cardYear = card.card.exp_year
+                  const cardMonth = card.card.exp_month
+                  return (
+                    cardYear < currentYear ||
+                    (cardYear === currentYear && cardMonth < currentMonth)
+                  )
+                }
+                const isCardExpired = checkIfCardExpired()
+                return (
+                  <View
+                    key={card.id}
+                    className={`p-4 ${
+                      index < savedCards.length - 1
+                        ? "border-b border-gray-200"
+                        : ""
+                    }`}
+                  >
+                    <View className="flex-row justify-between items-center">
+                      <View className="flex-row items-center">
+                        <Feather name="credit-card" size={24} color="#6B7280" />
+                        <View className="ml-3">
+                          <Text className="font-medium">
+                            {formatCardBrand(card.card.brand)} ••••{" "}
+                            {card.card.last4}
+                          </Text>
+                          <Text
+                            className={`text-gray-500 text-sm ${isCardExpired ? "text-red-500" : ""}`}
+                          >
+                            {isCardExpired
+                              ? "Expired"
+                              : `Expires ${card.card.exp_month}/${card.card.exp_year.toString().slice(-2)}`}
+                          </Text>
+                        </View>
                       </View>
+                      {paymentMethodId === card.id ? (
+                        <TouchableOpacity
+                          onPress={() => handleSamePaymentCard()}
+                        >
+                          <Feather name="trash-2" size={18} color="#9CA3AF" />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => handleDeleteCard(card.id)}
+                        >
+                          <Feather name="trash-2" size={18} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
                     </View>
-                    {paymentMethodId === card.id ? (
-                      <TouchableOpacity onPress={() => handleSamePaymentCard()}>
-                        <Feather name="trash-2" size={18} color="#9CA3AF" />
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        onPress={() => handleDeleteCard(card.id)}
-                      >
-                        <Feather name="trash-2" size={18} color="#EF4444" />
-                      </TouchableOpacity>
-                    )}
                   </View>
-                </View>
-              ))}
+                )
+              })}
             </View>
           </>
         ) : (

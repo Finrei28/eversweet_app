@@ -11,7 +11,7 @@ export function getEstimatedPickUpTime(numOfItems: number) {
   return minTime
 }
 
-export function convertToTime(base: Date, timeStr: string): Date {
+export function convertToTime(base: Date, timeStr: string | null): Date | null {
   if (!timeStr) return null
   const [time, modifier] = timeStr.split(" ")
   const [hours, minutes] = time.split(":").map(Number)
@@ -30,7 +30,7 @@ export function convertToTime(base: Date, timeStr: string): Date {
   return date
 }
 
-export function getOpenCloseTime(date: Date, storeHours: StoreHours) {
+export function getOpenCloseTime(date: Date | null, storeHours: StoreHours) {
   if (!date) {
     return { openTime: null, closeTime: null, dayName: null }
   }
@@ -74,7 +74,7 @@ export function getNextOpenDay(date: Date, storeHours: StoreHours) {
 export function getNextValidPickupTime(
   selected: Date,
   totalItems: number,
-  storeHours: StoreHours
+  storeHours: StoreHours,
 ) {
   const minTime = getEstimatedPickUpTime(totalItems)
 
@@ -106,6 +106,7 @@ export function getNextValidPickupTime(
     // after 12 am
     const nextOpenDay = getNextOpenDay(date, storeHours)
     const nextOpenTime = getOpenCloseTime(nextOpenDay, storeHours).openTime
+    if (!nextOpenTime) return minTime
     return nextOpenTime > minTime ? nextOpenTime : minTime
   }
   if (date < minTime) return minTime > openTime ? minTime : openTime

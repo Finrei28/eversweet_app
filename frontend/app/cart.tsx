@@ -26,8 +26,9 @@ export default function CartPage() {
   const getTotalCost = useCartStore((state) => state.getTotalCost)
   const getEarnablePoints = useCartStore((state) => state.getEarnablePoints)
   const [selectedCartItem, setSelectedCartItem] = useState<CartItem | null>(
-    null
+    null,
   )
+  const [offerId, setOfferId] = useState<string | null>(null)
   const [debounceActive, setDebounceActive] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [type, setType] = useState<"points" | "cents">("cents")
@@ -41,7 +42,7 @@ export default function CartPage() {
       navigation.setOptions({
         headerBackTitle: title,
       })
-    }, [navigation, route.key])
+    }, [navigation, route.key]),
   )
   const totalCost = getTotalCost()
   useEffect(() => {
@@ -87,6 +88,7 @@ export default function CartPage() {
                   setType={setType}
                   setModalVisible={setModalVisible}
                   setDebounceActive={setDebounceActive}
+                  setOfferId={setOfferId}
                 />
               )}
             />
@@ -112,7 +114,7 @@ export default function CartPage() {
                 <Text className="text-white font-bold">Checkout</Text>
               </TouchableOpacity>
             </View>
-            {modalVisible && (
+            {modalVisible && selectedCartItem && (
               <CustomModal
                 modalVisible={modalVisible}
                 setModalVisible={setModalVisible}
@@ -120,6 +122,7 @@ export default function CartPage() {
                 type={type}
                 state="edit"
                 cartItem={selectedCartItem}
+                offerId={offerId}
               />
             )}
           </>

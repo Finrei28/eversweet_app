@@ -47,7 +47,7 @@ export default function membershipSuccessPage() {
         </Text>
         <Text className="text-gray-600 text-center mb-8">
           Huge thanks for joining our membership! You now have access to all
-          membership perks. Enjoy exclusive offers and discounts!
+          membership perks. Enjoy our exclusive offers and discounts!
         </Text>
 
         <TouchableOpacity

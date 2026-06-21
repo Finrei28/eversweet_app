@@ -14,6 +14,40 @@ import useFetch from "@/services/use_fetch"
 import { getUserProfile, updateUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
 
+const FormField = ({
+  label,
+  value,
+  field,
+  editable = true,
+  isEditing,
+  handleChange,
+}: {
+  label: string
+  value: string
+  field: string
+  editable?: boolean
+  isEditing: boolean
+  handleChange: (field: string, value: string) => void
+}) => {
+  return (
+    <View className="mb-4">
+      <Text className="text-gray-500 mb-1">{label}</Text>
+
+      {isEditing && editable ? (
+        <TextInput
+          value={value}
+          onChangeText={(text) => handleChange(field, text)}
+          className="border border-gray-300 rounded-lg p-3 bg-white"
+        />
+      ) : (
+        <Text className="p-3 bg-gray-100 rounded-lg">
+          {value || "Not provided"}
+        </Text>
+      )}
+    </View>
+  )
+}
+
 export default function AccountDetails() {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
@@ -84,33 +118,6 @@ export default function AccountDetails() {
     return null
   }
 
-  const FormField = ({
-    label,
-    value,
-    field,
-    editable = true,
-  }: {
-    label: string
-    value: string
-    field: string
-    editable?: boolean
-  }) => (
-    <View className="mb-4">
-      <Text className="text-gray-500 mb-1">{label}</Text>
-      {isEditing && editable ? (
-        <TextInput
-          value={value}
-          onChangeText={(text) => handleChange(field, text)}
-          className="border border-gray-300 rounded-lg p-3 bg-white"
-        />
-      ) : (
-        <Text className="p-3 bg-gray-100 rounded-lg">
-          {value || "Not provided"}
-        </Text>
-      )}
-    </View>
-  )
-
   return (
     <View className="flex-1 bg-background">
       <CustomHeader />
@@ -157,14 +164,32 @@ export default function AccountDetails() {
             label="First Name"
             value={formData.firstName}
             field="firstName"
+            isEditing={isEditing}
+            handleChange={handleChange}
           />
           <FormField
             label="Last Name"
             value={formData.lastName}
             field="lastName"
+            isEditing={isEditing}
+            handleChange={handleChange}
           />
-          <FormField label="Email" value={formData.email} field="email" />
-          <FormField label="Phone" value={formData.phone} field="phone" />
+          <FormField
+            label="Email"
+            value={formData.email}
+            field="email"
+            isEditing={isEditing}
+            handleChange={handleChange}
+            editable={false}
+          />
+          <FormField
+            label="Phone"
+            value={formData.phone}
+            field="phone"
+            isEditing={isEditing}
+            handleChange={handleChange}
+            editable={formData.phone ? false : true}
+          />
         </View>
       </ScrollView>
     </View>

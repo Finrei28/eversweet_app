@@ -15,8 +15,8 @@ import CustomModal from "./modal"
 
 type OfferModalProps = {
   offer: Offer
-  itemPriceInCents?: number | null
-  discountAmount?: number | null
+  itemPriceInCents: number | null
+  discountAmount: number | null
   offerModal: boolean
   setOfferModal: React.Dispatch<React.SetStateAction<boolean>>
   refetchOffers: () => Promise<void>
@@ -57,17 +57,18 @@ export default function OfferModal({
                 setOfferModal={setOfferModal}
                 setSelectedDessert={setSelectedDessert}
                 selectedDessert={
-                  offer.dessert ? offer.dessert : selectedDessert
+                  offer.dessert ? offer.dessert : selectedDessert!
                 }
                 offerId={offer.id}
                 offerItemPrice={
                   itemPriceInCents !== null
                     ? itemPriceInCents
                     : offer.dessert
-                    ? offer.dessert.priceInCents * (1 - discountAmount)
-                    : selectedDessert
-                    ? selectedDessert.priceInCents * (1 - discountAmount)
-                    : 0
+                      ? offer.dessert.priceInCents * (1 - (discountAmount ?? 0))
+                      : selectedDessert
+                        ? selectedDessert.priceInCents *
+                          (1 - (discountAmount ?? 0))
+                        : 0
                 }
                 type="cents"
               />
@@ -77,12 +78,12 @@ export default function OfferModal({
           <View className="flex-1 justify-center items-center bg-black/50 p-4">
             <View className="bg-white rounded-xl p-4 w-full max-h-[80%]">
               <Text className="text-xl font-bold my-5">
-                Choose a {offer.category.name} item
+                Choose a {offer.category?.name} item
               </Text>
 
               <ScrollView className="overflow-hidden">
                 <View className="flex-col gap-y-4">
-                  {offer.category.desserts.map((dessert) => (
+                  {offer.category?.desserts.map((dessert) => (
                     <TouchableOpacity
                       key={dessert.id}
                       onPress={() => handleSelectDessert(dessert)}
@@ -107,8 +108,9 @@ export default function OfferModal({
                         {formatCurrency(
                           itemPriceInCents !== null
                             ? itemPriceInCents
-                            : (dessert.priceInCents * (1 - discountAmount)) /
-                                100
+                            : (dessert.priceInCents *
+                                (1 - (discountAmount ?? 0))) /
+                                100,
                         )}
                       </Text>
                     </TouchableOpacity>

@@ -111,7 +111,7 @@ const OTPInput = ({
             position: "bottom",
             visibilityTime: 5000,
             autoHide: true,
-            bottomOffset: 60,
+            bottomOffset: 90,
             props: {
               text1NumberOfLines: 0,
               text2NumberOfLines: 0, // allow wrapping
@@ -128,12 +128,12 @@ const OTPInput = ({
         Toast.show({
           type: "success",
           text1: `Welcome aboard ${name.charAt(0).toUpperCase()}${name.slice(
-            1
+            1,
           )}`,
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -160,7 +160,7 @@ const OTPInput = ({
           position: "bottom",
           visibilityTime: 4000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping
@@ -173,7 +173,7 @@ const OTPInput = ({
           position: "bottom",
           visibilityTime: 5000,
           autoHide: true,
-          bottomOffset: 60,
+          bottomOffset: 90,
           props: {
             text1NumberOfLines: 0,
             text2NumberOfLines: 0, // allow wrapping

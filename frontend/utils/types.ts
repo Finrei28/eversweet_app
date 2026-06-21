@@ -23,6 +23,8 @@ export type Customisations = {
   id: string
   chineseName: string
   name: string
+  priceInCents: number
+  discountedAmountInCents: number
   quantity: number
 }[]
 
@@ -43,6 +45,15 @@ export type Dessert = {
   priceInLoyaltyPoints: number
   imagePath: string
   ingredients: Ingredients
+  promo: {
+    type: "PERCENTAGE" | "FIXED_AMOUNT"
+    value: number
+    name: string
+    id: string
+    isActive: boolean
+    startsAt: Date | null
+    endsAt: Date | null
+  } | null
 }
 
 export type DessertCategory = {
@@ -88,10 +99,12 @@ export type Order = {
     customisations: {
       id: string
       quantity: number
+      discountedAmountInCents: number
       customisation: {
         id: string
         name: string
         chineseName: string
+        priceInCents: number
       }
     }[]
   }[]
@@ -142,18 +155,38 @@ export type UsersMembership = {
   stripeSubscriptionId: string | null
   planId: string
   isActive: boolean
+  totalMonths: number
   cancel: boolean
+  plan: {
+    id: string
+    name: string
+    stripePriceId: string
+    membershipDiscount: number
+    maxDiscount: number
+  }
 }
 
 export type MembershipStatus = {
   paymentStatus: "PENDING" | "SUCCESS" | "FAILED"
   isActive: boolean
+  paymentFailureCode: string | null
+  paymentFailureMessage: string | null
+}
+
+export type OfferRequirement = {
+  id: string
+  offerId: string
+  dessertId: string | null
+  categoryId: string | null
+  quantity: number
 }
 
 // A single redemption record
 export type Offer = {
   id: string
   name: string
+  description: string | null
+  image: string | null
   dessertId: string | null
   categoryId: string | null
   itemPriceInCents: number | null
@@ -161,13 +194,37 @@ export type Offer = {
   limit: number
   dessert: Dessert | null
   category: DessertCategory | null
+  requirements: OfferRequirement[]
   redemptions: {
     id: string
     membershipId: string
     offerId: string
-    redeemedAt: Date
+    redeemedAt: Date | null
     used: number
+    unlockedAt: Date
+    renewsAt: Date | null
+    status: "REDEEMED" | "AVAILABLE" | "EXPIRED"
   }[]
+}
+
+export type offerForClient = {
+  name: string
+  id: string
+  image: string | null
+  description: string | null
+  dessertId: string | null
+  categoryId: string | null
+  itemPriceInCents: number | null
+  discountAmount: number | null
+  limit: number
+  dessert: {
+    imagePath: string
+  } | null
+  category: {
+    desserts: {
+      imagePath: string
+    }[]
+  } | null
 }
 
 // The offers array type
@@ -179,6 +236,7 @@ export type RestaurantStatus = {
 }
 
 export type LoyaltyRates = {
+  memberRate: number
   rate: number
   modifier: number
 }
@@ -198,6 +256,7 @@ export type Announcement = {
   title: string
   text1: string
   text2?: string
+  updatedAt: string
 }
 
 export type Announcements = Announcement[]
@@ -212,4 +271,57 @@ export type SetUpIntent = {
   setupIntent: string | null
   ephemeralKey: string | undefined
   customer: string | undefined
+  setupIntentId: string
+}
+
+export type PrivacyPolicy = {
+  type: string
+  title: string
+  lastUpdated: string
+  sections: (
+    | {
+        heading: string
+        content: string
+        list?: undefined
+      }
+    | {
+        heading: string
+        list: string[]
+        content?: undefined
+      }
+  )[]
+}
+
+export type TermAndConditions = {
+  type: string
+  title: string
+  lastUpdated: string
+  sections: (
+    | {
+        heading: string
+        content: string
+        list?: undefined
+      }
+    | {
+        heading: string
+        list: string[]
+        content?: undefined
+      }
+  )[]
+}
+
+export type StoreInfo = {
+  name: string
+  isOpen: boolean
+  address: string
+  city: string
+  state: string
+  postal: string
+  phone: string
+  email: string
+  website: string
+}
+
+export type StoreHours = {
+  [key: string]: [string, string] | null
 }

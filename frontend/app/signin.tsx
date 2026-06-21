@@ -41,7 +41,7 @@ export default function signin() {
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
-        bottomOffset: 60,
+        bottomOffset: 90,
         props: {
           text1NumberOfLines: 0,
           text2NumberOfLines: 0, // allow wrapping
@@ -54,7 +54,7 @@ export default function signin() {
         router.replace(
           redirectPath as typeof router.replace extends (path: infer P) => any
             ? P
-            : never
+            : never,
         )
       } else {
         router.replace("/") // fallback
@@ -92,7 +92,7 @@ export default function signin() {
 
           <View className="flex-1 justify-center">
             <Text className="text-center font-bold text-lg text-primary mb-2 px-10">
-              Sign in to start ordering and earn points!
+              Sign in to start ordering and earning points!
             </Text>
             <View className="items-center">
               <View className="w-3/4 max-w-md mb-4">

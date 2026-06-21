@@ -24,7 +24,9 @@ import {
   checkPaymentStatus,
 } from "@/services/stripe-api"
 import { useCartStore } from "@/store/cart"
-import DateTimePicker from "@react-native-community/datetimepicker"
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker"
 import {
   createOrder,
   checkOrderStatus,
@@ -64,7 +66,7 @@ function CheckoutContent() {
     storeHours,
   } = useAuth()
   const { data: restaurantStatus, loading } = useFetch(() =>
-    getRestaurantStatus()
+    getRestaurantStatus(),
   )
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
@@ -84,7 +86,7 @@ function CheckoutContent() {
   const cartOperations = useCartStore((state) => state.cartOperations)
   const cartItems = useCartStore((state) => state.items)
   const getTotalMembershipDiscount = useCartStore(
-    (state) => state.getTotalMembershipDiscount
+    (state) => state.getTotalMembershipDiscount,
   )
   const getTotalItems = useCartStore((state) => state.getTotalItems)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
@@ -96,11 +98,11 @@ function CheckoutContent() {
 
   const [eatIn, setEatIn] = useState(false)
   const [eatInDate, setEatInDate] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
   )
   const [pickupNow, setPickupNow] = useState(true)
   const [pickupDate, setPickupDate] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
   )
 
   // const nextValidTime = useMemo(
@@ -108,7 +110,7 @@ function CheckoutContent() {
   //   [pickupDate]
   // )
   const [nextValidTime, setNextValidTime] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
   )
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [showDoneButton, setShowDoneButton] = useState(false)
@@ -116,7 +118,7 @@ function CheckoutContent() {
   const [showTime, setShowTime] = useState(false)
   const { closeTime } = getOpenCloseTime(
     eatIn ? eatInDate : pickupDate,
-    storeHours
+    storeHours,
   )
 
   // Fetch saved cards when component mounts
@@ -127,7 +129,7 @@ function CheckoutContent() {
         // useCartStore.getState().fetchCart()
         fetchSavedCards()
       }
-    }, [token])
+    }, [token]),
   )
 
   useEffect(() => {
@@ -143,13 +145,16 @@ function CheckoutContent() {
   useEffect(() => {
     const interval = setInterval(() => {
       setNextValidTime(
-        getNextValidPickupTime(new Date(), getTotalItems(), storeHours)
+        getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
       )
+      const estimatedPickupTime = getEstimatedPickUpTime(totalItems)
       if (
-        getEstimatedPickUpTime(totalItems)?.getTime() > pickupDate?.getTime()
+        estimatedPickupTime &&
+        pickupDate &&
+        estimatedPickupTime.getTime() > pickupDate.getTime()
       ) {
         setPickupDate(
-          getNextValidPickupTime(new Date(), totalItems, storeHours)
+          getNextValidPickupTime(new Date(), totalItems, storeHours),
         )
       }
     }, 60 * 1000)
@@ -160,7 +165,7 @@ function CheckoutContent() {
   useEffect(() => {
     const subscription = AppState.addEventListener(
       "change",
-      handleAppStateChange
+      handleAppStateChange,
     )
 
     return () => {
@@ -172,7 +177,8 @@ function CheckoutContent() {
     setLoadingPaymentSheet(true)
     await openPaymentSheetForSetup(
       { initPaymentSheet, presentPaymentSheet },
-      fetchSavedCards
+      fetchSavedCards,
+      usersMembership ? usersMembership.isActive : false,
     )
     setLoadingPaymentSheet(false)
   }
@@ -221,7 +227,7 @@ function CheckoutContent() {
                 text: "Try Again",
                 style: "cancel",
               },
-            ]
+            ],
           )
         }
       } else if (status.pending) {
@@ -231,7 +237,7 @@ function CheckoutContent() {
         // Payment failed
         Alert.alert(
           "Payment Failed",
-          "Your payment could not be processed. Please try again."
+          "Your payment could not be processed. Please try again.",
         )
         setPaymentIntentId(null)
       }
@@ -249,7 +255,7 @@ function CheckoutContent() {
             text: "Dismiss",
             style: "cancel",
           },
-        ]
+        ],
       )
     } finally {
       setIsCheckingStatus(false)
@@ -283,7 +289,7 @@ function CheckoutContent() {
               text: "Try Again",
               style: "cancel",
             },
-          ]
+          ],
         )
         setOrderInProgress(null)
         setPaymentIntentId(null)
@@ -302,7 +308,7 @@ function CheckoutContent() {
             text: "Dismiss",
             style: "cancel",
           },
-        ]
+        ],
       )
     } finally {
       setIsCheckingStatus(false)
@@ -322,7 +328,9 @@ function CheckoutContent() {
         setSelectedCardId(defaultCard.id)
       }
     } catch (error) {
-      console.error("Failed to fetch saved cards:", error)
+      console.error(
+        error instanceof Error ? error.message : "Failed to fetch saved cards",
+      )
       Alert.alert("Error", "Failed to load your saved payment methods.")
     } finally {
       setLoadingCards(false)
@@ -339,10 +347,16 @@ function CheckoutContent() {
     } else if (pickupNow) {
       return "As soon as possible"
     } else {
-      const day = eatIn ? eatInDate.getDate() : pickupDate.getDate()
-      const month = eatIn ? eatInDate.getMonth() + 1 : pickupDate.getMonth() + 1
-      const hours = eatIn ? eatInDate.getHours() : pickupDate.getHours()
-      const minutes = eatIn ? eatInDate.getMinutes() : pickupDate.getMinutes()
+      const day =
+        eatIn && eatInDate ? eatInDate.getDate() : pickupDate.getDate()
+      const month =
+        eatIn && eatInDate
+          ? eatInDate.getMonth() + 1
+          : pickupDate.getMonth() + 1
+      const hours =
+        eatIn && eatInDate ? eatInDate.getHours() : pickupDate.getHours()
+      const minutes =
+        eatIn && eatInDate ? eatInDate.getMinutes() : pickupDate.getMinutes()
       const ampm = hours >= 12 ? "PM" : "AM"
       const formattedHours = hours % 12 || 12
       const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes
@@ -351,10 +365,16 @@ function CheckoutContent() {
     }
   }
 
-  const alertTimeChange = (date: Date) => {
+  const alertTimeChange = (date: Date | null) => {
+    if (date === null) {
+      Alert.alert(
+        "Invalid Time",
+        "Please select a valid pickup time during our business hours.",
+      )
+    }
     const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
 
-    if (!openTime && !closeTime) {
+    if (!openTime || !closeTime) {
       Alert.alert("Sorry, we are closed on that day...")
     } else {
       Alert.alert(
@@ -364,11 +384,11 @@ function CheckoutContent() {
           {
             hour: "2-digit",
             minute: "2-digit",
-          }
+          },
         )} to ${closeTime.toLocaleTimeString("en-NZ", {
           hour: "2-digit",
           minute: "2-digit",
-        })} on a ${dayName}.`
+        })} on a ${dayName}.`,
       )
     }
   }
@@ -387,15 +407,19 @@ function CheckoutContent() {
     setShowDatePicker(false)
   }
 
-  const onAndroidChangeDate = (event, selectedDate?: Date) => {
+  const onAndroidChangeDate = (
+    event: DateTimePickerEvent,
+    selectedDate?: Date,
+  ) => {
     if (event.type === "dismissed") {
       setShowDate(false)
       return
     }
+    if (!selectedDate) return
     const validTime = getNextValidPickupTime(
       selectedDate,
       getTotalItems(),
-      storeHours
+      storeHours,
     )
     if (!validTime) {
       alertTimeChange(null)
@@ -416,15 +440,19 @@ function CheckoutContent() {
     }
   }
 
-  const onAndroidChangeTime = (event, selectedTime?: Date) => {
+  const onAndroidChangeTime = (
+    event: DateTimePickerEvent,
+    selectedTime?: Date,
+  ) => {
     if (event.type === "dismissed") {
       setShowTime(false)
       return
     }
+    if (!selectedTime) return
     const validTime = getNextValidPickupTime(
       selectedTime,
       getTotalItems(),
-      storeHours
+      storeHours,
     )
     if (!validTime) {
       alertTimeChange(null)
@@ -434,7 +462,8 @@ function CheckoutContent() {
         alertTimeChange(selectedTime)
         eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
       } else {
-        const newDate = new Date(pickupDate)
+        const baseDate = eatIn ? eatInDate : pickupDate
+        const newDate = new Date(baseDate ?? new Date())
         newDate.setHours(selectedTime.getHours())
         newDate.setMinutes(selectedTime.getMinutes())
         eatIn ? setEatInDate(newDate) : setPickupDate(newDate)
@@ -466,28 +495,29 @@ function CheckoutContent() {
   }
 
   const calculateMembershipDiscount = () => {
-    return getTotalMembershipDiscount() / 100
+    return getTotalMembershipDiscount(usersMembership) / 100
   }
 
   const handlePlaceOrder = async () => {
     if (!nextValidTime) {
       Alert.alert(
-        "We're closed for the time being, sorry for any inconvenience caused"
+        "We're closed for the time being, sorry for any inconvenience caused",
       )
       return
     }
+
     const totalAmount = Math.round(getTotalCost())
     const totalItems = getTotalItems()
 
-    const pickUpNowTime = getEstimatedPickUpTime(totalItems)
+    const pickUpNowTime = getEstimatedPickUpTime(totalItems) ?? nextValidTime
     const notOpenYet = pickupNow
       ? isOutsideBusinessHours(pickUpNowTime, storeHours)
       : eatIn
-      ? isOutsideBusinessHours(eatInDate, storeHours)
-      : isOutsideBusinessHours(pickupDate, storeHours)
+        ? isOutsideBusinessHours(eatInDate ?? nextValidTime, storeHours)
+        : isOutsideBusinessHours(pickupDate ?? nextValidTime, storeHours)
     if (notOpenYet && pickupNow) {
       Alert.alert(
-        "We're closed or are not open yet. Please pick a suitable pick up time."
+        "We're closed or are not open yet. Please pick a suitable pick up time.",
       )
       return
     }
@@ -510,14 +540,14 @@ function CheckoutContent() {
       const pickUpTime = pickupNow
         ? pickUpNowTime
         : eatIn
-        ? eatInDate
-        : pickupDate
+          ? eatInDate
+          : pickupDate
 
       // Get payment intent client secret from your server
       const { clientSecret, paymentIntentId } = await createPaymentIntent(
         totalAmount,
         "nzd",
-        selectedCardId
+        selectedCardId,
       )
       setPaymentIntentId(paymentIntentId)
 
@@ -545,11 +575,17 @@ function CheckoutContent() {
           ? createOrder(
               paymentMethodId,
               pickupNow,
-              pickUpTime,
+              pickUpTime ?? nextValidTime,
               eatIn,
-              paymentIntent.id
+              paymentIntent.id,
             )
-          : createOrder(null, pickupNow, pickUpTime, eatIn, null)
+          : createOrder(
+              null,
+              pickupNow,
+              pickUpTime ?? nextValidTime,
+              eatIn,
+              null,
+            )
 
       // Delay showing loading UI
       const loadingTimeout = setTimeout(() => {
@@ -589,7 +625,7 @@ function CheckoutContent() {
               text: "View Orders",
               onPress: () => router.replace("/orders"),
             },
-          ]
+          ],
         )
       } else {
         console.error(error)
@@ -599,7 +635,7 @@ function CheckoutContent() {
           position: "bottom",
           visibilityTime: undefined,
           autoHide: false,
-          bottomOffset: 60,
+          bottomOffset: 90,
         })
       }
     } finally {
@@ -608,15 +644,14 @@ function CheckoutContent() {
   }
 
   const handleEatIn = () => {
-    if (
-      restaurantStatus?.unavailableUntil
-        ? new Date(restaurantStatus?.unavailableUntil).getTime() > // if unavailableUntil is null and dine in availablility is false = indefinite unavailablility so don't allow eat in now.
-          nextValidTime.getTime()
-        : true && // if next valid time time to collect > unavailableUntil then it means unavailableUntil time has passed so can collect ASAP
-          !restaurantStatus?.dineInAvailability // if dine in availablility is true, allow eat in now. else don't allow
-    ) {
-      setPickupNow(false)
-    }
+    if (!nextValidTime) return
+
+    const unavailableUntil = restaurantStatus?.unavailableUntil
+    const unavailableUntilDate = unavailableUntil
+      ? new Date(unavailableUntil)
+      : null
+    const unavailableUntilTime = unavailableUntilDate?.getTime() ?? 0
+
     if (
       !restaurantStatus?.dineInAvailability &&
       !restaurantStatus?.unavailableUntil
@@ -626,24 +661,37 @@ function CheckoutContent() {
       return
     } else if (
       !restaurantStatus?.dineInAvailability &&
-      restaurantStatus?.unavailableUntil &&
-      new Date(restaurantStatus?.unavailableUntil).getTime() >
-        nextValidTime?.getTime()
+      unavailableUntilDate &&
+      unavailableUntilTime > nextValidTime.getTime()
     ) {
-      setEatInDate(new Date(restaurantStatus?.unavailableUntil))
+      setEatInDate(unavailableUntilDate)
     } else {
       setEatInDate(nextValidTime)
     }
+    const shouldDisableEatInNow = unavailableUntilDate
+      ? unavailableUntilTime > nextValidTime.getTime()
+      : !restaurantStatus?.dineInAvailability
+
+    if (shouldDisableEatInNow) {
+      setPickupNow(false)
+    }
+
     setEatIn(true)
   }
 
   const getMinTime = () => {
+    const minTime = nextValidTime ?? new Date()
+    const unavailableUntilDate = restaurantStatus?.unavailableUntil
+      ? new Date(restaurantStatus.unavailableUntil)
+      : null
+
     return eatIn &&
       !restaurantStatus?.dineInAvailability &&
-      restaurantStatus?.unavailableUntil &&
-      new Date(restaurantStatus?.unavailableUntil) > nextValidTime
-      ? roundToNearest5(new Date(restaurantStatus?.unavailableUntil))
-      : roundToNearest5(nextValidTime)
+      unavailableUntilDate &&
+      nextValidTime &&
+      unavailableUntilDate > nextValidTime
+      ? roundToNearest5(unavailableUntilDate)
+      : roundToNearest5(minTime)
   }
 
   if (creatingOrderLoading) {
@@ -743,35 +791,53 @@ function CheckoutContent() {
 
                   {/* RIGHT SIDE (prices) */}
                   <View className="flex-col items-end flex-shrink-0">
-                    {item.discountedAmountInCents > 0 &&
-                      !item.offerId &&
-                      !item.loyaltyPointsUsed && (
-                        <Text className="font-medium line-through text-gray-500">
-                          {formatCurrency(
-                            (item.itemPriceInCents * item.quantity) / 100
-                          )}
-                        </Text>
-                      )}
+                    {!item.loyaltyPointsUsed && (
+                      <Text className="font-medium line-through text-gray-500">
+                        {formatCurrency(
+                          (item.itemPriceInCents * item.quantity) / 100,
+                        )}
+                      </Text>
+                    )}
 
                     <Text className="font-medium">
                       {formatCurrency(
                         ((item.itemPriceInCents -
                           item.discountedAmountInCents) *
                           item.quantity) /
-                          100
+                          100,
                       )}
                     </Text>
                   </View>
                 </View>
-                {item.customisations.map((customisation) => (
-                  <Text key={customisation.id}>{`${
-                    customisation.quantity === 0 ? `- ` : `+ `
-                  } ${customisation.name} ${
-                    customisation.quantity > 1
-                      ? `x${customisation.quantity}`
-                      : ``
-                  }`}</Text>
-                ))}
+                {item.customisations.map((customisation) => {
+                  const customisationPriceAfterDiscount =
+                    (customisation.priceInCents -
+                      customisation.discountedAmountInCents) *
+                    customisation.quantity *
+                    item.quantity
+
+                  return (
+                    <View
+                      key={customisation.id}
+                      className="flex flex-row items-center justify-between"
+                    >
+                      <Text className="text-sm">{`${
+                        customisation.quantity === 0 ? `- ` : `+ `
+                      } ${customisation.name} ${
+                        customisation.quantity > 1
+                          ? `x${customisation.quantity}`
+                          : ``
+                      }`}</Text>
+                      {customisation.quantity > 0 && (
+                        <Text className="text-sm text-muted-foreground">
+                          {formatCurrency(
+                            customisationPriceAfterDiscount / 100,
+                          )}
+                        </Text>
+                      )}
+                    </View>
+                  )
+                })}
               </View>
             ))}
 
@@ -779,7 +845,7 @@ function CheckoutContent() {
               {usersMembership?.isActive && totalPrice > 0 && (
                 <View className="flex-row justify-between mb-1">
                   <Text className="text-gray-500">
-                    Membership Discount Included (15%)
+                    Membership Discount Included
                   </Text>
                   <Text className="font-medium">
                     - {formatCurrency(calculateMembershipDiscount())}
@@ -851,10 +917,13 @@ function CheckoutContent() {
                 <Text className="text-lg font-medium">
                   {eatIn ? "Eat In Date" : "Pick Up Date"}
                 </Text>
-                {pickupNow && <Text>{formatShortDate(pickupDate)}</Text>}
+                {pickupNow && pickupDate && (
+                  <Text>{formatShortDate(pickupDate)}</Text>
+                )}
               </View>
               {!(
                 eatIn &&
+                restaurantStatus?.unavailableUntil &&
                 new Date(restaurantStatus?.unavailableUntil).getTime() >
                   nextValidTime.getTime() &&
                 !restaurantStatus?.dineInAvailability
@@ -879,7 +948,11 @@ function CheckoutContent() {
                     <DateTimePickerModal
                       isVisible={showDatePicker}
                       mode="datetime"
-                      date={roundToNearest5(eatIn ? eatInDate : pickupDate)}
+                      date={roundToNearest5(
+                        eatIn
+                          ? (eatInDate ?? nextValidTime)
+                          : (pickupDate ?? nextValidTime),
+                      )}
                       minuteInterval={5}
                       onConfirm={handleConfirm}
                       onCancel={() => setShowDatePicker(false)}
@@ -890,7 +963,7 @@ function CheckoutContent() {
                               (closeTime
                                 ? closeTime.getTime()
                                 : new Date().getTime()) -
-                                30 * 60 * 1000
+                                30 * 60 * 1000,
                             )
                           : (() => {
                               const date = new Date() // Create a new Date object
@@ -903,7 +976,11 @@ function CheckoutContent() {
 
                   {Platform.OS === "android" && showDate && (
                     <DateTimePicker
-                      value={eatIn ? eatInDate : pickupDate}
+                      value={
+                        eatIn
+                          ? (eatInDate ?? nextValidTime)
+                          : (pickupDate ?? nextValidTime)
+                      }
                       mode="date"
                       display="calendar"
                       onChange={onAndroidChangeDate}
@@ -914,7 +991,7 @@ function CheckoutContent() {
                               (closeTime
                                 ? closeTime.getTime()
                                 : new Date().getTime()) -
-                                30 * 60 * 1000
+                                30 * 60 * 1000,
                             )
                           : (() => {
                               const date = new Date() // Create a new Date object
@@ -927,7 +1004,11 @@ function CheckoutContent() {
 
                   {Platform.OS === "android" && showTime && (
                     <DateTimePicker
-                      value={roundToNearest5(eatIn ? eatInDate : pickupDate)}
+                      value={roundToNearest5(
+                        eatIn
+                          ? (eatInDate ?? nextValidTime)
+                          : (pickupDate ?? nextValidTime),
+                      )}
                       mode="time"
                       display="spinner"
                       minuteInterval={5}
@@ -939,9 +1020,9 @@ function CheckoutContent() {
                               (closeTime
                                 ? closeTime.getTime()
                                 : new Date().getTime()) -
-                                30 * 60 * 1000
+                                30 * 60 * 1000,
                             )
-                          : closeTime
+                          : (closeTime ?? undefined)
                       }
                     />
                   )}
@@ -1052,7 +1133,13 @@ function CheckoutContent() {
                     className="bg-primary py-3 rounded-lg items-center"
                     disabled={loadingPaymentSheet}
                   >
-                    <Text className="text-white font-medium">Add New Card</Text>
+                    {loadingPaymentSheet ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text className="text-white font-medium">
+                        Add New Card
+                      </Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               )}
