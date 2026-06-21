@@ -2,15 +2,18 @@
 
 import { Order } from "@/lib/types"
 import { getToken } from "@/services/auth"
+import newOrderServices from "@/services/newOrders-service"
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
 import { io, type Socket } from "socket.io-client"
-import { useOrderContext } from "./order-provider"
+import { useAuth } from "./auth-provider"
 
 type SocketContextType = {
   isConnected: boolean
@@ -20,11 +23,11 @@ type SocketContextType = {
 const SocketContext = createContext<SocketContextType | undefined>(undefined)
 
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const [socket, setSocket] = useState<Socket | null>(null)
+  const { authenticated } = useAuth()
+  const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
-  const { setPendingOrders } = useOrderContext()
 
-  const setupSocket = async () => {
+  const setupSocket = useCallback(async () => {
     try {
       // Get auth token from storage
       const token = await getToken()
@@ -61,40 +64,48 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socketInstance.on("new-order", async (order: Order) => {
         // Add the order to the context
 
-        setPendingOrders((prev) => {
-          const exists = prev.some((o) => o.id === order.id)
-          if (exists) return prev // skip adding duplicate
-
-          return [...prev, order]
+        newOrderServices.enqueue({
+          id: order.id,
+          order: order,
+          createdAt: new Date().toISOString(),
+          status: "pending",
         })
       })
 
-      setSocket(socketInstance)
+      socketRef.current = socketInstance
 
       return socketInstance
     } catch (error) {
       console.error("Error setting up socket:", error)
     }
-  }
+  }, [])
 
   // Set up socket connection on mount
   useEffect(() => {
-    const socketInstance = setupSocket()
+    let socketInstance: Socket | undefined
 
-    // Clean up on unmount
-    return () => {
-      if (socket) {
-        socket.disconnect()
+    const init = async () => {
+      if (!authenticated) {
+        socketRef.current?.disconnect()
+        return
       }
+
+      socketInstance = await setupSocket()
     }
-  }, [])
+
+    init()
+
+    return () => {
+      socketInstance?.disconnect()
+    }
+  }, [authenticated])
 
   // Reconnect function
-  const reconnect = () => {
-    if (socket) {
-      socket.disconnect()
-    }
-    setupSocket()
+  const reconnect = async () => {
+    socketRef.current?.disconnect()
+    socketRef.current = null
+
+    await setupSocket()
   }
 
   return (

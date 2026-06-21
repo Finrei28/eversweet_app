@@ -1,20 +1,31 @@
-import { Order, PrintJob } from "@/lib/types"
+import { Order, PrintJob, QueuedPrintJob } from "@/lib/types"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import thermalPrinter from "./thermal-printer"
 
 const PRINT_QUEUE_KEY = "print_queue"
+
 class PrinterManager {
-  private queue: PrintJob[] = []
+  private queue: QueuedPrintJob[] = []
   private isPrinting = false
 
-  enqueue(printJob: PrintJob) {
+  enqueue(printJob: PrintJob): Promise<boolean> {
     const alreadyQueued = this.queue.some(
-      (queuedOrder) => queuedOrder.id === printJob.id,
+      (queuedOrder) => queuedOrder.printJob.id === printJob.id,
     )
-    if (!alreadyQueued) {
-      this.queue.push(printJob)
+
+    if (alreadyQueued) {
+      return Promise.resolve(false)
     }
-    this.processQueue()
+
+    return new Promise<boolean>((resolve, reject) => {
+      this.queue.push({
+        printJob,
+        resolve,
+        reject,
+      })
+
+      this.processQueue()
+    })
   }
 
   private async processQueue() {
@@ -26,18 +37,19 @@ class PrinterManager {
 
     try {
       while (this.queue.length > 0) {
-        const printJob = this.queue.shift()
+        const queuedJob = this.queue.shift()
 
-        if (!printJob) continue
+        if (!queuedJob) continue
 
         try {
-          await this.printOrderWithRetry(printJob.order)
+          await this.printOrderWithRetry(queuedJob.printJob.order)
 
           // Only remove after successful print
-          await removeJob(printJob.id)
+          await removeJob(queuedJob.printJob.id)
+          queuedJob.resolve(true)
         } catch (error) {
-          console.error(`Failed to print order ${printJob.id}`, error)
-          this.queue.unshift(printJob)
+          console.error(`Failed to print order ${queuedJob.printJob.id}`, error)
+          this.queue.unshift(queuedJob)
           break
 
           // Keep the job in AsyncStorage so it can be retried later
@@ -46,6 +58,12 @@ class PrinterManager {
     } finally {
       this.isPrinting = false
     }
+  }
+
+  async printNow(order: Order) {
+    try {
+      return this.printOrderWithRetry(order)
+    } catch (error) {}
   }
 
   private async printOrder(order: Order) {

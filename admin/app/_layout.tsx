@@ -1,15 +1,17 @@
 "use client"
+import { Order } from "@/lib/types"
 import { AuthProvider, useAuth } from "@/providers/auth-provider"
 import { OrderProvider } from "@/providers/order-provider"
 import { SocketProvider } from "@/providers/socket-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
+import newOrderServices from "@/services/newOrders-service"
 import printerService from "@/services/printer-service"
 import thermalPrinter from "@/services/thermal-printer"
 import { Ionicons } from "@expo/vector-icons"
 import { useFonts } from "expo-font"
 import { Stack, useRouter } from "expo-router"
 import { StatusBar } from "expo-status-bar"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import {
   ActivityIndicator,
   Platform,
@@ -19,9 +21,11 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast from "react-native-toast-message"
 import "./global.css"
+import NewOrderModal from "./new-order-alert/newOrderModal"
 
 function AppLayout() {
   const { authenticated, loading, setAuthenticated } = useAuth()
+  const [currentOrder, setCurrentOrder] = useState<Order | null>(null)
   const router = useRouter()
   const [fontsLoaded] = useFonts({
     "Inter-Light": require("../assets/fonts/Inter-Light.ttf"),
@@ -30,6 +34,12 @@ function AppLayout() {
     "Inter-SemiBold": require("../assets/fonts/Inter-SemiBold.ttf"),
     "Inter-Bold": require("../assets/fonts/Inter-Bold.ttf"),
   })
+
+  useEffect(() => {
+    const unsubscribe = newOrderServices.subscribe(setCurrentOrder)
+
+    return unsubscribe
+  }, [])
 
   useEffect(() => {
     if (!authenticated) {
@@ -73,15 +83,11 @@ function AppLayout() {
       <OrderProvider>
         <SocketProvider>
           <StatusBar style="auto" />
+          {currentOrder && (
+            <NewOrderModal order={currentOrder} visible={true} />
+          )}
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="new-order-alert/[id]"
-              options={{
-                headerShown: false,
-                presentation: "transparentModal",
-              }}
-            />
             <Stack.Screen
               name="order-details/[id]"
               options={{

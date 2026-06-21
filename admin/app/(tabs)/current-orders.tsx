@@ -4,7 +4,6 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { OrderCard } from "@/components/order-card"
 import { OrderQueueIndicator } from "@/components/order-queue-indicator"
 import { StatusFilterChip } from "@/components/status-filter-chip"
-import { OrderStatus } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
 import { useOrderContext } from "@/providers/order-provider"
 import { Ionicons } from "@expo/vector-icons"
@@ -21,8 +20,7 @@ import {
 
 export default function CurrentOrders() {
   const router = useRouter()
-  const { currentOrders, fetchOrders, updateOrderStatus, isLoading } =
-    useOrderContext()
+  const { currentOrders, fetchOrders, isLoading } = useOrderContext()
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const { authenticated, loading } = useAuth()
@@ -42,7 +40,7 @@ export default function CurrentOrders() {
     // Sort by created time (earlist first)
     return orders.sort(
       (a, b) =>
-        new Date(a.pickUpTime).getTime() - new Date(b.pickUpTime).getTime()
+        new Date(a.pickUpTime).getTime() - new Date(b.pickUpTime).getTime(),
     )
   }, [currentOrders, selectedStatus])
 
@@ -54,17 +52,9 @@ export default function CurrentOrders() {
     }
   }
 
-  const handleAcceptOrder = async (orderId: string) => {
-    await updateOrderStatus(orderId, "ACCEPTED")
-  }
-
   // const handleDeclineOrder = async (orderId: string) => {
   //   await updateOrderStatus(orderId, "DECLINED")
   // }
-
-  const handleStatusChange = async (orderId: string, status: OrderStatus) => {
-    await updateOrderStatus(orderId, status)
-  }
 
   if (loading) {
     return (
@@ -113,9 +103,6 @@ export default function CurrentOrders() {
           <OrderCard
             order={item}
             onPress={() => router.push(`/order-details/${item.id}`)}
-            onAccept={() => handleAcceptOrder(item.id)}
-            // onDecline={() => handleDeclineOrder(item.id)}
-            onStatusChange={(status) => handleStatusChange(item.id, status)}
           />
         )}
         contentContainerStyle={{ padding: 16, paddingBottom: 100, flexGrow: 1 }}

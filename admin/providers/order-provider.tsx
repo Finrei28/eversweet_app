@@ -10,11 +10,8 @@ import printerService, { addJob } from "@/services/printer-service"
 import { useRouter } from "expo-router"
 import {
   createContext,
-  Dispatch,
-  SetStateAction,
   useContext,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -23,18 +20,13 @@ import Toast from "react-native-toast-message"
 
 // Create the context
 type OrderContextType = {
-  pendingOrders: Order[]
   currentOrders: Order[]
   completedOrders: Order[]
   isLoading: boolean
-  currentAlertId: string | null
   fetchOrders: () => Promise<void>
   fetchCompletedOrders: (date?: Date) => Promise<void>
   updateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>
   findOrderById: (id: string) => Order | undefined
-  findPendingOrdersById: (id: string) => Order | undefined
-  setPendingOrders: Dispatch<SetStateAction<Order[]>>
-  setAlreadyAlertingIdSafe: (id: string | null) => void
   // processNextOrderAlert: () => void
 }
 
@@ -43,14 +35,9 @@ const OrderContext = createContext<OrderContextType | undefined>(undefined)
 // Provider component
 export function OrderProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
-  const [pendingOrders, setPendingOrders] = useState<Order[]>([])
   const [currentOrders, setCurrentOrders] = useState<Order[]>([])
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
-  const alreadyAlertingIdRef = useRef<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  // Add these new state variables after the existing state declarations
-  const [currentAlertId, setCurrentAlertId] = useState<string | null>(null)
 
   // Fetch current orders
   const fetchOrders = async () => {
@@ -73,34 +60,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchOrders()
   }, [])
-
-  useEffect(() => {
-    if (pendingOrders.length > 0 && currentAlertId === null) {
-      const stillPending = pendingOrders.find(
-        (order) => order.id === currentAlertId,
-      )
-      if (stillPending) {
-        processNextOrderAlert(stillPending.id)
-      } else {
-        processNextOrderAlert(pendingOrders[0].id)
-      }
-    }
-  }, [pendingOrders, currentAlertId])
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      if (currentAlertId && !alreadyAlertingIdRef.current) {
-        // Trigger alert for existing pending order
-        processNextOrderAlert(currentAlertId)
-      }
-    }, 60000) // 60,000 ms = 1 minute
-
-    return () => clearInterval(intervalId)
-  }, [currentAlertId])
-
-  const setAlreadyAlertingIdSafe = (id: string | null) => {
-    alreadyAlertingIdRef.current = id
-  }
 
   // Fetch completed orders
   const fetchCompletedOrders = async (date?: Date) => {
@@ -126,27 +85,9 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   // Find order by ID in any list
   const findOrderById = (id: string): Order | undefined => {
     return (
-      pendingOrders.find((order) => order.id === id) ||
       currentOrders.find((order) => order.id === id) ||
       completedOrders.find((order) => order.id === id)
     )
-  }
-
-  const findPendingOrdersById = (id: string): Order | undefined => {
-    return pendingOrders.find((order) => order.id === id)
-  }
-  const processNextOrderAlert = (orderId: string) => {
-    if (pendingOrders.length > 0) {
-      setCurrentAlertId(orderId)
-
-      // Show the alert for this order
-      router.push({
-        pathname: "/new-order-alert/[id]",
-        params: { id: orderId },
-      })
-    } else {
-      setCurrentAlertId(null)
-    }
   }
 
   // Update order status
@@ -165,32 +106,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       if (newStatus === "ACCEPTED") {
         // store the order for printing
         await addJob(existingOrder)
-        // Find the order
-        const newOrder = pendingOrders.find((order) => order.id === orderId)
-        // Delete from pending
-        setPendingOrders((prev) => prev.filter((order) => order.id !== orderId))
-        setCurrentAlertId(null)
-
-        if (newOrder) {
-          // Update the order status
-          const updatedOrder = { ...newOrder, status: newStatus }
-          setCurrentOrders((prev) => [...prev, updatedOrder])
-        } else if (existingOrder) {
-          const updatedOrder = {
-            ...existingOrder,
-            status: newStatus,
-          }
-          setCurrentOrders((prev) =>
-            prev.map((o) => (o.id === orderId ? updatedOrder : o)),
-          )
-        }
         printerService.enqueue({
           id: existingOrder.id,
           order: existingOrder,
           createdAt: new Date().toISOString(),
           status: "pending",
         })
-
+        await fetchOrders()
         // } else if (newStatus === "DECLINED") {
       } else if (newStatus === "PICKED_UP") {
         // Move from current to completed
@@ -232,18 +154,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   return (
     <OrderContext.Provider
       value={{
-        pendingOrders,
         currentOrders,
         completedOrders,
         isLoading,
-        currentAlertId,
         fetchOrders,
         fetchCompletedOrders,
         updateOrderStatus,
         findOrderById,
-        findPendingOrdersById,
-        setPendingOrders,
-        setAlreadyAlertingIdSafe,
       }}
     >
       {children}

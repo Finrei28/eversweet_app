@@ -4,27 +4,22 @@ import { formatCurrency, formatDate, getCollectionTime } from "@/lib/formatters"
 import { Ionicons } from "@expo/vector-icons"
 
 import { Order, OrderStatus } from "@/lib/types"
+import { useOrderContext } from "@/providers/order-provider"
 import { useRouter } from "expo-router"
-import { Text, TouchableOpacity, View } from "react-native"
+import { useState } from "react"
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native"
 import { StatusBadge } from "./status-badge"
 
 type OrderCardProps = {
   order: Order
   onPress: () => void
-  onAccept?: () => void
-  onDecline?: () => void
-  onStatusChange?: (status: OrderStatus) => void
 }
 
-export function OrderCard({
-  order,
-  onPress,
-  onAccept,
-  onDecline,
-  onStatusChange,
-}: OrderCardProps) {
+export function OrderCard({ order, onPress }: OrderCardProps) {
+  const [updatingStatus, setUpdatingStatus] = useState(false)
+  const { updateOrderStatus } = useOrderContext()
   const hasCustomizations = order.desserts.some(
-    (item) => item.customisations && item.customisations.length > 0
+    (item) => item.customisations && item.customisations.length > 0,
   )
   const router = useRouter()
 
@@ -42,32 +37,46 @@ export function OrderCard({
     nextStatus === "MAKING"
       ? "bg-indigo-100"
       : nextStatus === "READY"
-      ? "bg-purple-100"
-      : nextStatus === "PICKED_UP"
-      ? "bg-green-100"
-      : "bg-indigo-100"
+        ? "bg-purple-100"
+        : nextStatus === "PICKED_UP"
+          ? "bg-green-100"
+          : "bg-indigo-100"
   const textColour =
     nextStatus === "MAKING"
       ? "text-indigo-600"
       : nextStatus === "READY"
-      ? "text-purple-600"
-      : nextStatus === "PICKED_UP"
-      ? "text-green-600"
-      : "text-indigo-600"
+        ? "text-purple-600"
+        : nextStatus === "PICKED_UP"
+          ? "text-green-600"
+          : "text-indigo-600"
 
   const hexColour =
     nextStatus === "MAKING"
       ? "#4F46E5" // text-indigo-600
       : nextStatus === "READY"
-      ? "#7C3AED" // text-purple-600
-      : nextStatus === "PICKED_UP"
-      ? "#16A34A" // text-green-600
-      : "#4F46E5" // default: text-indigo-600
+        ? "#7C3AED" // text-purple-600
+        : nextStatus === "PICKED_UP"
+          ? "#16A34A" // text-green-600
+          : "#4F46E5" // default: text-indigo-600
 
   const totalItems = order.desserts.reduce(
     (total, item) => total + item.quantity,
-    0
+    0,
   )
+
+  const handleStatusChange = async (status: OrderStatus) => {
+    try {
+      setUpdatingStatus(true)
+      await updateOrderStatus(order.id, status)
+    } catch (error) {
+      console.error(
+        "Error: ",
+        (error as Error).message ?? "Problem updating order status",
+      )
+    } finally {
+      setUpdatingStatus(false)
+    }
+  }
 
   return (
     <View className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -97,7 +106,7 @@ export function OrderCard({
           </View>
           <Text className="font-bold text-lg">
             {formatCurrency(
-              (order.priceInCents - order.discountedAmountInCents) / 100
+              (order.priceInCents - order.discountedAmountInCents) / 100,
             )}
           </Text>
         </View>
@@ -126,7 +135,8 @@ export function OrderCard({
 
             <TouchableOpacity
               className="flex-1 py-3 bg-green-300 items-center justify-center"
-              onPress={onAccept}
+              onPress={() => handleStatusChange("ACCEPTED")}
+              disabled={updatingStatus}
             >
               <Text className="text-green-600 font-medium">Accept</Text>
             </TouchableOpacity>
@@ -143,28 +153,35 @@ export function OrderCard({
               </Text>
             </TouchableOpacity>
 
-            {nextStatus && onStatusChange && (
+            {nextStatus && (
               <TouchableOpacity
                 className={`flex-1 py-3 flex-row items-center justify-center  ${bgColour}`}
-                onPress={() => onStatusChange(nextStatus)}
+                onPress={() => handleStatusChange(nextStatus)}
+                disabled={updatingStatus}
               >
-                <Ionicons
-                  name={
-                    nextStatus === "MAKING"
-                      ? "restaurant-outline"
-                      : nextStatus === "READY"
-                      ? "checkmark-circle-outline"
-                      : nextStatus === "PICKED_UP"
-                      ? "archive-outline"
-                      : "arrow-forward"
-                  }
-                  size={18}
-                  color={hexColour}
-                />
-                <Text className={`${textColour} font-medium ml-1`}>
-                  Mark as{" "}
-                  {nextStatus.charAt(0) + nextStatus.slice(1).toLowerCase()}
-                </Text>
+                {updatingStatus ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name={
+                        nextStatus === "MAKING"
+                          ? "restaurant-outline"
+                          : nextStatus === "READY"
+                            ? "checkmark-circle-outline"
+                            : nextStatus === "PICKED_UP"
+                              ? "archive-outline"
+                              : "arrow-forward"
+                      }
+                      size={18}
+                      color={hexColour}
+                    />
+                    <Text className={`${textColour} font-medium ml-1`}>
+                      Mark as{" "}
+                      {nextStatus.charAt(0) + nextStatus.slice(1).toLowerCase()}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             )}
           </>

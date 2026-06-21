@@ -6,7 +6,7 @@ import { StatusUpdateModal } from "@/components/status-update-modal"
 import { formatCurrency, formatDate } from "@/lib/formatters"
 import { OrderStatus } from "@/lib/types"
 import { useOrderContext } from "@/providers/order-provider"
-import usePrintReceipt from "@/services/printer-service"
+import printerService from "@/services/printer-service"
 import { Ionicons } from "@expo/vector-icons"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
@@ -32,7 +32,6 @@ export default function OrderDetails() {
   const router = useRouter()
   const { findOrderById, updateOrderStatus } = useOrderContext()
   const [statusModalVisible, setStatusModalVisible] = useState(false)
-  const { isPrinting, handlePrintReceipt } = usePrintReceipt()
 
   const order = findOrderById(id)
 
@@ -61,15 +60,22 @@ export default function OrderDetails() {
       if (!order) {
         return
       }
-      await handlePrintReceipt(order)
-      Toast.show({
-        type: "success",
-        text1: `Order has been printed`,
-        position: "bottom",
-        visibilityTime: 3000,
-        autoHide: true,
-        bottomOffset: 60,
+      const success = await printerService.enqueue({
+        id: order.id,
+        order: order,
+        createdAt: new Date().toISOString(),
+        status: "pending",
       })
+      if (success === true) {
+        Toast.show({
+          type: "success",
+          text1: `Order has been printed`,
+          position: "bottom",
+          visibilityTime: 3000,
+          autoHide: true,
+          bottomOffset: 60,
+        })
+      }
     } catch (error) {
       Toast.show({
         type: "error",
@@ -173,61 +179,76 @@ export default function OrderDetails() {
           <View className="bg-white mt-4 p-4">
             <View className="justify-between flex-row items-center">
               <Text className="text-lg font-semibold mb-4">Order Items</Text>
-              <TouchableOpacity onPress={printReceipt} disabled={isPrinting}>
+              <TouchableOpacity onPress={printReceipt}>
                 <Ionicons name="print-outline" size={30} color="#3B82F6" />
               </TouchableOpacity>
             </View>
 
-            {order.desserts.map((item, index) => (
-              <View
-                key={index}
-                className={`flex-row py-3 ${
-                  index < order.desserts.length - 1
-                    ? "border-b border-gray-100"
-                    : ""
-                }`}
-              >
-                <Image
-                  source={{
-                    uri:
-                      item.dessert.imagePath ||
-                      "https://via.placeholder.com/60",
-                  }}
-                  className="w-16 h-16 rounded-lg bg-gray-200"
-                />
+            {order.desserts.map((item, index) => {
+              const customisationPrice = item.customisations.reduce(
+                (acc, c) =>
+                  acc +
+                  (c.quantity > 0
+                    ? (c.customisation.priceInCents -
+                        c.discountedAmountInCents) *
+                      c.quantity
+                    : 0),
+                0,
+              )
+              const pricePerItem =
+                (item.priceInCents -
+                  item.discountedAmountInCents +
+                  customisationPrice) /
+                100
 
-                <View className="flex-1 ml-3">
-                  <View className="flex-row justify-between">
-                    <Text className="font-medium text-base">
-                      {item.dessert.name}
-                    </Text>
-                    <Text className="font-medium">
-                      {formatCurrency(
-                        (item.priceInCents - item.discountedAmountInCents) /
-                          100,
-                      )}
-                    </Text>
-                  </View>
+              return (
+                <View
+                  key={index}
+                  className={`flex-row py-3 ${
+                    index < order.desserts.length - 1
+                      ? "border-b border-gray-100"
+                      : ""
+                  }`}
+                >
+                  <Image
+                    source={{
+                      uri:
+                        item.dessert.imagePath ||
+                        "https://via.placeholder.com/60",
+                    }}
+                    className="w-16 h-16 rounded-lg bg-gray-200"
+                  />
 
-                  <Text className="text-gray-500">Qty: {item.quantity}</Text>
-
-                  {item.customisations && item.customisations.length > 0 && (
-                    <View className="mt-1 bg-gray-50 p-2 rounded-md">
-                      {item.customisations.map((custom) => (
-                        <View
-                          key={custom.id}
-                          className="flex-row justify-between items-center mb-1"
-                        >
-                          <Text className="text-gray-600 text-sm">
-                            • {custom.customisation.name}: {custom.quantity}x
-                          </Text>
-                        </View>
-                      ))}
+                  <View className="flex-1 ml-3">
+                    <View className="flex-row justify-between">
+                      <Text className="font-medium text-base">
+                        {item.dessert.name}
+                      </Text>
+                      <Text className="font-medium">
+                        {formatCurrency(pricePerItem)}
+                      </Text>
                     </View>
-                  )}
+
+                    <Text className="text-gray-500">Qty: {item.quantity}</Text>
+
+                    {item.customisations && item.customisations.length > 0 && (
+                      <View className="mt-1 bg-gray-50 p-2 rounded-md">
+                        {item.customisations.map((custom) => (
+                          <View
+                            key={custom.id}
+                            className="flex-row justify-between items-center mb-1"
+                          >
+                            <Text className="text-gray-600 text-sm">
+                              • {custom.customisation.name}: {custom.quantity}x
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))}
+              )
+            })}
 
             {/* Order Totals */}
             <View className="mt-4 pt-3 border-t border-gray-200">

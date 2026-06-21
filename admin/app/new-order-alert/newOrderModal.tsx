@@ -1,11 +1,13 @@
 "use client"
 
 import { formatCurrency, getCollectionTime } from "@/lib/formatters"
+import { Order } from "@/lib/types"
 import { useOrderContext } from "@/providers/order-provider"
+import newOrderServices from "@/services/newOrders-service"
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useAudioPlayer } from "expo-audio"
-import { useLocalSearchParams, useRouter } from "expo-router"
+import { router } from "expo-router"
 import { StatusBar } from "expo-status-bar"
 import { useEffect, useRef } from "react"
 import {
@@ -16,25 +18,23 @@ import {
   View,
 } from "react-native"
 
-export default function NewOrderAlert() {
-  const { id } = useLocalSearchParams<{ id: string }>()
-  const router = useRouter()
-  const {
-    findPendingOrdersById,
-    updateOrderStatus,
-    pendingOrders,
-    setAlreadyAlertingIdSafe,
-  } = useOrderContext()
+export default function NewOrderModal({
+  order,
+  visible,
+}: {
+  order: Order
+  visible: boolean
+}) {
+  const { updateOrderStatus } = useOrderContext()
   const fadeAnim = useRef(new Animated.Value(0)).current
   const windowHeight = Dimensions.get("window").height
-  const order = findPendingOrdersById(id)
   const hasAccepted = useRef(false)
   const player = useAudioPlayer(
-    require("../../assets/sounds/chinese-justin.mp3")
+    require("../../assets/sounds/chinese-justin.mp3"),
   )
   const totalItems = order?.desserts?.reduce(
     (total, item) => total + item.quantity,
-    0
+    0,
   )
 
   // Play notification sound and animation when component mounts
@@ -54,8 +54,6 @@ export default function NewOrderAlert() {
         }
       }
       checkSoundAndPlay()
-
-      setAlreadyAlertingIdSafe(id)
 
       // Set up the listener for the looping logic
       // player.addListener("playbackStatusUpdate", async (status) => {
@@ -82,43 +80,31 @@ export default function NewOrderAlert() {
       if (autoAccept === "true" && order) {
         setTimeout(() => {
           handleAccept()
-        }, 3000) // Auto-accept after 3 seconds
+        }, 2000) // Auto-accept after 2 seconds
       }
     }
 
     checkAutoAccept()
   }, [player])
 
-  if (!order) {
-    // Close the modal if order not found
-    setTimeout(() => {
-      if (router.canGoBack?.()) {
-        router.replace("/current-orders")
-      }
-    }, 200)
-
-    return null
+  if (!visible) {
+    return
   }
 
   const handleAccept = async () => {
-    if (hasAccepted.current) return // Prevent double execution
+    if (hasAccepted.current) return
+
     hasAccepted.current = true
-    // Fade out animation before closing
+
     await updateOrderStatus(order.id, "ACCEPTED")
-    setAlreadyAlertingIdSafe(null)
+
     Animated.timing(fadeAnim, {
       toValue: 0,
       duration: 200,
       useNativeDriver: true,
     }).start(() => {
-      if (pendingOrders?.length === 0) {
-        setTimeout(() => {
-          router.push(`/order-details/${order.id}`)
-        }, 100)
-      }
+      newOrderServices.resolveCurrentAlert()
     })
-
-    return
   }
 
   // const handleDecline = async () => {
@@ -179,7 +165,7 @@ export default function NewOrderAlert() {
             </Text>
             <Text className="font-bold text-lg">
               {formatCurrency(
-                (order.priceInCents - order.discountedAmountInCents) / 100
+                (order.priceInCents - order.discountedAmountInCents) / 100,
               )}
             </Text>
           </View>
@@ -189,8 +175,21 @@ export default function NewOrderAlert() {
           {/* Order items preview */}
           <View className="bg-gray-50 rounded-lg p-3 mb-4">
             {order.desserts.slice(0, 3).map((item) => {
+              const customisationPrice = item.customisations.reduce(
+                (acc, c) =>
+                  acc +
+                  (c.quantity > 0
+                    ? (c.customisation.priceInCents -
+                        c.discountedAmountInCents) *
+                      c.quantity
+                    : 0),
+                0,
+              )
               const pricePerItem =
-                (item.priceInCents - item.discountedAmountInCents) / 100
+                (item.priceInCents -
+                  item.discountedAmountInCents +
+                  customisationPrice) /
+                100
               return (
                 <View key={item.id} className="flex-row justify-between mb-1">
                   <View className="flex-col">
@@ -232,7 +231,7 @@ export default function NewOrderAlert() {
 
           {/* Has customizations notice */}
           {order.desserts.some(
-            (item) => item.customisations && item.customisations.length > 0
+            (item) => item.customisations && item.customisations.length > 0,
           ) && (
             <View className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4 flex-row items-center">
               <Ionicons name="alert-circle" size={20} color="#F59E0B" />
