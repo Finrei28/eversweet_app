@@ -849,25 +849,8 @@ export const stripeWebhook = async (req: Request, res: Response) => {
   // 🔹 Handle different event types
   switch (event.type) {
     case "payment_intent.succeeded": {
-      const paymentIntent = event.data.object
+      // const paymentIntent = event.data.object
 
-      // read metadata
-      const webOrder = paymentIntent.metadata.webOrder
-      if (!webOrder) {
-        break
-      }
-      const orderData = JSON.parse(paymentIntent.metadata.orderData)
-      if (webOrder !== "true" || !orderData) {
-        break
-      }
-
-      // Create order in DB only once
-      const orderId = await createOrderForWebsite(orderData, paymentIntent.id)
-
-      // Optionally store orderId in the paymentIntent metadata
-      await stripe.paymentIntents.update(paymentIntent.id, {
-        metadata: { ...paymentIntent.metadata, orderId },
-      })
       break
     }
     case "invoice.payment_succeeded": {
