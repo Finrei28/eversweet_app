@@ -75,7 +75,24 @@ async function getOrCreateCustomerId(userId: string) {
     }
 
     if (user.stripeCustomerId) {
-      return { customerId: user.stripeCustomerId }
+      try {
+        const customer = await stripe.customers.retrieve(user.stripeCustomerId)
+        return { customerId: customer.id }
+      } catch (error) {
+        if (
+          error instanceof Stripe.errors.StripeInvalidRequestError &&
+          error.message.includes("No such customer")
+        ) {
+          const customer = await stripe.customers.create({
+            metadata: {
+              userId: userId,
+              email: user.email,
+              name: `${user.firstName} ${user.lastName}`,
+            },
+          })
+          return { customerId: customer.id }
+        }
+      }
     }
 
     // If no customer ID exists, create a new customer in Stripe
