@@ -709,6 +709,7 @@ export const getCartItems = async (req: Request, res: Response) => {
           },
         },
       },
+      orderBy: { createdAt: "asc" },
     })
 
     const cartItems = rawCartItems.map((item) => ({
