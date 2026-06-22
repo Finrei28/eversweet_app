@@ -102,6 +102,36 @@ export async function savePushToken(pushToken: string) {
   }
 }
 
+export async function getPushToken(): Promise<string> {
+  try {
+    const authToken = await getToken()
+    if (!authToken) {
+      throw new Error(
+        "Please sign in to receive notifications about your orders",
+      )
+    }
+
+    const response = await fetch(`${url}/api/notification/getPushToken`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to get push token")
+    }
+
+    const data = await response.json()
+
+    return data.pushToken
+  } catch (error) {
+    console.error("Error saving push token:", error)
+    throw new Error("Failed to get push token")
+  }
+}
+
 /**
  * Set up notification listeners
  */

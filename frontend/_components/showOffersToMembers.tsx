@@ -111,9 +111,13 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
                 <Text className="text-gray-800 font-medium">
                   {formatCurrency(offer.itemPriceInCents / 100)}
                 </Text>
-              ) : (
+              ) : offer.discountAmount ? (
                 <Text className="text-primary font-medium">
-                  {offer.discountAmount! * 100}% off
+                  {offer.discountAmount * 100}% off
+                </Text>
+              ) : (
+                <Text className="text-gray-800 font-medium">
+                  {formatCurrency(offer.dessert?.priceInCents ?? 0 / 100)}
                 </Text>
               )}
             </View>

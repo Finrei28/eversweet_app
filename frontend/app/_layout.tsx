@@ -13,6 +13,7 @@ import {
   savePushToken,
   handleNotification,
   hasMembershipPopupExpired,
+  getPushToken,
 } from "@/services/notifications"
 import { AuthProvider } from "@/store/authProvider"
 import { useCartStore } from "@/store/cart"
@@ -104,12 +105,11 @@ export default function RootLayout() {
     if (isAuthenticated) {
       // Register for push notifications
       const registerPushNotifications = async () => {
-        const storedToken = await AsyncStorage.getItem("pushToken")
+        const storedToken = await getPushToken()
         await registerForPushNotificationsAsync().then((token) => {
           if (token && token !== storedToken) {
             // Save the token to the server
             savePushToken(token)
-            AsyncStorage.setItem("pushToken", token)
           }
         })
       }
