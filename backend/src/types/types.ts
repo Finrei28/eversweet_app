@@ -214,8 +214,6 @@ export type RawCartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
-  isPromotionItem: boolean
-  promotionType: string | null
   discountedAmountInCents: number
 }
 

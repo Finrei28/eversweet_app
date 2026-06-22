@@ -209,10 +209,17 @@ export const unlockOfferForMembership = async (
 export const redeemOfferForMembership = async (
   membershipId: string,
   offerId: string,
+  tx: Omit<
+    PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
+    "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+  >,
 ) => {
-  const offer = await db.offer.findUnique({ where: { id: offerId } })
+  const offer = await tx.offer.findUnique({
+    where: { id: offerId },
+    include: { requirements: true },
+  })
   if (!offer) throw new Error("Offer does not exist")
-  const existing = await db.offerRedemption.findUnique({
+  const existing = await tx.offerRedemption.findUnique({
     where: {
       offerId_membershipId: { offerId, membershipId },
     },
@@ -223,7 +230,11 @@ export const redeemOfferForMembership = async (
       throw new Error("Offer usage limit reached")
     }
 
-    return await db.offerRedemption.update({
+    if (offer.requirements.length > 0 && existing.status !== "AVAILABLE") {
+      throw new Error("Requirements to unlock offer not met")
+    }
+
+    return await tx.offerRedemption.update({
       where: { id: existing.id },
       data: {
         used: { increment: 1 },
@@ -234,7 +245,7 @@ export const redeemOfferForMembership = async (
   }
 
   // Create new redemption
-  return await db.offerRedemption.create({
+  return await tx.offerRedemption.create({
     data: {
       offerId,
       membershipId,
@@ -269,7 +280,14 @@ export const addItemToCart = async (req: Request, res: Response) => {
     const [dessert, membership] = await Promise.all([
       db.dessert.findUnique({
         where: { id: cartItem.dessertId },
-        include: { promo: true, category: true },
+        include: {
+          promo: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
+        },
       }),
       db.membership.findUnique({
         where: { userId },
@@ -282,6 +300,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       return
     }
 
+    // check offer
     if (cartItem.offerId) {
       if (
         !membership ||
@@ -293,35 +312,6 @@ export const addItemToCart = async (req: Request, res: Response) => {
         })
         return
       }
-      await redeemOfferForMembership(membership.id, cartItem.offerId)
-    }
-
-    // If user used loyalty points, deduct from their account
-    if (cartItem.loyaltyPointsUsed) {
-      const existing = await db.loyalty.findUnique({
-        where: { userId },
-        select: { points: true },
-      })
-
-      if (!existing) throw new Error("User loyalty record not found")
-      if (existing.points < cartItem.loyaltyPointsUsed) {
-        res.status(400).json({ message: "Insufficient loyalty points" })
-        return
-      }
-      await db.loyalty.update({
-        where: { userId },
-        data: {
-          points: {
-            decrement: cartItem.loyaltyPointsUsed,
-          },
-          records: {
-            create: {
-              change: -cartItem.loyaltyPointsUsed,
-              reason: "REWARDS",
-            },
-          },
-        },
-      })
     }
 
     const wantsNoGlutinous = cartItem.customisations.some(
@@ -345,7 +335,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
     let finalDiscountedAmount = 0
 
     if (cartItem.offerId) {
-      const offer = await db.offer.findFirst({
+      const offer = await db.offer.findUnique({
         where: { id: cartItem.offerId },
         include: { dessert: true },
       })
@@ -379,16 +369,13 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     // calculate customisaton price
 
-    const existingCart = await db.cart.findUnique({
-      where: { userId },
-      select: {
-        id: true,
-      },
-    })
+    const maxMembershipDiscount = Math.min(
+      membership?.plan.maxDiscount ?? 0,
+      (membership?.totalMonths ?? 1) *
+        (membership?.plan.membershipDiscount ?? 0),
+    )
 
-    let rawCartItems: RawCartItem[]
-
-    const cartItemData: any = {
+    const cartItemData: Prisma.CartItemCreateWithoutCartInput = {
       dessert: {
         connect: {
           id: cartItem.dessertId, // Ensure dessert exists before connecting
@@ -400,12 +387,6 @@ export const addItemToCart = async (req: Request, res: Response) => {
       discountedAmountInCents: Math.round(finalDiscountedAmount),
       customisations: {
         create: cartItem.customisations.map((cartItemCustomisation) => {
-          const maxMembershipDiscount = Math.min(
-            membership?.plan.maxDiscount ?? 0,
-            (membership?.totalMonths ?? 1) *
-              (membership?.plan.membershipDiscount ?? 0),
-          )
-
           return {
             customisation: {
               connect: {
@@ -428,115 +409,177 @@ export const addItemToCart = async (req: Request, res: Response) => {
       cartItemData.offer = { connect: { id: cartItem.offerId } }
     }
 
-    if (!existingCart) {
-      // create a new cart if no cart
+    // create new cart item
+    // let promotionEligible = false
+    // await db.$transaction(async (tx) => {
+    //   if (cart) {
+    //     promotionEligible = await CheckMochiPromotion(
+    //       cart.id,
+    //       cartItem.dessertId,
+    //       dessert.priceInCents,
+    //       cartItem.itemPriceInCents,
+    //       cartItem.customisations,
+    //       tx,
+    //     )
+    //   }
+    // })
 
-      const cart = await db.cart.create({
-        data: {
-          user: { connect: { id: userId } },
-          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
-          totalLoyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? 0,
-          totalPriceInCents: Math.round(
-            itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
-          ),
-          cartItems: {
-            create: cartItemData,
-          },
-        },
-        select: {
-          id: true,
-          cartItems: {
-            include: {
-              dessert: {
-                select: {
-                  id: true,
-                  name: true,
-                  chineseName: true,
-                  description: true,
-                  priceInCents: true,
-                  priceInLoyaltyPoints: true,
-                  imagePath: true,
-                  ingredients: { include: { ingredient: true } },
-                  promo: true,
-                },
-              },
-              customisations: { include: { customisation: true } },
-            },
-          },
-        },
-      })
-
-      rawCartItems = cart.cartItems
-    } else {
-      // create new cart item
-      // let promotionEligible = false
-      // await db.$transaction(async (tx) => {
-      //   if (cart) {
-      //     promotionEligible = await CheckMochiPromotion(
-      //       cart.id,
-      //       cartItem.dessertId,
-      //       dessert.priceInCents,
-      //       cartItem.itemPriceInCents,
-      //       cartItem.customisations,
-      //       tx,
-      //     )
-      //   }
-      // })
-
-      const cart = await db.cart.update({
+    const rawCartItem = await db.$transaction(async (tx) => {
+      const existingCart = await tx.cart.findUnique({
         where: { userId },
-        data: {
-          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-          totalLoyaltyPointsUsed: {
-            increment: cartItem.loyaltyPointsUsed ?? 0,
-          },
-          totalPriceInCents: { increment: cartItem.itemPriceInCents },
-          cartItems: {
-            create: cartItemData,
-          },
-        },
         select: {
           id: true,
-          cartItems: {
-            include: {
-              dessert: {
-                select: {
-                  id: true,
-                  name: true,
-                  chineseName: true,
-                  description: true,
-                  priceInCents: true,
-                  priceInLoyaltyPoints: true,
-                  imagePath: true,
-                  ingredients: { include: { ingredient: true } },
-                  promo: true,
-                },
-              },
-              customisations: { include: { customisation: true } },
-            },
-          },
         },
       })
+      // redeem offer
+      if (cartItem.offerId && membership) {
+        await redeemOfferForMembership(membership.id, cartItem.offerId, tx)
+      }
 
-      rawCartItems = cart.cartItems
-    }
+      // If user used loyalty points, deduct from their account
+      if (cartItem.loyaltyPointsUsed) {
+        const existing = await tx.loyalty.findUnique({
+          where: { userId },
+          select: { points: true },
+        })
 
-    const cartItems = rawCartItems.map((item) => ({
-      ...item,
+        if (!existing) throw new Error("User loyalty record not found")
+        if (existing.points < cartItem.loyaltyPointsUsed) {
+          throw new Error("INSUFFICIENT_LOYALTY_POINTS")
+        }
+        await tx.loyalty.update({
+          where: { userId },
+          data: {
+            points: {
+              decrement: cartItem.loyaltyPointsUsed,
+            },
+            records: {
+              create: {
+                change: -cartItem.loyaltyPointsUsed,
+                reason: "REWARDS",
+              },
+            },
+          },
+        })
+      }
+
+      if (!existingCart) {
+        // create a new cart if no cart
+
+        const cart = await tx.cart.create({
+          data: {
+            user: { connect: { id: userId } },
+            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
+            totalLoyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? 0,
+            totalPriceInCents: Math.round(
+              itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
+            ),
+            cartItems: {
+              create: cartItemData,
+            },
+          },
+          select: {
+            id: true,
+            cartItems: {
+              include: {
+                dessert: {
+                  select: {
+                    id: true,
+                    name: true,
+                    chineseName: true,
+                    description: true,
+                    priceInCents: true,
+                    priceInLoyaltyPoints: true,
+                    imagePath: true,
+                    ingredients: { include: { ingredient: true } },
+                    promo: true,
+                  },
+                },
+                customisations: { include: { customisation: true } },
+              },
+            },
+          },
+        })
+        return cart.cartItems[0]
+      } else {
+        // if existing cart then update cart an create cart item
+
+        // update cart info
+
+        const cart = await tx.cart.update({
+          where: { userId },
+          data: {
+            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+            totalLoyaltyPointsUsed: {
+              increment: cartItem.loyaltyPointsUsed ?? 0,
+            },
+            totalPriceInCents: {
+              increment: Math.round(
+                itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
+              ),
+            },
+          },
+          select: {
+            id: true,
+          },
+        })
+
+        // create cart item
+
+        return await tx.cartItem.create({
+          data: {
+            cart: {
+              connect: {
+                id: cart.id,
+              },
+            },
+            ...cartItemData,
+          },
+          include: {
+            dessert: {
+              select: {
+                id: true,
+                name: true,
+                chineseName: true,
+                description: true,
+                priceInCents: true,
+                priceInLoyaltyPoints: true,
+                imagePath: true,
+                ingredients: { include: { ingredient: true } },
+                promo: true,
+              },
+            },
+            customisations: { include: { customisation: true } },
+          },
+        })
+      }
+    })
+
+    const formattedCartItem = {
+      ...rawCartItem,
       dessert: {
-        ...item.dessert,
-        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+        ...rawCartItem.dessert,
+        ingredients: rawCartItem.dessert.ingredients.map((i) => i.ingredient),
       },
-      customisations: item.customisations.map((c) => ({
+      customisations: rawCartItem.customisations.map((c) => ({
         ...c.customisation,
         discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
-    }))
+    }
 
-    res.status(201).json({ success: true, cartItems })
+    res.status(201).json({ success: true, cartItem: formattedCartItem })
     return
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "INSUFFICIENT_LOYALTY_POINTS"
+    ) {
+      res.status(400).json({
+        message: "Insufficient loyalty points",
+      })
+      return
+    }
     console.error(error)
     res.status(500).json({ success: false, message: "Internal server error" })
     return
@@ -712,40 +755,45 @@ export const clearCart = async (req: Request, res: Response) => {
       return sum + (item.loyaltyPointsUsed ?? 0)
     }, 0)
 
-    if (totalPointsToRefund > 0) {
-      await db.loyalty.update({
-        where: { userId },
-        data: {
-          points: { increment: totalPointsToRefund },
-          records: {
-            create: { change: totalPointsToRefund, reason: "REFUND" },
-          },
-        },
-      })
-    }
-
-    const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
-
-    for (const item of cartItemsWithOffer) {
-      if (item.offerId) {
-        const membership = await db.membership.findUnique({ where: { userId } })
-        if (!membership) {
-          break
-        }
-        await db.offerRedemption.updateMany({
-          where: {
-            offerId: item.offerId,
-            membershipId: membership.id,
-            used: { gt: 0 },
-          },
+    await db.$transaction(async (tx) => {
+      if (totalPointsToRefund > 0) {
+        await tx.loyalty.update({
+          where: { userId },
           data: {
-            used: { decrement: 1 },
+            points: { increment: totalPointsToRefund },
+            records: {
+              create: { change: totalPointsToRefund, reason: "REFUND" },
+            },
           },
         })
       }
-    }
 
-    await db.cart.delete({ where: { userId } })
+      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
+
+      for (const item of cartItemsWithOffer) {
+        if (item.offerId) {
+          const membership = await tx.membership.findUnique({
+            where: { userId },
+          })
+          if (!membership) {
+            break
+          }
+          await tx.offerRedemption.updateMany({
+            where: {
+              offerId: item.offerId,
+              membershipId: membership.id,
+              used: { gt: 0 },
+            },
+            data: {
+              used: { decrement: 1 },
+            },
+          })
+        }
+      }
+
+      await tx.cart.delete({ where: { userId } })
+    })
+
     res.status(200).json({ success: true, message: "Cart cleared" })
     return
   } catch (error) {
@@ -768,146 +816,103 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       return
     }
 
-    const cartItem = await db.cartItem.findUnique({
-      where: { id },
-      select: {
-        loyaltyPointsUsed: true,
-        itemPriceInCents: true,
-        offerId: true,
-        dessertId: true,
-        isPromotionItem: true,
-        dessert: { select: { priceInCents: true } },
-        customisations: {
-          select: {
-            customisation: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                priceInCents: true,
-              },
-            },
-            quantity: true,
-            discountedAmountInCents: true,
-          },
+    const [cartItem, membership] = await Promise.all([
+      db.cartItem.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          loyaltyPointsUsed: true,
+          itemPriceInCents: true,
+          offerId: true,
         },
-      },
-    })
+      }),
 
-    const cartItemCustomisation = cartItem?.customisations.map((c) => ({
-      ...c.customisation,
-      discountedAmountInCents: c.discountedAmountInCents,
-      quantity: c.quantity,
-    }))
+      db.membership.findUnique({ where: { userId } }),
+    ])
 
     if (!cartItem) {
       res.status(404).json({ message: "cart item not found" })
       return
     }
-    const membership = await db.membership.findUnique({ where: { userId } })
 
     if (cartItem?.offerId) {
       if (!membership) {
         res.status(403).json({ message: "No membership record found" })
         return
       }
-      await db.offerRedemption.updateMany({
-        where: {
-          offerId: cartItem.offerId,
-          membershipId: membership.id,
-          used: { gt: 0 },
-        },
-        data: {
-          used: { decrement: 1 },
-        },
-      })
-    }
-    const updatedCart = await db.cart.update({
-      where: { userId },
-      data: {
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-        totalLoyaltyPointsUsed: {
-          decrement: cartItem?.loyaltyPointsUsed ?? 0,
-        },
-        totalPriceInCents: { decrement: cartItem?.itemPriceInCents ?? 0 },
-        cartItems: {
-          delete: { id },
-        },
-      },
-    })
-
-    if (!cartItem.isPromotionItem) {
-      await db.$transaction(async (tx) => {
-        await CheckMochiPromotion(
-          updatedCart.id,
-          cartItem.dessertId,
-          cartItem.dessert.priceInCents,
-          cartItem.itemPriceInCents,
-          cartItemCustomisation ?? [],
-          tx,
-        )
-      })
     }
 
-    const newCartItems = await db.cartItem.findMany({
-      where: { cartId: updatedCart.id },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-            promo: true,
+    await db.$transaction(async (tx) => {
+      if (cartItem.offerId && membership) {
+        await tx.offerRedemption.updateMany({
+          where: {
+            offerId: cartItem.offerId,
+            membershipId: membership.id,
+            used: { gt: 0 },
           },
-        },
-        customisations: { include: { customisation: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    })
-    // restore loyalty points if any were used
-    if (cartItem && cartItem.loyaltyPointsUsed) {
-      await db.loyalty.update({
+          data: {
+            used: { decrement: 1 },
+          },
+        })
+      }
+
+      const updatedCart = await tx.cart.update({
         where: { userId },
         data: {
-          points: {
-            increment: cartItem.loyaltyPointsUsed,
+          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+          totalLoyaltyPointsUsed: {
+            decrement: cartItem.loyaltyPointsUsed ?? 0,
           },
-          records: {
-            create: { change: cartItem.loyaltyPointsUsed, reason: "REFUND" },
+          totalPriceInCents: {
+            decrement: cartItem.itemPriceInCents,
+          },
+          cartItems: {
+            delete: {
+              id: cartItem.id,
+            },
+          },
+        },
+        select: {
+          id: true,
+          cartItems: {
+            select: {
+              id: true,
+            },
           },
         },
       })
-    }
-    // delete cart if empty
 
-    if (newCartItems && newCartItems.length === 0) {
-      const checkCart = await db.cart.findFirst({
-        where: { id: updatedCart.id },
-      })
-      if (!checkCart) {
-        res.status(200).json({ success: true, cartItems: [] })
-        return
+      // restore loyalty points if any were used
+
+      if (cartItem.loyaltyPointsUsed) {
+        await tx.loyalty.update({
+          where: { userId },
+          data: {
+            points: {
+              increment: cartItem.loyaltyPointsUsed,
+            },
+            records: {
+              create: {
+                change: cartItem.loyaltyPointsUsed,
+                reason: "REFUND",
+              },
+            },
+          },
+        })
       }
-      await db.cart.delete({ where: { id: updatedCart.id } })
-    }
-    const cartItems = newCartItems.map((item) => ({
-      ...item,
-      dessert: {
-        ...item.dessert,
-        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
-      },
-      customisations: item.customisations.map((c) => ({
-        ...c.customisation,
-        discountedAmountInCents: c.discountedAmountInCents,
-        quantity: c.quantity,
-      })),
-    }))
-    res.status(200).json({ success: true, cartItems })
+
+      // delete cart if empty
+
+      if (updatedCart.cartItems.length === 0) {
+        await tx.cart.delete({
+          where: { id: updatedCart.id },
+        })
+      }
+
+      return cartItem.id
+    })
+
+    res.status(200).json({ success: true, id: cartItem.id })
     return
   } catch (error) {
     console.error(error)
@@ -938,25 +943,34 @@ export const updateCartItem = async (req: Request, res: Response) => {
 
     const cartItem = parsedBody.data
 
-    const dessert = await db.dessert.findUnique({
-      where: { id: cartItem.dessertId },
-      include: { promo: true },
-    })
+    const [dessert, existingCartItem, membership] = await Promise.all([
+      db.dessert.findUnique({
+        where: { id: cartItem.dessertId },
+        include: { promo: true, category: true },
+      }),
+      db.cartItem.findUnique({
+        where: { id: cartItem.id },
+        select: {
+          itemPriceInCents: true,
+          loyaltyPointsUsed: true,
+          quantity: true,
+          customisations: {
+            include: {
+              customisation: true,
+            },
+          },
+        },
+      }),
+      db.membership.findUnique({
+        where: { userId },
+        include: { plan: true },
+      }),
+    ])
 
     if (!dessert) {
       res.status(404).json({ message: "Dessert not found" })
       return
     }
-
-    const existingCartItem = await db.cartItem.findUnique({
-      where: { id: cartItem.id },
-      select: {
-        itemPriceInCents: true,
-        loyaltyPointsUsed: true,
-        quantity: true,
-        customisations: { include: { customisation: true } },
-      },
-    })
 
     if (!existingCartItem) {
       res.status(404).json({ message: "Cart item not found" })
@@ -981,10 +995,6 @@ export const updateCartItem = async (req: Request, res: Response) => {
     let isMochiBowl = false
 
     if (wantsNoGlutinous && wantsNoMochi) {
-      const dessert = await db.dessert.findUnique({
-        where: { id: cartItem.dessertId },
-        select: { category: true },
-      })
       if (dessert?.category.name === "Mochi Series") {
         isMochiBowl = true
       }
@@ -1003,11 +1013,6 @@ export const updateCartItem = async (req: Request, res: Response) => {
       !wantsNoGlutinous &&
       !wantsNoMochi // If existing cart has mochi and balls removed but new cart doesn't then user is trying to add it back
 
-    const membership = await db.membership.findUnique({
-      where: { userId },
-      include: { plan: true },
-    })
-
     const itemPriceInCentsBeforeDiscount = addBackMochi
       ? cartItem.itemPriceInCents + 200 // If user is trying to add mochi back, charge them $2
       : removeMochi
@@ -1017,7 +1022,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
     let finalDiscountedAmount = 0
 
     if (cartItem.offerId) {
-      const offer = await db.offer.findFirst({
+      const offer = await db.offer.findUnique({
         where: { id: cartItem.offerId },
         include: { dessert: true },
       })
@@ -1083,7 +1088,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
       (cartItem.loyaltyPointsUsed ?? 0) -
       (existingCartItem?.loyaltyPointsUsed ?? 0)
 
-    const updatedCart = await db.cart.update({
+    await db.cart.update({
       where: { userId },
       data: {
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
@@ -1122,40 +1127,51 @@ export const updateCartItem = async (req: Request, res: Response) => {
           },
         },
       },
+      select: { id: true },
+    })
+
+    const updatedItem = await db.cartItem.findUnique({
+      where: {
+        id: cartItem.id,
+      },
+
       include: {
-        cartItems: {
-          include: {
-            dessert: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                description: true,
-                priceInCents: true,
-                priceInLoyaltyPoints: true,
-                imagePath: true,
-                ingredients: { include: { ingredient: true } },
-                promo: true,
-              },
-            },
-            customisations: { include: { customisation: true } },
+        dessert: {
+          select: {
+            id: true,
+            name: true,
+            chineseName: true,
+            description: true,
+            priceInCents: true,
+            priceInLoyaltyPoints: true,
+            imagePath: true,
+            ingredients: { include: { ingredient: true } },
+            promo: true,
           },
         },
+        customisations: { include: { customisation: true } },
       },
     })
-    const cartItems = updatedCart.cartItems.map((item) => ({
-      ...item,
+
+    if (!updatedItem) {
+      res
+        .status(404)
+        .json({ success: false, message: "Could not find updated cart item" })
+      return
+    }
+    const UpdatedCartItem = {
+      ...updatedItem,
       dessert: {
-        ...item.dessert,
-        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+        ...updatedItem.dessert,
+        ingredients: updatedItem.dessert.ingredients.map((i) => i.ingredient),
       },
-      customisations: item.customisations.map((c) => ({
+      customisations: updatedItem.customisations.map((c) => ({
         ...c.customisation,
         discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
-    }))
-    res.status(200).json({ success: true, cartItems })
+    }
+    res.status(200).json({ success: true, cartItem: UpdatedCartItem })
     return
   } catch (error) {
     console.error(error)
@@ -1179,18 +1195,13 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
     const cartItem = await db.cartItem.findUnique({
       where: { id },
       select: {
+        id: true,
         cartId: true,
         itemPriceInCents: true,
         loyaltyPointsUsed: true,
         quantity: true,
-        dessertId: true,
+
         offerId: true,
-        dessert: {
-          select: {
-            category: { select: { name: true } },
-            priceInCents: true,
-          },
-        },
         customisations: {
           select: {
             customisation: {
@@ -1208,11 +1219,6 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       },
     })
 
-    const cartItemCustomisation = cartItem?.customisations.map((c) => ({
-      ...c.customisation,
-      quantity: c.quantity,
-      discountedAmountInCents: c.discountedAmountInCents,
-    }))
     if (!cartItem) {
       res.status(404).json({ message: "Cart item not found" })
       return
@@ -1240,7 +1246,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       (cartItem.itemPriceInCents + customisationPrice) * cartItem.quantity
     const priceDifference = newtotalCartItemPrice - oldTtotalItemPrice
 
-    await db.$transaction(async (tx) => {
+    const updatedCartItem = await db.$transaction(async (tx) => {
       await tx.cart.update({
         where: { userId },
         data: {
@@ -1258,55 +1264,60 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
             },
           },
         },
+        select: { id: true },
       })
 
-      if (cartItem.dessert.category.name === "Mochi Series") {
-        await CheckMochiPromotion(
-          cartItem.cartId,
-          cartItem.dessertId,
-          cartItem.dessert.priceInCents,
-          cartItem.itemPriceInCents,
-          cartItemCustomisation ?? [],
-          tx,
-        )
-      }
-    })
-
-    const newCartItems = await db.cartItem.findMany({
-      where: { cartId: cartItem.cartId },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-            promo: true,
-          },
+      return await tx.cartItem.update({
+        where: { id: cartItem.id },
+        data: {
+          quantity,
         },
-        customisations: { include: { customisation: true } },
-      },
-      orderBy: { createdAt: "asc" },
+        include: {
+          dessert: {
+            select: {
+              id: true,
+              name: true,
+              chineseName: true,
+              description: true,
+              priceInCents: true,
+              priceInLoyaltyPoints: true,
+              imagePath: true,
+              ingredients: { include: { ingredient: true } },
+              promo: true,
+            },
+          },
+          customisations: { include: { customisation: true } },
+        },
+      })
+
+      // if (cartItem.dessert.category.name === "Mochi Series") {
+      //   await CheckMochiPromotion(
+      //     cartItem.cartId,
+      //     cartItem.dessertId,
+      //     cartItem.dessert.priceInCents,
+      //     cartItem.itemPriceInCents,
+      //     cartItemCustomisation ?? [],
+      //     tx,
+      //   )
+      // }
     })
 
-    const cartItems = newCartItems.map((item) => ({
-      ...item,
+    const formattedCartItem = {
+      ...updatedCartItem,
       dessert: {
-        ...item.dessert,
-        ingredients: item.dessert.ingredients.map((i) => i.ingredient),
+        ...updatedCartItem.dessert,
+        ingredients: updatedCartItem.dessert.ingredients.map(
+          (i) => i.ingredient,
+        ),
       },
-      customisations: item.customisations.map((c) => ({
+      customisations: updatedCartItem.customisations.map((c) => ({
         ...c.customisation,
         discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
-    }))
+    }
 
-    res.status(200).json({ success: true, cartItems })
+    res.status(200).json({ success: true, cartItem: formattedCartItem })
     return
   } catch (error) {
     console.error(error)
