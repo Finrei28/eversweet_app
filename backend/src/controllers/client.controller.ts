@@ -3,11 +3,13 @@ import { db } from "../lib/db"
 import { Resend } from "resend"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
-import { storeHours } from "../lib/storeHours"
+import { storeHours, storeInfo } from "../lib/storeInfo"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { promotions } from "../lib/promotions"
 import { announcements } from "../lib/announcements"
 import { homepageCards } from "../lib/homePageContent"
+import { privacyPolicy } from "../legal/privacy-policy"
+import { termAndConditions } from "../legal/term-and-conditions"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -217,6 +219,11 @@ export const getStoreHours = (req: Request, res: Response) => {
   return
 }
 
+export const getStoreInfo = (req: Request, res: Response) => {
+  res.status(200).json(storeInfo)
+  return
+}
+
 export const restaurantStatus = async (req: Request, res: Response) => {
   const restaurant = await db.restaurantStatus.findFirst()
   const restaurantStatus = {
@@ -262,4 +269,14 @@ export const showOfferForClient = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to fetch offers" })
     return
   }
+}
+
+export const getPrivacyPolicy = (req: Request, res: Response) => {
+  res.status(200).json(privacyPolicy)
+  return
+}
+
+export const getTermAndConditions = (req: Request, res: Response) => {
+  res.status(200).json(termAndConditions)
+  return
 }

@@ -1,8 +1,7 @@
 export const membershipBenefits = [
-  "free weekly Mochi Series Bowl ($9.99)",
-  "15% discount on all listed items",
+  "Free weekly Mochi Series Bowl ($9.99)",
+  "Stackable membership discount from 5% to 25%, up by 5% each month",
   "Earn 2x loyalty points",
   "Exclusive membership offers",
   "Cancel anytime",
-  "More benefits to come in the future",
 ]

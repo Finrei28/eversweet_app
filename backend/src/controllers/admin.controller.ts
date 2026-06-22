@@ -99,11 +99,13 @@ export const getPendingOrders = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 quantity: true,
+                discountedAmountInCents: true,
                 customisation: {
                   select: {
                     id: true,
                     name: true,
                     chineseName: true,
+                    priceInCents: true,
                   },
                 },
               },
@@ -173,11 +175,13 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 quantity: true,
+                discountedAmountInCents: true,
                 customisation: {
                   select: {
                     id: true,
                     name: true,
                     chineseName: true,
+                    priceInCents: true,
                   },
                 },
               },
@@ -266,11 +270,13 @@ export const getPastOrders = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 quantity: true,
+                discountedAmountInCents: true,
                 customisation: {
                   select: {
                     id: true,
                     name: true,
                     chineseName: true,
+                    priceInCents: true,
                   },
                 },
               },
@@ -583,11 +589,13 @@ export const getFutureOrders = async () => {
               select: {
                 id: true,
                 quantity: true,
+                discountedAmountInCents: true,
                 customisation: {
                   select: {
                     id: true,
                     name: true,
                     chineseName: true,
+                    priceInCents: true,
                   },
                 },
               },
@@ -651,7 +659,7 @@ export const updateDailySpecial = async () => {
       })
     }
     const nzDate = new Date(
-      new Date().toLocaleString("en-US", {
+      new Date().toLocaleString("en-NZ", {
         timeZone: "Pacific/Auckland",
       }),
     )

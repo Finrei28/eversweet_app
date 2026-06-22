@@ -139,11 +139,13 @@ export const createOrderForWebsite = async (
             select: {
               id: true,
               quantity: true,
+              discountedAmountInCents: true,
               customisation: {
                 select: {
                   id: true,
                   name: true,
                   chineseName: true,
+                  priceInCents: true,
                 },
               },
             },
@@ -162,7 +164,7 @@ export const createOrderForWebsite = async (
   if (
     newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
       1000 * 60 * 15 &&
-    !newOrder.notified
+    newOrder.notified === false
   ) {
     emitNewOrder(newOrder)
   }
@@ -476,7 +478,12 @@ export const getUserOrders = async (req: Request, res: Response) => {
                 customisations: {
                   include: {
                     customisation: {
-                      select: { id: true, name: true, chineseName: true },
+                      select: {
+                        id: true,
+                        name: true,
+                        chineseName: true,
+                        priceInCents: true,
+                      },
                     },
                   },
                 },
@@ -577,8 +584,34 @@ export const createOrder = async (req: Request, res: Response) => {
       })
     }
 
-    const discountedAmountInCents = cart.cartItems.reduce(
-      (total, item) => total + item.discountedAmountInCents * item.quantity,
+    const discountedAmountInCents = cart.cartItems.reduce((total, item) => {
+      const customisationDiscountedAmount = item.customisations.reduce(
+        (acc, c) =>
+          acc + (c.quantity > 0 ? c.discountedAmountInCents * c.quantity : 0),
+        0,
+      )
+      return (
+        total +
+        (item.discountedAmountInCents + customisationDiscountedAmount) *
+          item.quantity
+      )
+    }, 0)
+
+    const totalPriceInCentsBeforeDiscount = cart.cartItems.reduce(
+      (acc, item) => {
+        // find the total price by adding all the cart item price + customisation
+        const totalCustomisationPriceInCents = item.customisations.reduce(
+          (acc, c) =>
+            acc +
+            (c.quantity > 0 ? c.customisation.priceInCents * c.quantity : 0),
+          0,
+        )
+        return (
+          acc +
+          (item.itemPriceInCents + totalCustomisationPriceInCents) *
+            item.quantity
+        )
+      },
       0,
     )
 
@@ -595,7 +628,7 @@ export const createOrder = async (req: Request, res: Response) => {
           },
         },
         source: "APP",
-        priceInCents: cart.totalPriceInCents,
+        priceInCents: totalPriceInCentsBeforeDiscount,
         discountedAmountInCents: discountedAmountInCents,
         GST: cart.totalPriceInCents * 0.15, // GST in cents
         pickUpTime: parsedBody.pickUpTime,
@@ -603,6 +636,7 @@ export const createOrder = async (req: Request, res: Response) => {
         status: "PENDING",
         paymentIntentId: parsedBody.paymentIntentId,
         paymentMethodId: parsedBody.paymentMethodId,
+        notified: true,
         desserts: {
           create: cart.cartItems.map((dessertItem) => ({
             dessert: {
@@ -622,6 +656,8 @@ export const createOrder = async (req: Request, res: Response) => {
                     id: customisationsItem.customisation.id, // Ensure customisation exists before connecting
                   },
                 },
+                discountedAmountInCents:
+                  customisationsItem.discountedAmountInCents,
                 quantity: customisationsItem.quantity,
               })),
             },
@@ -664,11 +700,13 @@ export const createOrder = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 quantity: true,
+                discountedAmountInCents: true,
                 customisation: {
                   select: {
                     id: true,
                     name: true,
                     chineseName: true,
+                    priceInCents: true,
                   },
                 },
               },
@@ -687,11 +725,23 @@ export const createOrder = async (req: Request, res: Response) => {
         (acc, item) =>
           acc +
           Math.floor(
-            ((item.itemPriceInCents - item.discountedAmountInCents) / 100) * // points is calculated per dollar
-              (loyaltyRates.rate ?? 10) * // if !rates.rate ? fallback to 10 points per dollar
+            ((item.itemPriceInCents -
+              item.discountedAmountInCents +
+              item.customisations.reduce(
+                (acc, c) =>
+                  acc +
+                  (c.quantity > 0
+                    ? (c.customisation.priceInCents -
+                        c.discountedAmountInCents) *
+                      c.quantity
+                    : 0),
+                0,
+              )) /
+              100) * // points is calculated per dollar
+              (loyaltyRates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
               item.quantity *
               (membership?.isActive
-                ? (loyaltyRates.modifier ?? 1) * 2 // if !rates.modifier ? fallback to 1
+                ? (loyaltyRates.modifier ?? 1) * loyaltyRates.memberRate // if !rates.modifier ? fallback to 1
                 : (loyaltyRates.modifier ?? 1)),
           ),
         0,
@@ -775,7 +825,7 @@ export const createOrder = async (req: Request, res: Response) => {
       (newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
         1000 * 60 * 15 ||
         parsedBody.pickupNow) &&
-      !newOrder.notified
+      newOrder.notified === false
     ) {
       emitNewOrder(newOrder)
     }

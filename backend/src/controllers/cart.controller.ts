@@ -3,7 +3,12 @@ import { db } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
 import { Prisma, PrismaClient } from "@prisma/client"
 import { DefaultArgs } from "@prisma/client/runtime/binary"
-import { CartItemCustomisation } from "../types/types"
+import {
+  CartItemCustomisation,
+  Dessert,
+  Membership,
+  CartItem,
+} from "../types/types"
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -13,6 +18,33 @@ import { CartItemCustomisation } from "../types/types"
 //   date.setHours(0, 0, 0, 0) // optional: normalize to start of day
 //   return date
 // }
+
+function calculateBestDiscount(
+  cartItem: CartItem,
+  membership: Membership,
+  itemPriceInCentsBeforeDiscount: number,
+  dessert: Dessert,
+) {
+  let finalDiscountedAmount = 0
+
+  const maxMembershipDiscount = Math.min(
+    membership?.plan.maxDiscount ?? 0,
+    (membership?.totalMonths ?? 1) * (membership?.plan.membershipDiscount ?? 0),
+  )
+  if (!cartItem.loyaltyPointsUsed) {
+    const membershipDiscount = membership?.isActive // membership discount applies to dessert and customisatons
+      ? itemPriceInCentsBeforeDiscount * (maxMembershipDiscount / 100)
+      : 0
+    const promoDiscount =
+      dessert?.promo?.type === "PERCENTAGE"
+        ? itemPriceInCentsBeforeDiscount * (dessert.promo.value / 100) // promo discounts only apply to dessert price, not customisations
+        : dessert?.promo?.type === "FIXED_AMOUNT"
+          ? dessert?.promo.value
+          : 0
+    finalDiscountedAmount = Math.max(membershipDiscount, promoDiscount)
+  }
+  return finalDiscountedAmount
+}
 
 const CheckMochiPromotion = async (
   cartId: string,
@@ -234,6 +266,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     const dessert = await db.dessert.findUnique({
       where: { id: cartItem.dessertId },
+      include: { promo: true, category: true },
     })
 
     if (!dessert) {
@@ -241,9 +274,16 @@ export const addItemToCart = async (req: Request, res: Response) => {
       return
     }
 
-    const membership = await db.membership.findUnique({ where: { userId } })
+    const membership = await db.membership.findUnique({
+      where: { userId },
+      include: { plan: true },
+    })
     if (cartItem.offerId) {
-      if (!membership?.isActive) {
+      if (
+        !membership ||
+        !membership.isActive ||
+        membership.paymentStatus !== "SUCCESS"
+      ) {
         res.status(403).json({
           message: "Join our membership to redeem this awesome offer!",
         })
@@ -287,27 +327,53 @@ export const addItemToCart = async (req: Request, res: Response) => {
       (c) => c.name === "Mochi" && c.quantity === 0,
     )
 
-    let isMochiBowl = false
-
-    if (wantsNoGlutinous && wantsNoMochi) {
-      const dessert = await db.dessert.findUnique({
-        where: { id: cartItem.dessertId },
-        select: { category: true },
-      })
-      if (dessert?.category.name === "Mochi Series") {
-        isMochiBowl = true
-      }
-    }
+    let isMochiBowl = dessert?.category.name === "Mochi Series"
 
     const noMochi = isMochiBowl && wantsNoGlutinous && wantsNoMochi
 
-    const finalItemPriceInCents =
-      cartItem.itemPriceInCents - (noMochi ? 200 : 0)
+    const itemPriceInCentsBeforeDiscount = Math.max(
+      0,
+      cartItem.itemPriceInCents - (noMochi ? 200 : 0),
+    )
 
-    const discountedAmount =
-      membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
-        ? Math.round(finalItemPriceInCents * 0.15)
-        : 0
+    // discount logic
+
+    let finalDiscountedAmount = 0
+
+    if (cartItem.offerId) {
+      const offer = await db.offer.findFirst({
+        where: { id: cartItem.offerId },
+        include: { dessert: true },
+      })
+      if (!offer) {
+        res.status(404).json({ message: "Offer may be expired or finished" })
+        return
+      }
+      const offerPrice =
+        offer?.itemPriceInCents !== null
+          ? offer?.itemPriceInCents
+          : offer.dessert
+            ? offer.dessert.priceInCents *
+              (1 - (Number(offer.discountAmount) ?? 0))
+            : dessert
+              ? dessert.priceInCents * (1 - (Number(offer.discountAmount) ?? 0))
+              : 0
+
+      finalDiscountedAmount = Math.max(
+        0,
+        Math.round(itemPriceInCentsBeforeDiscount - offerPrice),
+      ) // this calculates the discount from member offers
+    } else {
+      finalDiscountedAmount = calculateBestDiscount(
+        // this calculates the discounts on normal and promo items
+        cartItem,
+        membership,
+        itemPriceInCentsBeforeDiscount,
+        dessert,
+      )
+    }
+
+    // calculate customisaton price
 
     let cart = await db.cart.findUnique({
       where: { userId },
@@ -318,12 +384,17 @@ export const addItemToCart = async (req: Request, res: Response) => {
             dessert: {
               include: { ingredients: { select: { ingredient: true } } },
             },
-            customisations: { select: { customisation: true, quantity: true } },
+            customisations: {
+              select: {
+                customisation: true,
+                quantity: true,
+                discountedAmountInCents: true,
+              },
+            },
           },
         },
       },
     })
-
     const cartItemData: any = {
       dessert: {
         connect: {
@@ -331,18 +402,32 @@ export const addItemToCart = async (req: Request, res: Response) => {
         },
       },
       quantity: cartItem.quantity,
-      itemPriceInCents: cartItem.itemPriceInCents - (noMochi ? 200 : 0), // get price from order item
+      itemPriceInCents: itemPriceInCentsBeforeDiscount, // get price from order item
       loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
-      discountedAmountInCents: discountedAmount,
+      discountedAmountInCents: Math.round(finalDiscountedAmount),
       customisations: {
-        create: cartItem.customisations.map((cartItemCustomisation) => ({
-          customisation: {
-            connect: {
-              id: cartItemCustomisation.id, // Ensure customisation exists before connecting
+        create: cartItem.customisations.map((cartItemCustomisation) => {
+          const maxMembershipDiscount = Math.min(
+            membership?.plan.maxDiscount ?? 0,
+            (membership?.totalMonths ?? 1) *
+              (membership?.plan.membershipDiscount ?? 0),
+          )
+
+          return {
+            customisation: {
+              connect: {
+                id: cartItemCustomisation.id, // Ensure customisation exists before connecting
+              },
             },
-          },
-          quantity: cartItemCustomisation.quantity,
-        })),
+            discountedAmountInCents:
+              membership?.isActive && cartItemCustomisation.quantity > 0
+                ? cartItemCustomisation.priceInCents *
+                  (maxMembershipDiscount / 100)
+                : 0,
+
+            quantity: cartItemCustomisation.quantity,
+          }
+        }),
       },
     }
 
@@ -358,7 +443,9 @@ export const addItemToCart = async (req: Request, res: Response) => {
           user: { connect: { id: userId } },
           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
           totalLoyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? 0,
-          totalPriceInCents: cartItem.itemPriceInCents,
+          totalPriceInCents: Math.round(
+            itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
+          ),
           cartItems: {
             create: cartItemData,
           },
@@ -371,7 +458,11 @@ export const addItemToCart = async (req: Request, res: Response) => {
                 include: { ingredients: { select: { ingredient: true } } },
               },
               customisations: {
-                select: { customisation: true, quantity: true },
+                select: {
+                  customisation: true,
+                  quantity: true,
+                  discountedAmountInCents: true,
+                },
               },
             },
           },
@@ -379,47 +470,50 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
     } else {
       // create new cart item
-      let promotionEligible = false
-      await db.$transaction(async (tx) => {
-        if (cart) {
-          promotionEligible = await CheckMochiPromotion(
-            cart.id,
-            cartItem.dessertId,
-            dessert.priceInCents,
-            cartItem.itemPriceInCents,
-            cartItem.customisations,
-            tx,
-          )
-        }
-      })
-      if (!promotionEligible) {
-        cart = await db.cart.update({
-          where: { userId },
-          data: {
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-            totalLoyaltyPointsUsed: {
-              increment: cartItem.loyaltyPointsUsed ?? 0,
-            },
-            totalPriceInCents: { increment: cartItem.itemPriceInCents },
-            cartItems: {
-              create: cartItemData,
-            },
+      // let promotionEligible = false
+      // await db.$transaction(async (tx) => {
+      //   if (cart) {
+      //     promotionEligible = await CheckMochiPromotion(
+      //       cart.id,
+      //       cartItem.dessertId,
+      //       dessert.priceInCents,
+      //       cartItem.itemPriceInCents,
+      //       cartItem.customisations,
+      //       tx,
+      //     )
+      //   }
+      // })
+
+      cart = await db.cart.update({
+        where: { userId },
+        data: {
+          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+          totalLoyaltyPointsUsed: {
+            increment: cartItem.loyaltyPointsUsed ?? 0,
           },
-          select: {
-            id: true,
-            cartItems: {
-              include: {
-                dessert: {
-                  include: { ingredients: { select: { ingredient: true } } },
-                },
-                customisations: {
-                  select: { customisation: true, quantity: true },
+          totalPriceInCents: { increment: cartItem.itemPriceInCents },
+          cartItems: {
+            create: cartItemData,
+          },
+        },
+        select: {
+          id: true,
+          cartItems: {
+            include: {
+              dessert: {
+                include: { ingredients: { select: { ingredient: true } } },
+              },
+              customisations: {
+                select: {
+                  customisation: true,
+                  quantity: true,
+                  discountedAmountInCents: true,
                 },
               },
             },
           },
-        })
-      }
+        },
+      })
     }
 
     const newCartItems = await db.cartItem.findMany({
@@ -435,6 +529,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
             priceInLoyaltyPoints: true,
             imagePath: true,
             ingredients: { include: { ingredient: true } },
+            promo: true,
           },
         },
         customisations: { include: { customisation: true } },
@@ -450,6 +545,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       },
       customisations: item.customisations.map((c) => ({
         ...c.customisation,
+        discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
     }))
@@ -575,9 +671,16 @@ export const getCartItems = async (req: Request, res: Response) => {
             priceInLoyaltyPoints: true,
             imagePath: true,
             ingredients: { select: { ingredient: true } },
+            promo: true,
           },
         },
-        customisations: { select: { customisation: true, quantity: true } },
+        customisations: {
+          select: {
+            customisation: true,
+            quantity: true,
+            discountedAmountInCents: true,
+          },
+        },
       },
     })
 
@@ -589,6 +692,7 @@ export const getCartItems = async (req: Request, res: Response) => {
       },
       customisations: item.customisations.map((c) => ({
         ...c.customisation,
+        discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
     }))
@@ -692,9 +796,15 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         customisations: {
           select: {
             customisation: {
-              select: { id: true, name: true, chineseName: true },
+              select: {
+                id: true,
+                name: true,
+                chineseName: true,
+                priceInCents: true,
+              },
             },
             quantity: true,
+            discountedAmountInCents: true,
           },
         },
       },
@@ -702,6 +812,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
 
     const cartItemCustomisation = cartItem?.customisations.map((c) => ({
       ...c.customisation,
+      discountedAmountInCents: c.discountedAmountInCents,
       quantity: c.quantity,
     }))
 
@@ -767,6 +878,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
             priceInLoyaltyPoints: true,
             imagePath: true,
             ingredients: { include: { ingredient: true } },
+            promo: true,
           },
         },
         customisations: { include: { customisation: true } },
@@ -790,6 +902,13 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
     // delete cart if empty
 
     if (newCartItems && newCartItems.length === 0) {
+      const checkCart = await db.cart.findFirst({
+        where: { id: updatedCart.id },
+      })
+      if (!checkCart) {
+        res.status(200).json({ success: true, cartItems: [] })
+        return
+      }
       await db.cart.delete({ where: { id: updatedCart.id } })
     }
     const cartItems = newCartItems.map((item) => ({
@@ -800,6 +919,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       },
       customisations: item.customisations.map((c) => ({
         ...c.customisation,
+        discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
     }))
@@ -807,7 +927,10 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error(error)
-    res.status(500).json({ success: false, message: "Internal server error" })
+    res.status(500).json({
+      success: false,
+      message: "Error removing item from cart",
+    })
     return
   }
 }
@@ -830,6 +953,16 @@ export const updateCartItem = async (req: Request, res: Response) => {
     }
 
     const cartItem = parsedBody.data
+
+    const dessert = await db.dessert.findUnique({
+      where: { id: cartItem.dessertId },
+      include: { promo: true },
+    })
+
+    if (!dessert) {
+      res.status(404).json({ message: "Dessert not found" })
+      return
+    }
 
     const existingCartItem = await db.cartItem.findUnique({
       where: { id: cartItem.id },
@@ -880,27 +1013,88 @@ export const updateCartItem = async (req: Request, res: Response) => {
       !existingCartHasNoBalls &&
       !existingCartHasNoMochi
     const addBackMochi =
+      isMochiBowl &&
       existingCartHasNoBalls &&
       existingCartHasNoMochi &&
       !wantsNoGlutinous &&
-      !wantsNoMochi // If there was no mochi but now is then user is trying to add it back
+      !wantsNoMochi // If existing cart has mochi and balls removed but new cart doesn't then user is trying to add it back
 
-    const membership = await db.membership.findUnique({ where: { userId } })
+    const membership = await db.membership.findUnique({
+      where: { userId },
+      include: { plan: true },
+    })
 
-    const finalItemPriceInCents = addBackMochi
+    const itemPriceInCentsBeforeDiscount = addBackMochi
       ? cartItem.itemPriceInCents + 200 // If user is trying to add mochi back, charge them $2
       : removeMochi
-        ? cartItem.itemPriceInCents - 200 // If user is removing mochi, minus $2
+        ? Math.max(0, cartItem.itemPriceInCents - 200) // If user is removing mochi, minus $2
         : cartItem.itemPriceInCents // else normal price
 
-    const discountedAmount =
-      membership?.isActive && !cartItem.offerId && cartItem.itemPriceInCents > 0
-        ? Math.round(finalItemPriceInCents * 0.15)
-        : 0
+    let finalDiscountedAmount = 0
 
-    const priceDifference =
-      (cartItem.itemPriceInCents - existingCartItem.itemPriceInCents) *
-      existingCartItem.quantity
+    if (cartItem.offerId) {
+      const offer = await db.offer.findFirst({
+        where: { id: cartItem.offerId },
+        include: { dessert: true },
+      })
+      if (!offer) {
+        res.status(404).json({ message: "Offer may be expired or finished" })
+        return
+      }
+      const offerPrice =
+        offer?.itemPriceInCents !== null
+          ? offer?.itemPriceInCents
+          : offer.dessert
+            ? offer.dessert.priceInCents *
+              (1 - (Number(offer.discountAmount) ?? 0))
+            : dessert
+              ? dessert.priceInCents * (1 - (Number(offer.discountAmount) ?? 0))
+              : 0
+
+      finalDiscountedAmount = Math.max(
+        0,
+        Math.round(itemPriceInCentsBeforeDiscount - offerPrice),
+      ) // this calculates the discount from member offers
+    } else {
+      finalDiscountedAmount = calculateBestDiscount(
+        // this calculates the discounts on normal and promo items
+        cartItem,
+        membership,
+        itemPriceInCentsBeforeDiscount,
+        dessert,
+      )
+    }
+
+    const newCustomisationPrice = cartItem.customisations.reduce(
+      (sum, customisation) =>
+        sum +
+        (customisation.quantity > 0
+          ? (customisation.priceInCents -
+              customisation.discountedAmountInCents) *
+            customisation.quantity
+          : 0),
+      0,
+    )
+
+    const oldCustomisationPrice = existingCartItem.customisations.reduce(
+      (sum, customisation) =>
+        sum +
+        (customisation.quantity > 0
+          ? (customisation.customisation.priceInCents -
+              customisation.discountedAmountInCents) *
+            customisation.quantity
+          : 0),
+      0,
+    )
+    // included customisations that want to be removed have their quantity as 0 therefore only count customisation where their quantity is > 0
+    const newtotalCartItemPrice =
+      itemPriceInCentsBeforeDiscount + newCustomisationPrice
+
+    const oldtotalCartItemPrice =
+      existingCartItem.itemPriceInCents + oldCustomisationPrice
+
+    const priceDifference = newtotalCartItemPrice - oldtotalCartItemPrice
+
     const loyaltyPointsDifference =
       (cartItem.loyaltyPointsUsed ?? 0) -
       (existingCartItem?.loyaltyPointsUsed ?? 0)
@@ -915,16 +1109,30 @@ export const updateCartItem = async (req: Request, res: Response) => {
           update: {
             where: { id: cartItem.id },
             data: {
-              itemPriceInCents: finalItemPriceInCents, // get price from order item
-              discountedAmountInCents: discountedAmount,
+              itemPriceInCents: itemPriceInCentsBeforeDiscount, // get price from order item
+              discountedAmountInCents: Math.round(finalDiscountedAmount),
               loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
               // quantity: cartItem.quantity,
               customisations: {
                 deleteMany: {},
-                create: cartItem.customisations.map((customisation) => ({
-                  customisation: { connect: { id: customisation.id } },
-                  quantity: customisation.quantity,
-                })),
+                create: cartItem.customisations.map((customisation) => {
+                  const maxMembershipDiscount = Math.min(
+                    membership?.plan.maxDiscount ?? 0,
+                    (membership?.totalMonths ?? 1) *
+                      (membership?.plan.membershipDiscount ?? 0),
+                  )
+
+                  return {
+                    customisation: { connect: { id: customisation.id } },
+                    discountedAmountInCents:
+                      membership?.isActive && customisation.quantity > 0
+                        ? customisation.priceInCents *
+                          (maxMembershipDiscount / 100)
+                        : 0,
+
+                    quantity: customisation.quantity,
+                  }
+                }),
               },
             },
           },
@@ -943,6 +1151,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
                 priceInLoyaltyPoints: true,
                 imagePath: true,
                 ingredients: { include: { ingredient: true } },
+                promo: true,
               },
             },
             customisations: { include: { customisation: true } },
@@ -958,6 +1167,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
       },
       customisations: item.customisations.map((c) => ({
         ...c.customisation,
+        discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
     }))
@@ -1000,9 +1210,15 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
         customisations: {
           select: {
             customisation: {
-              select: { id: true, name: true, chineseName: true },
+              select: {
+                id: true,
+                name: true,
+                chineseName: true,
+                priceInCents: true,
+              },
             },
             quantity: true,
+            discountedAmountInCents: true,
           },
         },
       },
@@ -1011,6 +1227,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
     const cartItemCustomisation = cartItem?.customisations.map((c) => ({
       ...c.customisation,
       quantity: c.quantity,
+      discountedAmountInCents: c.discountedAmountInCents,
     }))
     if (!cartItem) {
       res.status(404).json({ message: "Cart item not found" })
@@ -1021,6 +1238,24 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       res.status(404).json({ message: "Cannot change offer quantity" })
       return
     }
+
+    const customisationPrice = cartItem.customisations.reduce(
+      (sum, customisation) =>
+        sum +
+        (customisation.quantity > 0
+          ? (customisation.customisation.priceInCents -
+              customisation.discountedAmountInCents) *
+            customisation.quantity
+          : 0),
+      0,
+    )
+    // included customisations that want to be removed have their quantity as 0 therefore only count customisation where their quantity is > 0
+    const newtotalCartItemPrice =
+      (cartItem.itemPriceInCents + customisationPrice) * quantity
+    const oldTtotalItemPrice =
+      (cartItem.itemPriceInCents + customisationPrice) * cartItem.quantity
+    const priceDifference = newtotalCartItemPrice - oldTtotalItemPrice
+
     await db.$transaction(async (tx) => {
       await tx.cart.update({
         where: { userId },
@@ -1029,7 +1264,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
           totalLoyaltyPointsUsed: {
             increment: cartItem?.loyaltyPointsUsed ?? 0,
           },
-          totalPriceInCents: { increment: cartItem?.itemPriceInCents ?? 0 },
+          totalPriceInCents: { increment: priceDifference ?? 0 },
           cartItems: {
             update: {
               where: { id },
@@ -1066,6 +1301,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
             priceInLoyaltyPoints: true,
             imagePath: true,
             ingredients: { include: { ingredient: true } },
+            promo: true,
           },
         },
         customisations: { include: { customisation: true } },
@@ -1081,6 +1317,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       },
       customisations: item.customisations.map((c) => ({
         ...c.customisation,
+        discountedAmountInCents: c.discountedAmountInCents,
         quantity: c.quantity,
       })),
     }))

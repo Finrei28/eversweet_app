@@ -12,7 +12,10 @@ import {
   paymentMethods,
   pollMembershipStatus,
   removeCard,
+  resumeMembership,
+  retryPayment,
   saveCard,
+  setCardForMembershipPayments,
 } from "../controllers/stripe.controller"
 
 const router = Router()
@@ -24,6 +27,13 @@ router.post("/createPaymentIntent", authenticateToken, createPaymentIntent)
 router.get("/checkPaymentStatus/:id", authenticateToken, checkPaymentStatus)
 router.post("/createMembership", authenticateToken, createMembership)
 router.post("/cancelMembership", authenticateToken, cancelMembership)
+router.post("/resumeMembership", authenticateToken, resumeMembership)
+router.post(
+  "/setCardForMembershipPayments",
+  authenticateToken,
+  setCardForMembershipPayments,
+)
+router.post("/retryPayment", authenticateToken, retryPayment)
 router.get("/pollMembershipStatus", authenticateToken, pollMembershipStatus)
 router.get("/getMembershipDetails", authenticateToken, getMembershipDetails)
 router.get("/getUsersMembership", authenticateToken, getUsersMembership)
@@ -31,7 +41,7 @@ router.post("/createSetupIntent", authenticateToken, createSetupIntent)
 router.get(
   "/getCurrentSubscriptionPaymentMethodId",
   authenticateToken,
-  getCurrentSubscriptionPaymentMethodId
+  getCurrentSubscriptionPaymentMethodId,
 )
 
 export default router

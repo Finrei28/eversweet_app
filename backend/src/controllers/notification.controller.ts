@@ -7,7 +7,7 @@ const expo = new Expo()
 export const sendOfferNotifications = async (
   title: string,
   body: string,
-  isMembersOffer: boolean
+  isMembersOffer: boolean,
 ) => {
   try {
     // 1. Load all push tokens
@@ -53,6 +53,38 @@ export const sendOfferNotifications = async (
     console.log("Push tickets:", tickets)
   } catch (err) {
     console.error("Notification error:", err)
+  }
+}
+
+export const getPushToken = async (req: Request, res: Response) => {
+  const userId = (req as any).userId
+  if (!userId) {
+    res.status(401).json({ message: "Unauthorised" })
+    return
+  }
+  try {
+    const user = await db.user.findUnique({ where: { id: userId } })
+    if (!user) {
+      res.status(401).json({ message: "Please sign in or sign up to continue" })
+      return
+    }
+    const pushToken = user.pushToken
+    if (!pushToken) {
+      res.status(400).json({ message: "No push token found" })
+      return
+    }
+    if (!Expo.isExpoPushToken(pushToken)) {
+      res.status(400).json({ message: "Invalid Expo push token" })
+      return
+    }
+    res.status(200).json({ pushToken })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Error getting push token",
+      error: (error as Error).message,
+    })
+    return
   }
 }
 

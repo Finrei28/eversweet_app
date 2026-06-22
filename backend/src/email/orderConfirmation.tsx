@@ -187,8 +187,21 @@ export default function EmailOrderConfirmation({
               </Heading>
 
               {order.desserts.map((item) => {
+                const customisationPrice = item.customisations.reduce(
+                  (acc, c) =>
+                    acc +
+                    (c.quantity > 0
+                      ? (c.customisation.priceInCents -
+                          c.discountedAmountInCents) *
+                        c.quantity
+                      : 0),
+                  0,
+                )
                 const pricePerItem =
-                  (item.priceInCents - item.discountedAmountInCents) / 100
+                  (item.priceInCents -
+                    item.discountedAmountInCents +
+                    customisationPrice) /
+                  100
                 return (
                   <Row key={item.id} className="py-2">
                     {/* Dessert Image */}
@@ -269,7 +282,7 @@ export default function EmailOrderConfirmation({
                     {formatCurrency(
                       ((order.priceInCents - order.discountedAmountInCents) *
                         0.15) /
-                        100
+                        100,
                     )}
                   </Text>
                 </Column>
@@ -281,7 +294,8 @@ export default function EmailOrderConfirmation({
                 <Column align="right">
                   <Text className="font-semibold">
                     {formatCurrency(
-                      (order.priceInCents - order.discountedAmountInCents) / 100
+                      (order.priceInCents - order.discountedAmountInCents) /
+                        100,
                     )}
                   </Text>
                 </Column>

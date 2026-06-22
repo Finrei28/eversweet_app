@@ -5,6 +5,8 @@ export const customisationSchema = z.object({
   name: z.string(),
   chineseName: z.string(),
   quantity: z.number().int(),
+  priceInCents: z.coerce.number().min(0),
+  discountedAmountInCents: z.coerce.number().min(0),
 })
 
 export const dessertSchema = z.object({

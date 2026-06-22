@@ -74,10 +74,21 @@ model Membership {
   stripePaymentMethodId String?
   stripeSubscriptionId  String?           @unique
   paymentStatus         PaymentStatus     @default(PENDING)
+  paymentFailureCode    String?
+  paymentFailureMessage String?
   totalMonths           Int               @default(0)
   plan                  MembershipPlan    @relation(fields: [planId], references: [id])
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   redemptions           OfferRedemption[]
+}
+
+model MembershipPlan {
+  id                 String       @id @default(cuid())
+  name               String
+  stripePriceId      String       @unique
+  membershipDiscount Int          @default(5)
+  maxDiscount        Int          @default(25)
+  memberships        Membership[]
 }
 
 model Offer {
@@ -127,14 +138,6 @@ model OfferRedemption {
   offer        Offer      @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   @@unique([offerId, membershipId])
-}
-
-model MembershipPlan {
-  id                 String       @id @default(cuid())
-  name               String
-  stripePriceId      String       @unique
-  membershipDiscount Int          @default(10)
-  memberships        Membership[]
 }
 
 model Authenticator {
@@ -277,6 +280,7 @@ model OrderDessertCustomisation {
   id              String       @id @default(cuid())
   orderDessertId  String
   customisationId String
+  discountedAmountInCents Int  @default(0)
   quantity        Int          @default(1)
   customisation   Ingredient   @relation(fields: [customisationId], references: [id], onDelete: Cascade)
   orderDessert    OrderDessert @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
@@ -359,12 +363,13 @@ model CartItem {
 }
 
 model CustomisationInCartItem {
-  id              String     @id @default(cuid())
+  id              String      @id @default(cuid())
   cartItemId      String
   customisationId String
-  quantity        Int        @default(1)
-  cartItem        CartItem   @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
-  customisation   Ingredient @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  discountedAmountInCents     Int                       @default(0)
+  quantity        Int         @default(1)
+  cartItem        CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  customisation   Ingredient  @relation(fields: [customisationId], references: [id], onDelete: Cascade)
 
   @@unique([cartItemId, customisationId])
 }

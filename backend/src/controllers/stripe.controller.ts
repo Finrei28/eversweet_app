@@ -150,6 +150,7 @@ export const createSetupIntent = async (req: Request, res: Response) => {
       setupIntent: setupIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
       customer: customerId,
+      setupIntentId: setupIntent.id,
     })
     return
   } catch (error) {
@@ -160,6 +161,49 @@ export const createSetupIntent = async (req: Request, res: Response) => {
     })
   }
   return
+}
+
+export const setCardForMembershipPayments = async (
+  req: Request,
+  res: Response,
+) => {
+  const userId = (req as any).userId
+  if (!userId) {
+    res.status(401).json({ message: "Unauthenticated" })
+    return
+  }
+  try {
+    const { setupIntentId } = req.body
+
+    if (!setupIntentId) {
+      res.status(400).json({ message: "Set up intent is required" })
+      return
+    }
+
+    const { customerId } = await getOrCreateCustomerId(userId)
+    if (!customerId) {
+      res.status(400).json({ message: "Could not find your details" })
+      return
+    }
+
+    const si = await stripe.setupIntents.retrieve(setupIntentId)
+
+    const paymentMethodId = si.payment_method as string
+
+    await stripe.customers.update(customerId, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
+      },
+    })
+    res.status(200).json({ success: true })
+    return
+  } catch (error) {
+    console.error("Error making card as default:", error)
+    res.status(500).json({
+      message: (error as Error).message,
+    })
+    return
+  }
 }
 
 // POST /api/stripe/save-card - Save a payment method to customer
@@ -415,6 +459,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
         planId: true,
         isActive: true,
         cancel: true,
+        totalMonths: true,
         plan: true,
       },
     })
@@ -436,6 +481,84 @@ export const getUsersMembership = async (req: Request, res: Response) => {
 }
 
 // membership payment
+
+export const retryPayment = async (req: Request, res: Response) => {
+  const userId = (req as any).userId
+  if (!userId) {
+    res.status(401).json({ message: "unauthenticated to do this action" })
+    return
+  }
+  try {
+    const user = await db.user.findUnique({ where: { id: userId } })
+    if (!user) {
+      res.status(401).json({ message: "Could not find user" })
+      return
+    }
+    const membership = await db.membership.findUnique({
+      where: { userId },
+    })
+
+    if (!membership) {
+      res.status(404).json({ message: "Membership not found" })
+      return
+    }
+
+    if (membership.paymentStatus !== "PENDING") {
+      res.status(400).json({
+        message: "No failed payment to retry",
+      })
+      return
+    }
+
+    if (!user.stripeCustomerId) {
+      res.status(400).json({
+        message: "No Stripe customer found",
+      })
+      return
+    }
+
+    const customer = await stripe.customers.retrieve(user.stripeCustomerId)
+
+    if (customer.deleted || !customer.invoice_settings.default_payment_method) {
+      res.status(400).json({
+        message: "Please add a payment method first",
+      })
+      return
+    }
+
+    const invoices = await stripe.invoices.list({
+      customer: user.stripeCustomerId,
+      status: "open",
+      limit: 10,
+    })
+    const invoice = invoices.data.find(
+      (invoice) =>
+        invoice.lines.data[0].subscription === membership.stripeSubscriptionId,
+    )
+
+    if (!invoice || !invoice.id) {
+      res.status(404).json({
+        message: "No unpaid invoice found",
+      })
+      return
+    }
+
+    if (invoice.status === "paid") {
+      res.status(400).json({
+        message: "Invoice already paid",
+      })
+      return
+    }
+
+    await stripe.invoices.pay(invoice.id)
+    res.status(200).json({ success: true })
+  } catch (error) {
+    console.error("Error retrying payment:", error)
+    res.status(500).json({
+      message: (error as Error).message,
+    })
+  }
+}
 
 export const createMembership = async (req: Request, res: Response) => {
   const userId = (req as any).userId
@@ -496,6 +619,16 @@ export const createMembership = async (req: Request, res: Response) => {
           endDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
         },
       })
+    } else {
+      await db.membership.update({
+        where: { id: membership.id },
+        data: {
+          paymentStatus: "PENDING",
+          isActive: false,
+          stripePaymentMethodId: paymentMethodId,
+          totalMonths: 0,
+        },
+      })
     }
 
     // Create a payment intent
@@ -520,8 +653,7 @@ export const createMembership = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error creating membership:", error)
     res.status(500).json({
-      message: "Error creating membership",
-      error: (error as Error).message,
+      message: "Failed to create membership: " + (error as Error).message,
     })
     return
   }
@@ -569,8 +701,43 @@ export const cancelMembership = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error cancelling membershp:", error)
     res.status(500).json({
-      message: "Error cancelling membershp",
-      error: (error as Error).message,
+      message: "Failed to cancel membership: " + (error as Error).message,
+    })
+    return
+  }
+}
+
+export const resumeMembership = async (req: Request, res: Response) => {
+  const userId = (req as any).userId
+
+  if (!userId) {
+    res.status(401).json({ message: "Unauthenticated" })
+    return
+  }
+
+  try {
+    const membership = await db.membership.findUnique({
+      where: { userId },
+    })
+
+    if (!membership?.stripeSubscriptionId) {
+      res.status(404).json({
+        message: "Subscription not found",
+      })
+      return
+    }
+
+    await stripe.subscriptions.update(membership.stripeSubscriptionId, {
+      cancel_at_period_end: false,
+    })
+
+    res.status(200).json({
+      success: true,
+    })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: (error as Error).message,
     })
     return
   }
@@ -585,7 +752,12 @@ export const pollMembershipStatus = async (req: Request, res: Response) => {
   }
   const membershipStatus = await db.membership.findUnique({
     where: { userId },
-    select: { paymentStatus: true, isActive: true },
+    select: {
+      paymentStatus: true,
+      isActive: true,
+      paymentFailureCode: true,
+      paymentFailureMessage: true,
+    },
   })
 
   if (!membershipStatus) {
@@ -633,8 +805,9 @@ export const getCurrentSubscriptionPaymentMethodId = async (
     return
   } catch (error) {
     res.status(500).json({
-      message: "Error fetching current subscription payment method ID",
-      error: (error as Error).message,
+      message:
+        "Failed to fetch current subscription payment method ID: " +
+        (error as Error).message,
     })
     return
   }
@@ -663,6 +836,9 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
       // read metadata
       const webOrder = paymentIntent.metadata.webOrder
+      if (!webOrder) {
+        break
+      }
       const orderData = JSON.parse(paymentIntent.metadata.orderData)
       if (webOrder !== "true" || !orderData) {
         break
@@ -679,13 +855,13 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     }
     case "invoice.payment_succeeded": {
       const invoice = event.data.object as Stripe.Invoice
+      const newEndDate = invoice.period_end
       const subscriptionId = invoice.lines.data[0].subscription
       if (subscriptionId) {
-        await db.membership.updateMany({
+        await db.membership.update({
           where: { stripeSubscriptionId: subscriptionId as string },
           data: {
-            startDate: new Date(),
-            endDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
+            endDate: new Date(newEndDate * 1000),
             paymentStatus: "SUCCESS",
             isActive: true,
             totalMonths: { increment: 1 },
@@ -703,6 +879,29 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId)
 
+      let paymentIntentId: string | null = null
+
+      if ((invoice as any).payment_intent) {
+        paymentIntentId = (invoice as any).payment_intent
+      } else if (
+        invoice.confirmation_secret &&
+        invoice.confirmation_secret.type === "payment_intent"
+      ) {
+        const clientSecret = invoice.confirmation_secret.client_secret
+        paymentIntentId = clientSecret.split("_secret_")[0]
+      }
+
+      let failureCode: string | null = null
+      let failureMessage: string | null = null
+
+      if (paymentIntentId) {
+        const paymentIntent =
+          await stripe.paymentIntents.retrieve(paymentIntentId)
+
+        failureCode = paymentIntent.last_payment_error?.code ?? null
+        failureMessage = paymentIntent.last_payment_error?.message ?? null
+      }
+
       if (subscription.status === "incomplete") {
         // First payment failed
         await db.membership.updateMany({
@@ -710,6 +909,8 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           data: {
             paymentStatus: "FAILED",
             isActive: false,
+            paymentFailureCode: failureCode,
+            paymentFailureMessage: failureMessage,
           },
         })
       } else {
@@ -733,6 +934,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         await db.membership.updateMany({
           where: { stripeSubscriptionId: sub.id },
           data: { endDate: new Date(sub.cancel_at * 1000), cancel: true }, // timestamp to JS Date
+        })
+      } else if (!sub.cancel_at_period_end) {
+        await db.membership.updateMany({
+          where: { stripeSubscriptionId: sub.id },
+          data: { cancel: false }, // timestamp to JS Date
         })
       }
       break

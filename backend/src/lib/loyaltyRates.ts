@@ -1,4 +1,5 @@
 export const loyaltyRates = {
-  rate: 15,
+  memberRate: 1.5,
+  rate: 6,
   modifier: 1,
 }
