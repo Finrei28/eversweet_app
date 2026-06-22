@@ -424,7 +424,7 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
   }
   try {
     const membershipPlan = await db.membershipPlan.findFirst({
-      where: { name: "Test_Membership" },
+      where: { name: "Monthly_Membership" },
     })
     if (!membershipPlan) {
       res.status(404).json({ message: "Membership plan not found" })
@@ -601,7 +601,7 @@ export const createMembership = async (req: Request, res: Response) => {
     })
 
     const plan = await db.membershipPlan.findFirstOrThrow({
-      where: { name: "Test_Membership" },
+      where: { name: "Monthly_Membership" },
     })
 
     let membership = await db.membership.findUnique({ where: { userId } })
