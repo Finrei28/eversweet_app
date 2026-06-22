@@ -152,12 +152,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           ),
         })
       } else {
-        const updatedCartItem = await addItemToCart(item)
-        set({
-          items: get().items.map((i) =>
-            i.id === updatedCartItem.id ? updatedCartItem : i,
-          ),
-        })
+        const newCartItem = await addItemToCart(item)
+        set({ items: [...get().items, newCartItem] })
       }
 
       if (item?.offerId && !usersMembership?.isActive) {

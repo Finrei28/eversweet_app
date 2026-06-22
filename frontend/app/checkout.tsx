@@ -50,6 +50,7 @@ import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { TickAnimation } from "@/_components/tickAnimation"
+import { Result } from "@stripe/stripe-react-native/lib/typescript/src/types/PaymentIntent"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -65,8 +66,8 @@ function CheckoutContent() {
     usersMembership,
     storeHours,
   } = useAuth()
-  const { data: restaurantStatus, loading } = useFetch(() =>
-    getRestaurantStatus(),
+  const { data: restaurantStatus, loading: loadingRestaurantStatus } = useFetch(
+    () => getRestaurantStatus(),
   )
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
@@ -81,6 +82,7 @@ function CheckoutContent() {
   const [showEatInError, setShowEatInError] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [creatingOrderLoading, setCreatingOrderLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   // Cart items and total
   const cartOperations = useCartStore((state) => state.cartOperations)
@@ -135,7 +137,9 @@ function CheckoutContent() {
   useEffect(() => {
     if (cartOperations === 0) {
       const getNewItems = async () => {
+        setLoading(true)
         await useCartStore.getState().fetchCart()
+        setLoading(false)
         // useCartStore.getState().getTotalItems()
       }
       getNewItems()
@@ -521,10 +525,6 @@ function CheckoutContent() {
       )
       return
     }
-    if (!selectedCardId || showAddCard) {
-      Alert.alert("Please select a payment method or add a new card")
-      return
-    }
 
     if (cartItems?.length === 0) {
       Alert.alert("Your cart is empty")
@@ -543,28 +543,41 @@ function CheckoutContent() {
           ? eatInDate
           : pickupDate
 
-      // Get payment intent client secret from your server
-      const { clientSecret, paymentIntentId } = await createPaymentIntent(
-        totalAmount,
-        "nzd",
-        selectedCardId,
-      )
-      setPaymentIntentId(paymentIntentId)
+      let paymentIntentId: string | null = null
 
-      // Confirm the payment with Stripe
-      const { error, paymentIntent } = await confirmPayment(clientSecret, {
-        paymentMethodType: "Card",
-        paymentMethodData: {
-          paymentMethodId: selectedCardId,
-        },
-      })
+      if (totalAmount > 0) {
+        if (!selectedCardId || showAddCard) {
+          Alert.alert("Please select a payment method or add a new card")
+          return
+        }
 
-      if (error) {
-        throw new Error(error.message)
-      }
+        // Get payment intent client secret from your server
+        const { clientSecret, paymentIntentId: id } = await createPaymentIntent(
+          totalAmount,
+          "nzd",
+          selectedCardId,
+        )
 
-      if (paymentIntent.status !== "Succeeded") {
-        throw new Error(`Payment failed with status: ${paymentIntent.status}`)
+        setPaymentIntentId(paymentIntentId)
+        paymentIntentId = id
+
+        // Confirm the payment with Stripe
+        const { error, paymentIntent } = await confirmPayment(clientSecret, {
+          paymentMethodType: "Card",
+          paymentMethodData: {
+            paymentMethodId: selectedCardId,
+          },
+        })
+
+        if (error) {
+          throw new Error(error.message)
+        }
+
+        if (paymentIntent.status !== "Succeeded") {
+          throw new Error(`Payment failed with status: ${paymentIntent.status}`)
+        }
+
+        paymentIntentId = paymentIntent.id
       }
 
       // Payment succeeded, now create the order in the database
@@ -577,7 +590,7 @@ function CheckoutContent() {
               pickupNow,
               pickUpTime ?? nextValidTime,
               eatIn,
-              paymentIntent.id,
+              paymentIntentId,
             )
           : createOrder(
               null,
@@ -710,7 +723,13 @@ function CheckoutContent() {
     )
   }
 
-  if (loadingToken || loadingCards || cartOperations > 0 || loading) {
+  if (
+    loadingToken ||
+    loadingCards ||
+    cartOperations > 0 ||
+    loading ||
+    loadingRestaurantStatus
+  ) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />
@@ -1048,7 +1067,7 @@ function CheckoutContent() {
           )}
 
           {/* Payment Method */}
-          {getTotalCost() > 0 && (
+          {totalPrice > 0 && (
             <View className="bg-white rounded-xl shadow-sm p-4 mb-6">
               <View className="flex-row justify-between items-center mb-3">
                 <Text className="text-lg font-medium">Payment Method</Text>
