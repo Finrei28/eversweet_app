@@ -636,7 +636,6 @@ export const createOrder = async (req: Request, res: Response) => {
         status: "PENDING",
         paymentIntentId: parsedBody.paymentIntentId,
         paymentMethodId: parsedBody.paymentMethodId,
-        notified: true,
         desserts: {
           create: cart.cartItems.map((dessertItem) => ({
             dessert: {
