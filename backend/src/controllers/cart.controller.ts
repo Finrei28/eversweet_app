@@ -7,6 +7,8 @@ import {
   CartItemCustomisation,
   Dessert,
   Membership,
+  AddCartItem,
+  RawCartItem,
   CartItem,
 } from "../types/types"
 
@@ -20,7 +22,7 @@ import {
 // }
 
 function calculateBestDiscount(
-  cartItem: CartItem,
+  cartItem: CartItem | AddCartItem,
   membership: Membership,
   itemPriceInCentsBeforeDiscount: number,
   dessert: Dessert,
@@ -264,20 +266,22 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     const cartItem = parsedBody.data
 
-    const dessert = await db.dessert.findUnique({
-      where: { id: cartItem.dessertId },
-      include: { promo: true, category: true },
-    })
+    const [dessert, membership] = await Promise.all([
+      db.dessert.findUnique({
+        where: { id: cartItem.dessertId },
+        include: { promo: true, category: true },
+      }),
+      db.membership.findUnique({
+        where: { userId },
+        include: { plan: true },
+      }),
+    ])
 
     if (!dessert) {
       res.status(404).json({ message: "Dessert not found" })
       return
     }
 
-    const membership = await db.membership.findUnique({
-      where: { userId },
-      include: { plan: true },
-    })
     if (cartItem.offerId) {
       if (
         !membership ||
@@ -375,26 +379,15 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     // calculate customisaton price
 
-    let cart = await db.cart.findUnique({
+    const existingCart = await db.cart.findUnique({
       where: { userId },
       select: {
         id: true,
-        cartItems: {
-          include: {
-            dessert: {
-              include: { ingredients: { select: { ingredient: true } } },
-            },
-            customisations: {
-              select: {
-                customisation: true,
-                quantity: true,
-                discountedAmountInCents: true,
-              },
-            },
-          },
-        },
       },
     })
+
+    let rawCartItems: RawCartItem[]
+
     const cartItemData: any = {
       dessert: {
         connect: {
@@ -435,10 +428,10 @@ export const addItemToCart = async (req: Request, res: Response) => {
       cartItemData.offer = { connect: { id: cartItem.offerId } }
     }
 
-    if (!cart) {
+    if (!existingCart) {
       // create a new cart if no cart
 
-      cart = await db.cart.create({
+      const cart = await db.cart.create({
         data: {
           user: { connect: { id: userId } },
           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
@@ -455,19 +448,25 @@ export const addItemToCart = async (req: Request, res: Response) => {
           cartItems: {
             include: {
               dessert: {
-                include: { ingredients: { select: { ingredient: true } } },
-              },
-              customisations: {
                 select: {
-                  customisation: true,
-                  quantity: true,
-                  discountedAmountInCents: true,
+                  id: true,
+                  name: true,
+                  chineseName: true,
+                  description: true,
+                  priceInCents: true,
+                  priceInLoyaltyPoints: true,
+                  imagePath: true,
+                  ingredients: { include: { ingredient: true } },
+                  promo: true,
                 },
               },
+              customisations: { include: { customisation: true } },
             },
           },
         },
       })
+
+      rawCartItems = cart.cartItems
     } else {
       // create new cart item
       // let promotionEligible = false
@@ -484,7 +483,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       //   }
       // })
 
-      cart = await db.cart.update({
+      const cart = await db.cart.update({
         where: { userId },
         data: {
           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
@@ -501,43 +500,28 @@ export const addItemToCart = async (req: Request, res: Response) => {
           cartItems: {
             include: {
               dessert: {
-                include: { ingredients: { select: { ingredient: true } } },
-              },
-              customisations: {
                 select: {
-                  customisation: true,
-                  quantity: true,
-                  discountedAmountInCents: true,
+                  id: true,
+                  name: true,
+                  chineseName: true,
+                  description: true,
+                  priceInCents: true,
+                  priceInLoyaltyPoints: true,
+                  imagePath: true,
+                  ingredients: { include: { ingredient: true } },
+                  promo: true,
                 },
               },
+              customisations: { include: { customisation: true } },
             },
           },
         },
       })
+
+      rawCartItems = cart.cartItems
     }
 
-    const newCartItems = await db.cartItem.findMany({
-      where: { cartId: cart.id },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-            promo: true,
-          },
-        },
-        customisations: { include: { customisation: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    })
-
-    const cartItems = newCartItems.map((item) => ({
+    const cartItems = rawCartItems.map((item) => ({
       ...item,
       dessert: {
         ...item.dessert,

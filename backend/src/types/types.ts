@@ -148,17 +148,95 @@ export type Membership =
     })
   | null
 
+export type Customisations = {
+  id: string
+  chineseName: string
+  name: string
+  priceInCents: number
+  discountedAmountInCents: number
+  quantity: number
+}[]
+
+export type RawCustomisations = ({
+  customisation: {
+    id: string
+    name: string
+    chineseName: string
+    priceInCents: number
+    isAvailableForPurchase: boolean
+  }
+} & {
+  id: string
+  quantity: number
+  discountedAmountInCents: number
+  cartItemId: string
+  customisationId: string
+})[]
+
+export type Ingredients = ({
+  ingredient: {
+    name: string
+    id: string
+    priceInCents: number
+    chineseName: string
+    isAvailableForPurchase: boolean
+  }
+} & {
+  dessertId: string
+  ingredientId: string
+})[]
+
+export type DessertInCartItem = {
+  id: string
+  name: string
+  chineseName: string
+  description: string | null
+  priceInCents: number
+  priceInLoyaltyPoints: number
+  imagePath: string
+  ingredients: Ingredients
+  promo: {
+    type: "PERCENTAGE" | "FIXED_AMOUNT"
+    value: number
+    name: string
+    id: string
+    isActive: boolean
+    startsAt: Date | null
+    endsAt: Date | null
+  } | null
+}
+
+export type RawCartItem = {
+  id: string
+  customisations: RawCustomisations
+  dessert: DessertInCartItem
+  itemPriceInCents: number
+  quantity: number
+  loyaltyPointsUsed: number | null
+  offerId: string | null
+  isPromotionItem: boolean
+  promotionType: string | null
+  discountedAmountInCents: number
+}
+
 export type CartItem = {
+  id: string
+  customisations: Customisations
+  dessert: Dessert
+  itemPriceInCents: number
+  quantity: number
+  loyaltyPointsUsed: number | null
+  offerId: string | null
+  isPromotionItem: boolean
+  promotionType: string | null
+  discountedAmountInCents: number
+}
+
+export type AddCartItem = {
+  customisations: Customisations
   dessertId: string
   itemPriceInCents: number
   quantity: number
-  customisations: {
-    name: string
-    id: string
-    quantity: number
-    chineseName: string
-    priceInCents: number
-  }[]
   loyaltyPointsUsed?: number | null | undefined
   offerId?: string | null | undefined
 }
