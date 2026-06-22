@@ -509,7 +509,7 @@ export const getCartItems = async (): Promise<CartItem[]> => {
   }
 }
 
-export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
+export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Please sign in to add item")
@@ -552,7 +552,7 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
       throw new Error(data?.message || "Failed to add item to cart")
     }
 
-    return data.cartItems
+    return data.cartItem
   } catch (error) {
     console.error("Error adding item to cart:", error)
     throw new Error(
@@ -561,9 +561,7 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem[]> => {
   }
 }
 
-export const removeItemFromCart = async (
-  itemId: string,
-): Promise<CartItem[]> => {
+export const removeItemFromCart = async (itemId: string): Promise<string> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Please sign in to remove item from cart")
@@ -583,7 +581,7 @@ export const removeItemFromCart = async (
       throw new Error(data?.message || "Failed to remove item from cart")
     }
 
-    return data.cartItems
+    return data.id
   } catch (error) {
     console.error("Error removing item from cart:", error)
     throw new Error(
@@ -594,7 +592,7 @@ export const removeItemFromCart = async (
 
 export const updateCartItem = async (
   item: CartItem,
-): Promise<{ cartItems: CartItem[] }> => {
+): Promise<{ cartItem: CartItem }> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Please sign in to update your cart")
@@ -635,7 +633,7 @@ export const updateCartItem = async (
       throw new Error(data?.message || "Failed to update item in cart")
     }
 
-    return { cartItems: data.cartItems }
+    return { cartItem: data.cartItem }
   } catch (error) {
     console.error("Error updating item in cart:", error)
     throw new Error(
@@ -731,7 +729,7 @@ export const clearCart = async () => {
 export const updateCartItemQuantity = async (
   itemId: string,
   quantity: number,
-): Promise<CartItem[]> => {
+): Promise<CartItem> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Please sign in to update item quantity in cart")
@@ -751,7 +749,7 @@ export const updateCartItemQuantity = async (
       throw new Error(data?.message || "Failed to update cart item")
     }
 
-    return data.cartItems
+    return data.cartItem
   } catch (error) {
     console.error("Error updating cart item:", error)
     throw new Error(

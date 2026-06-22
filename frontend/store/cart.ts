@@ -142,14 +142,22 @@ export const useCartStore = create<CartState>((set, get) => ({
     // }
     try {
       if (existing) {
-        const updatedCart = await updateCartItemQuantity(
+        const updatedCartItem = await updateCartItemQuantity(
           existing.id,
           existing.quantity + 1,
         )
-        set({ items: updatedCart })
+        set({
+          items: get().items.map((i) =>
+            i.id === updatedCartItem.id ? updatedCartItem : i,
+          ),
+        })
       } else {
-        const updatedCart = await addItemToCart(item)
-        set({ items: updatedCart })
+        const updatedCartItem = await addItemToCart(item)
+        set({
+          items: get().items.map((i) =>
+            i.id === updatedCartItem.id ? updatedCartItem : i,
+          ),
+        })
       }
 
       if (item?.offerId && !usersMembership?.isActive) {
@@ -232,8 +240,10 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
   editItem: async (item) => {
     try {
-      const { cartItems } = await updateCartItem(item)
-      set({ items: cartItems })
+      const { cartItem } = await updateCartItem(item)
+      set({
+        items: get().items.map((i) => (i.id === cartItem.id ? cartItem : i)),
+      })
       Toast.show({
         type: "success",
         text1: `Your cart has been updated`,
@@ -260,6 +270,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   removeItem: async (id) => {
+    const previousItems = get().items
     const item = get().items.find((i) => i.id === id)
     set({
       items: get().items.filter((i) => i.id !== id),
@@ -267,11 +278,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
     set({ cartOperations: get().cartOperations + 1 })
     try {
-      const updatedCart = await removeItemFromCart(id)
+      await removeItemFromCart(id)
       set({ cartOperations: get().cartOperations - 1 })
-      if (get().cartOperations === 0) {
-        set({ items: updatedCart })
-      }
 
       if (item?.loyaltyPointsUsed) {
         useLoyaltyStore.getState().fetchPoints()
@@ -301,6 +309,10 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     } catch (error) {
       console.error("Failed to remove item from cart", error)
+      set({
+        items: previousItems,
+        error: "Failed to remove item",
+      })
       set({ cartOperations: get().cartOperations - 1 })
       if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
         useLoyaltyStore.getState().fetchPoints()
@@ -427,13 +439,15 @@ export const useCartStore = create<CartState>((set, get) => ({
     const requestId = Date.now() // or incrementing counter
     set({ lastRequestId: requestId })
     try {
-      const updatedCart = await updateCartItemQuantity(id, quantity)
+      const updatedCartItem = await updateCartItemQuantity(id, quantity)
 
       // ❗ Ignore stale responses
       if (get().lastRequestId !== requestId) return
 
       set({
-        items: updatedCart,
+        items: get().items.map((i) =>
+          i.id === updatedCartItem.id ? updatedCartItem : i,
+        ),
       })
     } catch (error) {
       console.error("Failed to update cart item:", error)

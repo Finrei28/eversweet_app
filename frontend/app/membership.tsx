@@ -368,15 +368,20 @@ function MembershipContent() {
                       onPress={() =>
                         usersMembership.paymentStatus === "SUCCESS"
                           ? setCancelMembership(true)
-                          : handleRetryPayment
+                          : handleRetryPayment()
                       }
                       className={`${usersMembership.paymentStatus === "SUCCESS" ? "bg-red-500" : "bg-primary"} px-2 py-1 rounded-lg items-center justify-center`}
+                      disabled={isProcessingPayment}
                     >
-                      <Text className="text-white">
-                        {usersMembership.paymentStatus === "SUCCESS"
-                          ? "Cancel"
-                          : "Retry payment"}
-                      </Text>
+                      {isProcessingPayment ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text className="text-white">
+                          {usersMembership.paymentStatus === "SUCCESS"
+                            ? "Cancel"
+                            : "Retry payment"}
+                        </Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 )}
@@ -536,15 +541,15 @@ function MembershipContent() {
                 <Text className="flex-1 ml-8">
                   I agree to the{" "}
                   <Text
-                    className="text-blue-600 underline"
-                    onPress={() => open("https://example.com/terms")}
+                    className="text-primary underline"
+                    onPress={() => router.push("/terms-and-conditions")}
                   >
                     Terms & Conditions
                   </Text>{" "}
                   and{" "}
                   <Text
-                    className="text-blue-600 underline"
-                    onPress={() => open("https://example.com/privacy")}
+                    className="text-primary underline"
+                    onPress={() => router.push("/privacy-policy")}
                   >
                     Privacy Policy
                   </Text>
