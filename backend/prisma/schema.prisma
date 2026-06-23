@@ -244,7 +244,7 @@ model CategoryCustomisation {
 
 model TempOrderCounter {
   id      String   @id @default(cuid())
-  date    DateTime @unique
+  date    String @unique
   counter Int
 }
 
