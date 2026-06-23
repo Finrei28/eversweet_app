@@ -1071,3 +1071,28 @@ export const getTermAndConditions = async (): Promise<TermAndConditions> => {
     )
   }
 }
+
+export const getEstimatedPickUpTime = async (
+  numOfItems: number,
+): Promise<Date> => {
+  try {
+    if (numOfItems === 0) {
+      return new Date()
+    }
+    const res = await fetch(`${url}/api/getEstimatedPickUpTime`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ numOfItems }),
+    })
+
+    const data = await res.json()
+
+    return new Date(data.estimatedTime)
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get estimated time",
+    )
+  }
+}

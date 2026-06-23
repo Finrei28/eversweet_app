@@ -606,6 +606,7 @@ function MembershipContent() {
         <CancelMembershipModal
           modalVisible={cancelMembership}
           setModalVisible={setCancelMembership}
+          membershipDetails={membershipDetails}
         />
       )}
     </View>

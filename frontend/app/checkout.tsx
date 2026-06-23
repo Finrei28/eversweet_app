@@ -31,15 +31,12 @@ import {
   createOrder,
   checkOrderStatus,
   getRestaurantStatus,
+  getEstimatedPickUpTime,
 } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
 import { isOutsideBusinessHours } from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
-import {
-  getEstimatedPickUpTime,
-  getNextValidPickupTime,
-  getOpenCloseTime,
-} from "@/lib/checkoutHelpers"
+import { getNextValidPickupTime, getOpenCloseTime } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
 import {
   formatCurrency,
@@ -99,21 +96,15 @@ function CheckoutContent() {
   // Pickup time state
 
   const [eatIn, setEatIn] = useState(false)
-  const [eatInDate, setEatInDate] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
-  )
+  const [eatInDate, setEatInDate] = useState<Date | null>(null)
   const [pickupNow, setPickupNow] = useState(true)
-  const [pickupDate, setPickupDate] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
-  )
+  const [pickupDate, setPickupDate] = useState<Date | null>(null)
 
   // const nextValidTime = useMemo(
   //   () => getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
   //   [pickupDate]
   // )
-  const [nextValidTime, setNextValidTime] = useState(
-    getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
-  )
+  const [nextValidTime, setNextValidTime] = useState<Date | null>(null)
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [showDoneButton, setShowDoneButton] = useState(false)
   const [showDate, setShowDate] = useState(false)
@@ -147,24 +138,51 @@ function CheckoutContent() {
   }, [cartOperations])
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setNextValidTime(
-        getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
+    const init = async () => {
+      const next = await getNextValidPickupTime(
+        new Date(),
+        totalItems,
+        storeHours,
       )
-      const estimatedPickupTime = getEstimatedPickUpTime(totalItems)
-      if (
-        estimatedPickupTime &&
-        pickupDate &&
-        estimatedPickupTime.getTime() > pickupDate.getTime()
-      ) {
-        setPickupDate(
-          getNextValidPickupTime(new Date(), totalItems, storeHours),
+
+      setNextValidTime(next)
+      setPickupDate(next)
+    }
+
+    init()
+  }, [])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date()
+
+      const run = async () => {
+        const estimatedPickupTime = await getEstimatedPickUpTime(totalItems)
+
+        const nextValidPickupTime = await getNextValidPickupTime(
+          now,
+          totalItems,
+          storeHours,
         )
+        setNextValidTime(nextValidPickupTime)
+
+        setPickupDate((prev) => {
+          if (
+            estimatedPickupTime &&
+            prev &&
+            estimatedPickupTime.getTime() > prev.getTime()
+          ) {
+            return nextValidPickupTime
+          }
+          return prev
+        })
       }
+
+      run()
     }, 60 * 1000)
 
     return () => clearInterval(interval)
-  }, [pickupDate, totalItems])
+  }, [totalItems, storeHours])
 
   useEffect(() => {
     const subscription = AppState.addEventListener(
@@ -397,8 +415,12 @@ function CheckoutContent() {
     }
   }
 
-  const handleConfirm = (date: Date) => {
-    const validTime = getNextValidPickupTime(date, getTotalItems(), storeHours)
+  const handleConfirm = async (date: Date) => {
+    const validTime = await getNextValidPickupTime(
+      date,
+      getTotalItems(),
+      storeHours,
+    )
     if (!validTime) {
       alertTimeChange(null)
     } else if (validTime.getTime() !== date.getTime()) {
@@ -411,7 +433,7 @@ function CheckoutContent() {
     setShowDatePicker(false)
   }
 
-  const onAndroidChangeDate = (
+  const onAndroidChangeDate = async (
     event: DateTimePickerEvent,
     selectedDate?: Date,
   ) => {
@@ -420,7 +442,7 @@ function CheckoutContent() {
       return
     }
     if (!selectedDate) return
-    const validTime = getNextValidPickupTime(
+    const validTime = await getNextValidPickupTime(
       selectedDate,
       getTotalItems(),
       storeHours,
@@ -444,7 +466,7 @@ function CheckoutContent() {
     }
   }
 
-  const onAndroidChangeTime = (
+  const onAndroidChangeTime = async (
     event: DateTimePickerEvent,
     selectedTime?: Date,
   ) => {
@@ -453,7 +475,7 @@ function CheckoutContent() {
       return
     }
     if (!selectedTime) return
-    const validTime = getNextValidPickupTime(
+    const validTime = await getNextValidPickupTime(
       selectedTime,
       getTotalItems(),
       storeHours,
@@ -511,11 +533,9 @@ function CheckoutContent() {
     }
 
     const totalAmount = Math.round(getTotalCost())
-    const totalItems = getTotalItems()
 
-    const pickUpNowTime = getEstimatedPickUpTime(totalItems) ?? nextValidTime
     const notOpenYet = pickupNow
-      ? isOutsideBusinessHours(pickUpNowTime, storeHours)
+      ? isOutsideBusinessHours(nextValidTime, storeHours)
       : eatIn
         ? isOutsideBusinessHours(eatInDate ?? nextValidTime, storeHours)
         : isOutsideBusinessHours(pickupDate ?? nextValidTime, storeHours)
@@ -538,7 +558,7 @@ function CheckoutContent() {
 
       const paymentMethodId = totalAmount > 0 ? selectedCardId : null
       const pickUpTime = pickupNow
-        ? pickUpNowTime
+        ? nextValidTime
         : eatIn
           ? eatInDate
           : pickupDate

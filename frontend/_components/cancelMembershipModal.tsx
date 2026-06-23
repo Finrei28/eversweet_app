@@ -15,14 +15,17 @@ import { Feather } from "@expo/vector-icons"
 import { cancelMembership } from "@/services/stripe-api"
 import Toast from "react-native-toast-message"
 import { formatShortDate } from "@/lib/formatters"
+import { MembershipDetails } from "@/utils/types"
 
 type CancelMembershipModalProps = {
   modalVisible: boolean
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
+  membershipDetails: MembershipDetails | null
 }
 export default function CancelMembershipModal({
   modalVisible,
   setModalVisible,
+  membershipDetails,
 }: CancelMembershipModalProps) {
   const [canceling, setCanceling] = useState(false)
   const handleClose = async () => {
@@ -94,45 +97,24 @@ export default function CancelMembershipModal({
                 </Text>
                 <Text className="text-gray-700 text-center mb-1">
                   You will lose access to exclusive discounts, exclusive offers,
-                  and 2x loyalty rewards.
+                  and bonus loyalty rewards.
+                </Text>
+                <Text className="text-gray-700 text-center mb-1 font-bold">
+                  If your membership ever expires, your membership discount will
+                  reset and will start from the lowest discount.
                 </Text>
                 <Text className="text-gray-700 text-center mb-1 font-semibold">
                   Don't miss out on these awesome offers!
                 </Text>
-                <View className="space-y-3 my-6">
-                  <View className="flex-row items-center">
-                    <Feather name="x-circle" size={18} color="#EF4444" />
-                    <Text className="ml-2 text-gray-700">
-                      free weekly Mochi Series bowl ($9.99)
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Feather name="x-circle" size={18} color="#EF4444" />
-                    <Text className="ml-2 text-gray-700">
-                      15% discount on all listed items
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Feather name="x-circle" size={18} color="#EF4444" />
-                    <Text className="ml-2 text-gray-700">
-                      Earn 2x loyalty points
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Feather name="x-circle" size={18} color="#EF4444" />
-                    <Text className="ml-2 text-gray-700">
-                      Exclusive member offers
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Feather name="x-circle" size={18} color="#EF4444" />
-                    <Text className="ml-2 text-gray-700">Cancel anytime</Text>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Text className=" text-gray-700">
-                      More benefits to come in the future...
-                    </Text>
-                  </View>
+                <View className="space-y-3 my-6 px-5">
+                  {membershipDetails?.membershipBenefits.map(
+                    (benefits, index) => (
+                      <View className="flex-row" key={index}>
+                        <Feather name="x-circle" size={18} color="#EF4444" />
+                        <Text className="ml-2 text-gray-700">{benefits}</Text>
+                      </View>
+                    ),
+                  )}
                 </View>
 
                 {/* Join button */}
