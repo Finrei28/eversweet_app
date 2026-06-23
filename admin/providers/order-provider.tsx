@@ -28,6 +28,7 @@ type OrderContextType = {
   fetchCompletedOrders: (date?: Date) => Promise<void>
   updateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>
   findOrderById: (id: string) => Order | undefined
+  setPendingOrders: React.Dispatch<React.SetStateAction<Order[]>>
   // processNextOrderAlert: () => void
 }
 
@@ -36,6 +37,7 @@ const OrderContext = createContext<OrderContextType | undefined>(undefined)
 // Provider component
 export function OrderProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
+  const [pendingOrders, setPendingOrders] = useState<Order[]>([])
   const [currentOrders, setCurrentOrders] = useState<Order[]>([])
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -86,6 +88,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   // Find order by ID in any list
   const findOrderById = (id: string): Order | undefined => {
     return (
+      pendingOrders.find((order) => order.id === id) ||
       currentOrders.find((order) => order.id === id) ||
       completedOrders.find((order) => order.id === id)
     )
@@ -105,6 +108,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
       // For demo, update state directly
       if (newStatus === "ACCEPTED") {
+        // remove from pending list
+        setPendingOrders((prev) => prev.filter((o) => o.id !== orderId))
         // check if auto print
         const autoPrintSetting =
           await AsyncStorage.getItem("auto_print_enabled")
@@ -170,6 +175,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         fetchCompletedOrders,
         updateOrderStatus,
         findOrderById,
+        setPendingOrders,
       }}
     >
       {children}

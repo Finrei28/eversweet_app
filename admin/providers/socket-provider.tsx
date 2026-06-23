@@ -14,6 +14,7 @@ import {
 } from "react"
 import { io, type Socket } from "socket.io-client"
 import { useAuth } from "./auth-provider"
+import { useOrderContext } from "./order-provider"
 
 type SocketContextType = {
   isConnected: boolean
@@ -24,6 +25,7 @@ const SocketContext = createContext<SocketContextType | undefined>(undefined)
 
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { authenticated } = useAuth()
+  const { setPendingOrders } = useOrderContext()
   const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
 
@@ -63,7 +65,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       // Listen for new orders
       socketInstance.on("new-order", async (order: Order) => {
         // Add the order to the context
-
+        setPendingOrders((prev) =>
+          prev.some((o) => o.id === order.id) ? prev : [...prev, order],
+        )
         newOrderServices.enqueue({
           id: order.id,
           order: order,
