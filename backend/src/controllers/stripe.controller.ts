@@ -490,10 +490,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
         plan: true,
       },
     })
-    if (!membership) {
-      res.status(404).json({ message: "user has no membership" })
-      return
-    }
+
     res.status(200).json(membership)
     return
   } catch (error) {
