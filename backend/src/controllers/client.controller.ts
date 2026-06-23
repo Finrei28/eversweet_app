@@ -280,3 +280,23 @@ export const getTermAndConditions = (req: Request, res: Response) => {
   res.status(200).json(termAndConditions)
   return
 }
+
+export function getEstimatedPickUpTime(req: Request, res: Response) {
+  const { numOfItems } = req.body
+  const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
+  const tenMinutes = new Date(Date.now() + 11 * 60 * 1000)
+  const fifteenMinutes = new Date(Date.now() + 16 * 60 * 1000)
+  const twentyMinutes = new Date(Date.now() + 21 * 60 * 1000)
+
+  const minTime =
+    numOfItems === 1
+      ? fiveMinutes
+      : numOfItems <= 3
+        ? tenMinutes
+        : numOfItems <= 6
+          ? fifteenMinutes
+          : twentyMinutes
+
+  res.status(200).json({ estimatedTime: minTime })
+  return
+}
