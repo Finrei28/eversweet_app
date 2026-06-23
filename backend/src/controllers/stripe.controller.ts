@@ -207,6 +207,15 @@ export const setCardForMembershipPayments = async (
 
     const paymentMethodId = si.payment_method as string
 
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId)
+
+    console.log({
+      paymentMethodCustomer: paymentMethod.customer,
+      customerId,
+      paymentMethod,
+      paymentMethodId,
+    })
+
     await stripe.customers.update(customerId, {
       invoice_settings: {
         default_payment_method: paymentMethodId,
