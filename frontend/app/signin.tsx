@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from "react-native"
 import React, { useState } from "react"
 import { useRouter, useLocalSearchParams } from "expo-router"
@@ -135,10 +136,13 @@ export default function signin() {
               <TouchableOpacity
                 onPress={handleLogin}
                 className="bg-primary py-3 rounded-lg items-center w-1/2 mb-10"
+                disabled={isLoading}
               >
-                <Text className="text-white text-2xl font-bold">
-                  {isLoading ? "Signing in..." : "Sign in"}
-                </Text>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text className="text-white text-2xl font-bold">Sign in</Text>
+                )}
               </TouchableOpacity>
               <View className="flex-row items-center justify-center mb-3">
                 <Text className="text-gray-500 mr-2">
