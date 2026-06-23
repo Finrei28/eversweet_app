@@ -474,7 +474,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
     return
   }
   try {
-    const membership = await db.membership.findFirst({
+    const membership = await db.membership.findUnique({
       where: { userId },
       select: {
         id: true,
