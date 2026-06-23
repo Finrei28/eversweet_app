@@ -90,6 +90,7 @@ async function getOrCreateCustomerId(userId: string) {
               name: `${user.firstName} ${user.lastName}`,
             },
           })
+          await updateUserWithCustomerId(userId, customer.id)
           return { customerId: customer.id }
         }
       }
