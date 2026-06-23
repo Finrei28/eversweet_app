@@ -84,7 +84,7 @@ function AppLayout() {
         <SocketProvider>
           <StatusBar style="auto" />
           {currentOrder && (
-            <NewOrderModal order={currentOrder} visible={true} />
+            <NewOrderModal order={currentOrder} visible={!!currentOrder} />
           )}
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

@@ -7,6 +7,7 @@ import {
   updateOrderStatusAPI,
 } from "@/services/api"
 import printerService, { addJob } from "@/services/printer-service"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useRouter } from "expo-router"
 import {
   createContext,
@@ -104,14 +105,22 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
       // For demo, update state directly
       if (newStatus === "ACCEPTED") {
-        // store the order for printing
-        await addJob(existingOrder)
-        printerService.enqueue({
-          id: existingOrder.id,
-          order: existingOrder,
-          createdAt: new Date().toISOString(),
-          status: "pending",
-        })
+        // check if auto print
+        const autoPrintSetting =
+          await AsyncStorage.getItem("auto_print_enabled")
+
+        if (autoPrintSetting === "true") {
+          // store the order for printing
+
+          await addJob(existingOrder)
+          printerService.enqueue({
+            id: existingOrder.id,
+            order: existingOrder,
+            createdAt: new Date().toISOString(),
+            status: "pending",
+          })
+        }
+
         await fetchOrders()
         // } else if (newStatus === "DECLINED") {
       } else if (newStatus === "PICKED_UP") {
