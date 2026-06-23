@@ -56,7 +56,7 @@ export default function RootLayout() {
             "lastSeenAnnouncement",
           )
 
-          const hasNewAnnouncements = announcements.some(
+          const hasNewAnnouncements = announcementList.some(
             // check if there are any new announcements
             (announcement) =>
               !lastSeenAnnouncement ||
@@ -65,12 +65,12 @@ export default function RootLayout() {
           if (hasNewAnnouncements) {
             // show new announcements
             setShowAnnounceModal(true)
-            const latestAnnouncementDate = announcements.reduce(
+            const latestAnnouncementDate = announcementList.reduce(
               (latest, announcement) =>
                 new Date(announcement.updatedAt) > new Date(latest)
                   ? announcement.updatedAt
                   : latest,
-              announcements[0].updatedAt,
+              announcementList[0].updatedAt,
             )
 
             await AsyncStorage.setItem(
@@ -105,13 +105,17 @@ export default function RootLayout() {
     if (isAuthenticated) {
       // Register for push notifications
       const registerPushNotifications = async () => {
-        const storedToken = await getPushToken()
-        await registerForPushNotificationsAsync().then((token) => {
+        try {
+          const storedToken = await getPushToken()
+
+          const token = await registerForPushNotificationsAsync()
+
           if (token && token !== storedToken) {
-            // Save the token to the server
-            savePushToken(token)
+            await savePushToken(token)
           }
-        })
+        } catch (error) {
+          console.error("Failed to register push notifications:", error)
+        }
       }
       registerPushNotifications()
 

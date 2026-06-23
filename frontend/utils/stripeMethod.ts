@@ -43,7 +43,7 @@ export const openPaymentSheetForSetup = async (
     ReturnType<typeof useStripe>,
     "initPaymentSheet" | "presentPaymentSheet"
   >,
-  refetchCards: () => void,
+  refetchCards: () => Promise<void>,
   isMembershipActive: boolean,
 ) => {
   const { initPaymentSheet, presentPaymentSheet } = stripeHooks

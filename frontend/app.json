@@ -28,6 +28,7 @@
       "icon": "./assets/images/ios-light.png"
     },
     "android": {
+      "permissions": ["POST_NOTIFICATIONS"],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

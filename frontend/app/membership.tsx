@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import {
   View,
   Text,
@@ -71,17 +71,25 @@ function MembershipContent() {
   const membershipStatus = usersMembership?.paymentStatus
 
   // Fetch saved cards when component mounts
-  useFocusEffect(
-    useCallback(() => {
-      if (!token && !loadingToken) {
-        router.push("/signin")
-      } else {
-        refetchUsersMembership()
-        fetchSavedCards()
-        getMembershipDetail()
-      }
-    }, [token, loadingToken]),
-  )
+
+  useEffect(() => {
+    if (loadingToken) return
+
+    if (!token) {
+      router.replace("/signin")
+      return
+    }
+
+    const init = async () => {
+      await Promise.all([
+        refetchUsersMembership(),
+        fetchSavedCards(),
+        getMembershipDetail(),
+      ])
+    }
+
+    init()
+  }, [token, loadingToken])
 
   const getMembershipDetail = async () => {
     setLoadingMembershipDetails(true)
@@ -180,6 +188,7 @@ function MembershipContent() {
       await createMembership(selectedCardId, membershipDetails.stripePriceId)
       const success = await pollUsersMembershipStatus()
       if (success) {
+        refetchUsersMembership()
         router.push("/routers/membership-success")
       }
     } catch (error) {
@@ -203,16 +212,7 @@ function MembershipContent() {
     setIsResuming(true)
     try {
       await resumeMembership()
-      // await new Promise((resolve) => setTimeout(resolve, 2000))
-    } catch (error) {
-      Alert.alert(
-        "Failed to resume your membership",
-        error instanceof Error
-          ? error.message
-          : "Could not resume your membership at this time. Please try again later or contact support.",
-      )
-    } finally {
-      setIsResuming(false)
+      await refetchUsersMembership()
       Toast.show({
         type: "success",
         text1: `Your membership has been resumed.`,
@@ -225,6 +225,16 @@ function MembershipContent() {
           text2NumberOfLines: 0, // allow wrapping
         },
       })
+      // await new Promise((resolve) => setTimeout(resolve, 2000))
+    } catch (error) {
+      Alert.alert(
+        "Failed to resume your membership",
+        error instanceof Error
+          ? error.message
+          : "Could not resume your membership at this time. Please try again later or contact support.",
+      )
+    } finally {
+      setIsResuming(false)
     }
   }
 
@@ -234,6 +244,7 @@ function MembershipContent() {
       await retryPayment()
       const success = await pollUsersMembershipStatus()
       if (success) {
+        refetchUsersMembership()
         router.push("/routers/membership-success")
       }
     } catch (error) {

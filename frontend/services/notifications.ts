@@ -1,6 +1,6 @@
 import * as Notifications from "expo-notifications"
 import * as Device from "expo-device"
-import { Alert, Platform } from "react-native"
+import { Alert, Linking, Platform } from "react-native"
 import { getToken } from "./authToken"
 import * as SecureStore from "expo-secure-store"
 import { getUsersMembership } from "./stripe-api"
@@ -39,8 +39,19 @@ export async function registerForPushNotificationsAsync() {
     // If we don't have permission, return null
     if (finalStatus !== "granted") {
       Alert.alert(
-        "Please turn on notifications to receive order status changes",
+        "Notifications are disabled",
+        "Please enable notifications in Settings to receive order updates.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Settings",
+            onPress: () => {
+              Linking.openSettings()
+            },
+          },
+        ],
       )
+
       return null
     }
     // Get the token
@@ -102,7 +113,7 @@ export async function savePushToken(pushToken: string) {
   }
 }
 
-export async function getPushToken(): Promise<string> {
+export async function getPushToken(): Promise<string | null> {
   try {
     const authToken = await getToken()
     if (!authToken) {
@@ -120,14 +131,14 @@ export async function getPushToken(): Promise<string> {
     })
 
     if (!response.ok) {
-      throw new Error("Failed to get push token")
+      return null
     }
 
     const data = await response.json()
 
     return data.pushToken
   } catch (error) {
-    console.error("Error saving push token:", error)
+    console.error("Error getting push token:", error)
     throw new Error("Failed to get push token")
   }
 }

@@ -6,28 +6,18 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Switch,
   Alert,
   ActivityIndicator,
 } from "react-native"
 import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
-import {
-  StripeProvider,
-  CardField,
-  useStripe,
-  type CardFieldInput,
-  CardForm,
-} from "@stripe/stripe-react-native"
+import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 import {
   getSavedCards,
-  saveCard,
   removeCard,
-  createSetupIntent,
   getCurrentSubscriptionPaymentMethodId,
 } from "@/services/stripe-api"
-import { getUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"

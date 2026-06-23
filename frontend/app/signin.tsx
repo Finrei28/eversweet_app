@@ -16,11 +16,13 @@ import { signIn } from "@/services/api"
 import CustomHeader from "@/_components/custom-header"
 import Toast from "react-native-toast-message"
 import { useAuth } from "@/store/authProvider"
+import { Ionicons } from "@expo/vector-icons"
 
 export default function signin() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const { redirectTo } = useLocalSearchParams()
   const router = useRouter()
   const { signInProvider } = useAuth()
@@ -107,13 +109,27 @@ export default function signin() {
 
               <View className="w-3/4 max-w-md mb-8">
                 <Text className="text-lg text-gray-500 mb-1">Password:</Text>
-                <TextInput
-                  className="border border-gray-300 rounded-lg p-4"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                  onSubmitEditing={handleLogin}
-                />
+
+                <View className="relative">
+                  <TextInput
+                    className="border border-gray-300 rounded-lg p-4 pr-12"
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
+                    onSubmitEditing={handleLogin}
+                  />
+
+                  <TouchableOpacity
+                    className="absolute right-4 top-0 bottom-0 justify-center"
+                    onPress={() => setShowPassword((prev) => !prev)}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={22}
+                      color="gray"
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <TouchableOpacity

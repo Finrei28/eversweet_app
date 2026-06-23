@@ -47,7 +47,6 @@ import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { TickAnimation } from "@/_components/tickAnimation"
-import { Result } from "@stripe/stripe-react-native/lib/typescript/src/types/PaymentIntent"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -116,15 +115,6 @@ function CheckoutContent() {
 
   // Fetch saved cards when component mounts
 
-  useFocusEffect(
-    useCallback(() => {
-      if (token) {
-        // useCartStore.getState().fetchCart()
-        fetchSavedCards()
-      }
-    }, [token]),
-  )
-
   useEffect(() => {
     if (cartOperations === 0) {
       const getNewItems = async () => {
@@ -138,6 +128,9 @@ function CheckoutContent() {
   }, [cartOperations])
 
   useEffect(() => {
+    if (token) {
+      fetchSavedCards()
+    }
     const init = async () => {
       const next = await getNextValidPickupTime(
         new Date(),
@@ -590,7 +583,15 @@ function CheckoutContent() {
         })
 
         if (error) {
-          throw new Error(error.message)
+          console.error("Stripe error:", {
+            message: error.message,
+            code: error.code,
+            declineCode: error.declineCode,
+          })
+
+          throw new Error(
+            error.message ?? "Your card was declined. Please try another one.",
+          )
         }
 
         if (paymentIntent.status !== "Succeeded") {
@@ -1080,7 +1081,7 @@ function CheckoutContent() {
 
               <Text className="text-sm text-gray-500 mt-2">
                 {pickupNow
-                  ? "Your order will be ready in approximately 5-15 minutes, alternatively have your notifications turned on to receive real time changes to your order(s) status."
+                  ? "Remember to have your notifications turned on to receive real time changes to your order(s) status."
                   : "Please have the apps notifications turned on to receive real time changes to your order(s) status or arrive at your selected time to pick up your order."}
               </Text>
             </View>

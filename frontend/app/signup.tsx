@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Platform,
+  ActivityIndicator,
 } from "react-native"
 import React, { useState } from "react"
 import { useRouter } from "expo-router"
@@ -27,9 +28,11 @@ export default function SignUp() {
   })
   const [verifyEmail, setVerifyEmail] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
   const router = useRouter()
 
   const handleSignUp = async () => {
+    setIsCreating(true)
     if (!signupForm.email || !signupForm.password) {
       Alert.alert("Error", "Please enter both email and password.")
       return
@@ -68,6 +71,8 @@ export default function SignUp() {
         Alert.alert("Sign-up failed", message || "An unknown error occurred.")
       }
       return
+    } finally {
+      setIsCreating(false)
     }
   }
   return (
@@ -163,10 +168,15 @@ export default function SignUp() {
                   <TouchableOpacity
                     onPress={handleSignUp}
                     className=" mb-10 bg-primary py-3 rounded-lg items-center w-1/2"
+                    disabled={isCreating}
                   >
-                    <Text className="text-white text-2xl font-bold">
-                      Create Account
-                    </Text>
+                    {isCreating ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text className="text-white text-2xl font-bold">
+                        Create Account
+                      </Text>
+                    )}
                   </TouchableOpacity>
                   <View className="flex-row items-center justify-center">
                     <Text className="text-gray-500 mr-2">
