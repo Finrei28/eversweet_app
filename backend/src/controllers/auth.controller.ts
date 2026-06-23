@@ -10,6 +10,7 @@ import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../index"
 import { Status, WebOrderType } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
+import { formatInTimeZone } from "date-fns-tz"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -43,24 +44,27 @@ export const createOrderForWebsite = async (
   orderData: WebOrderType,
   paymentIntentId: string,
 ): Promise<string> => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0) // Normalize to midnight
+  const todayNZ = formatInTimeZone(new Date(), "Pacific/Auckland", "yyyy-MM-dd")
 
   let counter = await db.tempOrderCounter.findUnique({
-    where: { date: today },
+    where: { date: todayNZ },
   })
 
   if (!counter) {
     counter = await db.tempOrderCounter.create({
       data: {
-        date: today,
+        date: todayNZ,
         counter: 6000,
       },
     })
   } else {
     counter = await db.tempOrderCounter.update({
-      where: { date: today },
-      data: { counter: counter.counter + 1 },
+      where: { date: todayNZ },
+      data: {
+        counter: {
+          increment: 1,
+        },
+      },
     })
   }
 
@@ -563,24 +567,31 @@ export const createOrder = async (req: Request, res: Response) => {
       return
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0) // Normalize to midnight
+    const todayNZ = formatInTimeZone(
+      new Date(),
+      "Pacific/Auckland",
+      "yyyy-MM-dd",
+    )
 
     let counter = await db.tempOrderCounter.findUnique({
-      where: { date: today },
+      where: { date: todayNZ },
     })
 
     if (!counter) {
       counter = await db.tempOrderCounter.create({
         data: {
-          date: today,
+          date: todayNZ,
           counter: 6000,
         },
       })
     } else {
       counter = await db.tempOrderCounter.update({
-        where: { date: today },
-        data: { counter: counter.counter + 1 },
+        where: { date: todayNZ },
+        data: {
+          counter: {
+            increment: 1,
+          },
+        },
       })
     }
 
