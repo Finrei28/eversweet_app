@@ -1,6 +1,6 @@
 import { SplashScreen, Stack, useRouter } from "expo-router"
 import "./global.css"
-import { StatusBar } from "react-native"
+import { AppState, StatusBar } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast, { BaseToast } from "react-native-toast-message"
@@ -14,6 +14,7 @@ import {
   handleNotification,
   hasMembershipPopupExpired,
   getPushToken,
+  syncPushToken,
 } from "@/services/notifications"
 import { AuthProvider } from "@/store/authProvider"
 import { useCartStore } from "@/store/cart"
@@ -101,18 +102,29 @@ export default function RootLayout() {
   }, [])
 
   useEffect(() => {
+    // listen when app state changes (when user switches apps)
+    if (!isAuthenticated) return
+
+    const subscription = AppState.addEventListener("change", async (state) => {
+      if (state === "active") {
+        try {
+          await syncPushToken()
+        } catch (error) {
+          console.error("Failed to sync push token:", error)
+        }
+      }
+    })
+
+    return () => subscription.remove()
+  }, [isAuthenticated])
+
+  useEffect(() => {
     // Only register for push notifications if the user is authenticated
     if (isAuthenticated) {
       // Register for push notifications
       const registerPushNotifications = async () => {
         try {
-          const storedToken = await getPushToken()
-
-          const token = await registerForPushNotificationsAsync()
-
-          if (token && token !== storedToken) {
-            await savePushToken(token)
-          }
+          await syncPushToken()
         } catch (error) {
           console.error("Failed to register push notifications:", error)
         }

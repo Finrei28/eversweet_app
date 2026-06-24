@@ -113,6 +113,34 @@ export async function savePushToken(pushToken: string) {
   }
 }
 
+export async function removePushToken() {
+  try {
+    const authToken = await getToken()
+    if (!authToken) {
+      throw new Error(
+        "Please sign in to receive notifications about your orders",
+      )
+    }
+
+    const response = await fetch(`${url}/api/notification/removePushToken`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to remove push token")
+    }
+
+    return true
+  } catch (error) {
+    console.error("Error remove push token:", error)
+    return false
+  }
+}
+
 export async function getPushToken(): Promise<string | null> {
   try {
     const authToken = await getToken()
@@ -217,5 +245,19 @@ export const hasMembershipPopupExpired = async (): Promise<boolean> => {
     return false
   } catch {
     return true // fallback in case of corrupted data
+  }
+}
+
+export async function syncPushToken() {
+  try {
+    const pushToken = await registerForPushNotificationsAsync()
+
+    const storedToken = await getPushToken()
+
+    if (pushToken && pushToken !== storedToken) {
+      await savePushToken(pushToken)
+    }
+  } catch (error) {
+    console.error(error)
   }
 }

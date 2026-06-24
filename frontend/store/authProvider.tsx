@@ -13,6 +13,13 @@ import { getUsersMembership } from "@/services/stripe-api"
 import { getStoreHours } from "@/services/api"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
+import {
+  getPushToken,
+  registerForPushNotificationsAsync,
+  removePushToken,
+  savePushToken,
+  syncPushToken,
+} from "@/services/notifications"
 
 interface DecodedToken {
   userId: string
@@ -83,18 +90,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   const signInProvider = async (token: string) => {
-    await SecureStore.setItemAsync("token", token)
-    setToken(token)
-    const membership = await getUsersMembership()
-    setUsersMembership(membership)
-    useLoyaltyStore.getState().fetchPoints() // load fresh points on login
-    useCartStore.getState().fetchCart() // load cart items on login
+    try {
+      await SecureStore.setItemAsync("token", token)
+      setToken(token)
+      const membership = await getUsersMembership()
+      setUsersMembership(membership)
+      useLoyaltyStore.getState().fetchPoints() // load fresh points on login
+      useCartStore.getState().fetchCart() // load cart items on login
+    } catch (error) {
+      console.error("Sign in error", error)
+      return
+    }
+
+    try {
+      await syncPushToken()
+    } catch (error) {
+      console.error("Failed to register push notifications:", error)
+    }
   }
 
   const signOutProvider = async () => {
-    await removeToken()
-    setToken(null)
-    setUsersMembership(null)
+    try {
+      await removeToken()
+      await removePushToken()
+      setToken(null)
+      setUsersMembership(null)
+    } catch (error) {
+      console.error("Sign out error: ", error)
+    }
   }
 
   return (
