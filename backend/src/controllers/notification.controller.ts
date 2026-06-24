@@ -129,6 +129,51 @@ export const pushToken = async (req: Request, res: Response) => {
   }
 }
 
+export const removePushToken = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorised" })
+      return
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { pushToken: true },
+    })
+
+    if (!user) {
+      res.status(401).json({ message: "Unauthenticated" })
+      return
+    }
+
+    if (!user.pushToken) {
+      res.status(200).json({ message: "not registered for push notification" })
+      return
+    }
+
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        pushToken: null,
+      },
+      select: {
+        pushToken: true,
+      },
+    })
+
+    res.status(200).json({ success: true })
+    return
+  } catch (error) {
+    console.error("Error removing push token:", error)
+    res.status(500).json({
+      message: "Error removing push token",
+      error: (error as Error).message,
+    })
+    return
+  }
+}
+
 export const sendNotification = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
