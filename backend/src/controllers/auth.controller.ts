@@ -207,8 +207,11 @@ export const signUp = async (req: Request, res: Response) => {
     res.status(400).json({ message: "Phone number is required" })
     return
   }
+
+  const normalisedEmail = email.trim().toLowerCase()
+
   const existUser = await db.user.findFirst({
-    where: { email },
+    where: { email: normalisedEmail },
   })
   if (existUser) {
     res.status(400).json({ message: "Email already registered" })
@@ -220,7 +223,7 @@ export const signUp = async (req: Request, res: Response) => {
   try {
     const newUser = await db.user.create({
       data: {
-        email,
+        email: normalisedEmail,
         password: hashed,
         firstName:
           firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
