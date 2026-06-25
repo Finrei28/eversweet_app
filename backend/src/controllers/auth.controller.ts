@@ -263,55 +263,60 @@ export const signIn = async (req: Request, res: Response) => {
     return
   }
   const normalisedEmail = email.trim().toLowerCase()
-  const user = await db.user.findUnique({ where: { email: normalisedEmail } })
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    res.status(401).json("Invalid credentials")
-    return
-  }
+  try {
+    const user = await db.user.findUnique({ where: { email: normalisedEmail } })
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      res.status(401).json("Invalid credentials")
+      return
+    }
 
-  if (!!user.emailVerified) {
-    const otp = Math.floor(100000 + Math.random() * 900000).toString()
-    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
-    await db.user.update({
-      where: { id: user.id },
-      data: {
-        otp,
-        otpExpiresAt,
+    if (!!user.emailVerified) {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString()
+      const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          otp,
+          otpExpiresAt,
+        },
+        select: { id: true },
+      })
+      await resend.emails.send({
+        from: '"Eversweet" <eversweet@eversweet.co.nz>',
+        to: user.email,
+        subject: "Verify your email address",
+        react: VerifyEmail({ otp }),
+      })
+      res.status(201).json({
+        message: "User needs to verify email",
+        name: user.firstName ?? "",
+        emailVerified: !!user.emailVerified,
+      })
+      return
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        firstName: user.firstName,
       },
-      select: { id: true },
-    })
-    await resend.emails.send({
-      from: '"Eversweet" <eversweet@eversweet.co.nz>',
-      to: user.email,
-      subject: "Verify your email address",
-      react: VerifyEmail({ otp }),
-    })
-    res.status(201).json({
-      message: "User needs to verify email",
+      process.env.JWT_SECRET!,
+      {
+        expiresIn: "90d",
+      },
+    )
+    res.status(200).json({
+      token,
       name: user.firstName ?? "",
       emailVerified: !!user.emailVerified,
     })
     return
+  } catch (error) {
+    res.status(500).json({ message: error })
+    return
   }
-
-  const token = jwt.sign(
-    {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      firstName: user.firstName,
-    },
-    process.env.JWT_SECRET!,
-    {
-      expiresIn: "90d",
-    },
-  )
-  res.status(200).json({
-    token,
-    name: user.firstName ?? "",
-    emailVerified: !!user.emailVerified,
-  })
-  return
 }
 
 export const checkVerificationCode = async (req: Request, res: Response) => {
