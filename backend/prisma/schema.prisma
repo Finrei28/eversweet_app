@@ -317,7 +317,7 @@ model Loyalty {
   id     String @id @default(cuid())
   points Int
   userId String @unique
-  User   User   @relation(fields: [userId], references: [id])
+  User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   records LoyaltyRecord[]
 }
 
