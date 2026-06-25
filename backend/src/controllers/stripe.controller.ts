@@ -3,7 +3,6 @@ import { db } from "../lib/db"
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
 import { membershipBenefits } from "../lib/membership"
-import { createOrderForWebsite } from "./auth.controller"
 
 // Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)

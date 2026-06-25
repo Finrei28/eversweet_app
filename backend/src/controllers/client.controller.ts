@@ -120,8 +120,23 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
       react: ResetPasswordEmail({ otp }),
     })
     res.status(200).json({ success: true })
+    return
   } catch (error) {
+    if ((error as Error).message.includes("limit")) {
+      res.status(429).json({
+        message: "We've reached our email limit. Please try again tomorrow.",
+      })
+      return
+    }
+
+    if ((error as Error).message.includes("domain")) {
+      res.status(400).json({
+        message: "Email service is not configured correctly.",
+      })
+      return
+    }
     res.status(500).json({ message: error })
+    return
   }
 }
 

@@ -8,7 +8,7 @@ import { Resend } from "resend"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../index"
-import { Status, WebOrderType } from "../types/types"
+import { Status } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { formatInTimeZone } from "date-fns-tz"
 
@@ -47,142 +47,6 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
   })
 
   return updated.points
-}
-
-export const createOrderForWebsite = async (
-  orderData: WebOrderType,
-  paymentIntentId: string,
-): Promise<string> => {
-  const todayNZ = formatInTimeZone(new Date(), "Pacific/Auckland", "yyyy-MM-dd")
-
-  let counter = await db.tempOrderCounter.findUnique({
-    where: { date: todayNZ },
-  })
-
-  if (!counter) {
-    counter = await db.tempOrderCounter.create({
-      data: {
-        date: todayNZ,
-        counter: 6000,
-      },
-    })
-  } else {
-    counter = await db.tempOrderCounter.update({
-      where: { date: todayNZ },
-      data: {
-        counter: {
-          increment: 1,
-        },
-      },
-    })
-  }
-
-  const newOrder = await db.order.create({
-    data: {
-      tempOrderId: counter.counter.toString(),
-      customerFirstName: orderData.customerFirstName ?? "",
-      customerLastName: orderData.customerLastName ?? "",
-      customerEmail: orderData.customerEmail,
-      customerPhoneNumber: orderData.customerPhoneNumber,
-      source: "WEBSITE",
-      priceInCents: orderData.totalPriceInCents,
-      GST: orderData.totalPriceInCents * 0.15, // GST in cents
-      pickUpTime: orderData.pickUpTime,
-      dineIn: false,
-      status: "PENDING",
-      paymentIntentId: paymentIntentId,
-      desserts: {
-        create: orderData.desserts.map((dessertItem) => ({
-          dessert: {
-            connect: {
-              id: dessertItem.dessert.id, // Ensure dessert exists before connecting
-            },
-          },
-
-          quantity: dessertItem.dessert.quantity,
-          priceInCents: dessertItem.priceInCents, // get price from order item
-          discountedAmountInCents: dessertItem.discountedAmountInCents,
-          promoId: dessertItem.promoId,
-          customisations: {
-            create: dessertItem.customisations.map((customisationsItem) => ({
-              customisation: {
-                connect: {
-                  id: customisationsItem.id, // Ensure customisation exists before connecting
-                },
-              },
-              quantity: customisationsItem.quantity,
-            })),
-          },
-        })),
-      },
-    },
-    select: {
-      id: true,
-      tempOrderId: true,
-      status: true,
-      createdAt: true,
-      customerFirstName: true,
-      customerLastName: true,
-      customerEmail: true,
-      customerPhoneNumber: true,
-      priceInCents: true,
-      discountedAmountInCents: true,
-      pickUpTime: true,
-      dineIn: true,
-      pickedUpAt: true,
-      GST: true,
-      notified: true,
-      desserts: {
-        select: {
-          orderId: true,
-          id: true,
-          quantity: true,
-          priceInCents: true,
-          discountedAmountInCents: true,
-          dessert: {
-            select: {
-              id: true,
-              name: true,
-              chineseName: true,
-              imagePath: true,
-              categoryId: true,
-            },
-          },
-          customisations: {
-            select: {
-              id: true,
-              quantity: true,
-              discountedAmountInCents: true,
-              customisation: {
-                select: {
-                  id: true,
-                  name: true,
-                  chineseName: true,
-                  priceInCents: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  })
-
-  await resend.emails.send({
-    from: '"Eversweet" <eversweet@eversweet.co.nz>',
-    to: orderData.customerEmail,
-    subject: "Order Confirmation",
-    react: EmailOrderConfirmation({ order: newOrder }),
-  })
-  if (
-    newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
-      1000 * 60 * 15 &&
-    newOrder.notified === false
-  ) {
-    emitNewOrder(newOrder)
-  }
-
-  return newOrder.id
 }
 
 export const signUp = async (req: Request, res: Response) => {
@@ -251,6 +115,20 @@ export const signUp = async (req: Request, res: Response) => {
       .json({ message: "User created", firstName: newUser.firstName ?? "" })
     return
   } catch (error) {
+    if ((error as Error).message.includes("limit")) {
+      res.status(429).json({
+        message: "We've reached our email limit. Please try again tomorrow.",
+      })
+      return
+    }
+
+    if ((error as Error).message.includes("domain")) {
+      res.status(400).json({
+        message: "Email service is not configured correctly.",
+      })
+      return
+    }
+
     res.status(500).json({ message: error })
     return
   }
@@ -314,6 +192,20 @@ export const signIn = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
+    if ((error as Error).message.includes("limit")) {
+      res.status(429).json({
+        message: "We've reached our email limit. Please try again tomorrow.",
+      })
+      return
+    }
+
+    if ((error as Error).message.includes("domain")) {
+      res.status(400).json({
+        message: "Email service is not configured correctly.",
+      })
+      return
+    }
+
     res.status(500).json({ message: error })
     return
   }
@@ -925,6 +817,20 @@ export const createOrder = async (req: Request, res: Response) => {
       res.status(400).json({
         message: "Invalid data",
         errors: error.errors, // This will give the validation errors
+      })
+      return
+    }
+
+    if ((error as Error).message.includes("limit")) {
+      res.status(429).json({
+        message: "We've reached our email limit. Please try again tomorrow.",
+      })
+      return
+    }
+
+    if ((error as Error).message.includes("domain")) {
+      res.status(400).json({
+        message: "Email service is not configured correctly.",
       })
       return
     }
