@@ -35,7 +35,7 @@ export default function VerifyEmail({ otp }: { otp: string }) {
                         className="h-auto rounded-xl object-cover mx-auto"
                       />
                       <Heading className="text-2xl font-bold text-center mt-10 mb-2 text-black">
-                        Verify your email address
+                        Verify your email address: {otp}
                       </Heading>
                       <Text className="text-center text-lg mb-4">
                         Thank you for signing up! Please verify your email
