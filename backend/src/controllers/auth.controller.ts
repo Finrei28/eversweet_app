@@ -186,7 +186,7 @@ export const createOrderForWebsite = async (
 }
 
 export const signUp = async (req: Request, res: Response) => {
-  const { email, password, firstName, lastName } = req.body
+  const { email, password, firstName, lastName, phoneNumber } = req.body
   if (!email) {
     res.status(400).json({ message: "Email is required" })
     return
@@ -201,6 +201,10 @@ export const signUp = async (req: Request, res: Response) => {
   }
   if (!lastName) {
     res.status(400).json({ message: "Last name is required" })
+    return
+  }
+  if (!phoneNumber) {
+    res.status(400).json({ message: "Phone number is required" })
     return
   }
   const existUser = await db.user.findFirst({
@@ -222,6 +226,7 @@ export const signUp = async (req: Request, res: Response) => {
           firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
         lastName:
           lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase(),
+        phone: phoneNumber,
         role: "USER",
         otp,
         otpExpiresAt,
