@@ -270,7 +270,7 @@ export const signIn = async (req: Request, res: Response) => {
       return
     }
 
-    if (!!user.emailVerified) {
+    if (!!user.emailVerified === false) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString()
       const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
       await db.user.update({
