@@ -269,6 +269,29 @@ export const signIn = async (req: Request, res: Response) => {
     return
   }
 
+  if (!!user.emailVerified) {
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        otp,
+        otpExpiresAt,
+      },
+      select: { id: true },
+    })
+    await resend.emails.send({
+      from: '"Eversweet" <eversweet@eversweet.co.nz>',
+      to: user.email,
+      subject: "Verify your email address",
+      react: VerifyEmail({ otp }),
+    })
+    res
+      .status(201)
+      .json({ message: "User needs to verify email", email: user.email })
+    return
+  }
+
   const token = jwt.sign(
     {
       userId: user.id,
