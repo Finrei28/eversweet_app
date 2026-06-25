@@ -18,6 +18,7 @@ import OTPInput from "@/_components/emailVerification"
 import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
 import { parsePhoneNumberFromString } from "libphonenumber-js"
+import validator from "validator"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
@@ -36,6 +37,10 @@ export default function SignUp() {
   const handleSignUp = async () => {
     if (!signupForm.email || !signupForm.password) {
       Alert.alert("Error", "Please enter both email and password.")
+      return
+    }
+    if (!validator.isEmail(signupForm.email)) {
+      Alert.alert("Error", "Please enter a valid email address.")
       return
     }
     const phone = parsePhoneNumberFromString(signupForm.phoneNumber, "NZ")

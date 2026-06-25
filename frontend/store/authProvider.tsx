@@ -111,8 +111,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signOutProvider = async () => {
     try {
-      await removeToken()
       await removePushToken()
+      await removeToken()
       setToken(null)
       setUsersMembership(null)
     } catch (error) {

@@ -136,7 +136,7 @@ export async function removePushToken() {
 
     return true
   } catch (error) {
-    console.error("Error remove push token:", error)
+    console.error("Error removing push token:", error)
     return false
   }
 }

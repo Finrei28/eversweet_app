@@ -302,7 +302,7 @@ export const getMembershipDetails = async (): Promise<MembershipDetails> => {
   }
 }
 
-export const getUsersMembership = async (): Promise<UsersMembership> => {
+export const getUsersMembership = async (): Promise<UsersMembership | null> => {
   const token = await SecureStore.getItemAsync("token")
 
   if (!token) {

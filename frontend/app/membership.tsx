@@ -175,6 +175,10 @@ function MembershipContent() {
       Alert.alert("Please agree to the Terms & Privacy to continue.")
       return
     }
+    if (savedCards.length === 0) {
+      Alert.alert("Please add a payment method to continue.")
+      return
+    }
     if (!selectedCardId) {
       Alert.alert("Please select a payment method to continue.")
       return

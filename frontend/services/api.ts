@@ -85,7 +85,7 @@ export async function signIn(
     password: string
   },
   signInProvider: (token: string) => Promise<void>, // pass from context
-): Promise<{ name: string; emailVerified: string }> {
+): Promise<{ name: string; emailVerified: boolean }> {
   if (!email || !password) {
     throw new Error("Email and password are required.")
   }
@@ -109,7 +109,10 @@ export async function signIn(
       throw new Error("Failed to sign in, please try again later.")
     }
 
-    await signInProvider(data.token) // Set token and user
+    if (data.token) {
+      await signInProvider(data.token) // Set token and user
+    }
+
     return {
       name: data.name,
       emailVerified: data.emailVerified,

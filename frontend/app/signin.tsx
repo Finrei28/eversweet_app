@@ -74,14 +74,7 @@ export default function signin() {
         router.replace("/") // fallback
       }
     } catch (error) {
-      const message = (error as Error).message
-      if (message.includes("invalid login credentials")) {
-        Alert.alert("Error", "Invalid email or password.")
-      } else if (message.includes("User not found")) {
-        Alert.alert("Error", "User not found. Please sign up.")
-      } else {
-        Alert.alert("Error", (error as Error).message)
-      }
+      Alert.alert("Error", (error as Error).message)
     } finally {
       setIsLoading(false)
     }
