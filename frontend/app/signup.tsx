@@ -17,12 +17,14 @@ import { createAccount } from "@/services/api"
 import OTPInput from "@/_components/emailVerification"
 import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
+import { parsePhoneNumberFromString } from "libphonenumber-js"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
     firstName: "",
     lastName: "",
     email: "",
+    phoneNumber: "",
     password: "",
     confirmPassword: "",
   })
@@ -34,6 +36,11 @@ export default function SignUp() {
   const handleSignUp = async () => {
     if (!signupForm.email || !signupForm.password) {
       Alert.alert("Error", "Please enter both email and password.")
+      return
+    }
+    const phone = parsePhoneNumberFromString(signupForm.phoneNumber, "NZ")
+    if (!phone?.isValid()) {
+      Alert.alert("Error", "Please enter a valid phone number")
       return
     }
     if (signupForm.password !== signupForm.confirmPassword) {
@@ -56,6 +63,7 @@ export default function SignUp() {
       firstName: signupForm.firstName,
       lastName: signupForm.lastName,
       email: signupForm.email,
+      phoneNumber: phone.format("E.164"),
       password: signupForm.password,
     }
     try {
@@ -135,6 +143,22 @@ export default function SignUp() {
                       value={signupForm.email}
                       onChangeText={(text) =>
                         setSignupForm((prev) => ({ ...prev, email: text }))
+                      }
+                    />
+                  </View>
+                  <View className="w-3/4 mb-4">
+                    <Text className="text-lg text-gray-500">Phone Number:</Text>
+
+                    <TextInput
+                      className="border border-gray-300 rounded-lg p-4"
+                      keyboardType="phone-pad"
+                      placeholder="+64 21 123 4567"
+                      value={signupForm.phoneNumber}
+                      onChangeText={(text) =>
+                        setSignupForm((prev) => ({
+                          ...prev,
+                          phoneNumber: text,
+                        }))
                       }
                     />
                   </View>
