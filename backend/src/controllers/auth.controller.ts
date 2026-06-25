@@ -262,7 +262,8 @@ export const signIn = async (req: Request, res: Response) => {
     res.status(400).json("Email and password is required")
     return
   }
-  const user = await db.user.findUnique({ where: { email } })
+  const normalisedEmail = email.trim().toLowerCase()
+  const user = await db.user.findUnique({ where: { email: normalisedEmail } })
   if (!user || !(await bcrypt.compare(password, user.password))) {
     res.status(401).json("Invalid credentials")
     return
@@ -290,9 +291,11 @@ export const signIn = async (req: Request, res: Response) => {
 
 export const checkVerificationCode = async (req: Request, res: Response) => {
   const { verificationCode, email } = req.body
+
   try {
+    const normalisedEmail = email.trim().toLowerCase()
     const user = await db.user.findUnique({
-      where: { email },
+      where: { email: normalisedEmail },
       select: {
         id: true,
         otpExpiresAt: true,
