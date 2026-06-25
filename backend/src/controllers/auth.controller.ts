@@ -286,9 +286,11 @@ export const signIn = async (req: Request, res: Response) => {
       subject: "Verify your email address",
       react: VerifyEmail({ otp }),
     })
-    res
-      .status(201)
-      .json({ message: "User needs to verify email", email: user.email })
+    res.status(201).json({
+      message: "User needs to verify email",
+      name: user.firstName ?? "",
+      emailVerified: !!user.emailVerified,
+    })
     return
   }
 
