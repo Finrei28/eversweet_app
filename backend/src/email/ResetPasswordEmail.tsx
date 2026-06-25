@@ -14,7 +14,7 @@ import {
 } from "@react-email/components"
 import tailwindConfig from "../tailwind.config.js"
 
-export default function VerifyEmail({ otp }: { otp: string }) {
+export default function ResetPasswordEmail({ otp }: { otp: string }) {
   return (
     <Html lang="en" className="bg-white" dir="ltr">
       <Tailwind config={tailwindConfig}>
@@ -35,13 +35,13 @@ export default function VerifyEmail({ otp }: { otp: string }) {
                         className="h-auto rounded-xl object-cover mx-auto"
                       />
                       <Heading className="text-2xl font-bold text-center mt-10 mb-2 text-black">
-                        Reset Password Code
+                        Reset Password Code: {otp}
                       </Heading>
                       <Text className="text-center text-lg mb-4">
                         Please use the code below to reset your password:
                       </Text>
                       <Text className="text-center text-lg mb-4">
-                        The code is valid for 5 minutes.
+                        The code is valid for 15 minutes.
                       </Text>
                     </Column>
                   </Row>

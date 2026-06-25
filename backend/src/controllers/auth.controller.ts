@@ -4,15 +4,13 @@ import jwt from "jsonwebtoken"
 import { db } from "../lib/db"
 import { CreateOrderSchema } from "../utils/schema"
 import { z } from "zod"
-import { Resend } from "resend"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../index"
 import { Status } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { formatInTimeZone } from "date-fns-tz"
-
-const resend = new Resend(process.env.RESEND_API_KEY!)
+import EmailSender from "../lib/emailSender"
 
 //Helper function
 const incrementLoyaltyPoints = async (userId: string, points: number) => {
@@ -104,32 +102,14 @@ export const signUp = async (req: Request, res: Response) => {
         },
       },
     })
-    await resend.emails.send({
-      from: '"Eversweet" <eversweet@eversweet.co.nz>',
-      to: email,
-      subject: "Verify your email address",
-      react: VerifyEmail({ otp }),
-    })
+    const subject = "Verify your email address"
+    await EmailSender(email, subject, VerifyEmail({ otp }))
     res
       .status(201)
       .json({ message: "User created", firstName: newUser.firstName ?? "" })
     return
   } catch (error) {
-    if ((error as Error).message.includes("limit")) {
-      res.status(429).json({
-        message: "We've reached our email limit. Please try again tomorrow.",
-      })
-      return
-    }
-
-    if ((error as Error).message.includes("domain")) {
-      res.status(400).json({
-        message: "Email service is not configured correctly.",
-      })
-      return
-    }
-
-    res.status(500).json({ message: error })
+    res.status(500).json({ message: (error as Error).message })
     return
   }
 }
@@ -159,12 +139,8 @@ export const signIn = async (req: Request, res: Response) => {
         },
         select: { id: true },
       })
-      await resend.emails.send({
-        from: '"Eversweet" <eversweet@eversweet.co.nz>',
-        to: user.email,
-        subject: "Verify your email address",
-        react: VerifyEmail({ otp }),
-      })
+      const subject = "Verify your email address"
+      await EmailSender(user.email, subject, VerifyEmail({ otp }))
       res.status(200).json({
         message: "User needs to verify email",
         name: user.firstName ?? "",
@@ -787,13 +763,12 @@ export const createOrder = async (req: Request, res: Response) => {
     // delete cart and send email and emit order
 
     await db.cart.delete({ where: { userId } })
-
-    await resend.emails.send({
-      from: '"Eversweet" <eversweet@eversweet.co.nz>',
-      to: user.email,
-      subject: "Order Confirmation",
-      react: EmailOrderConfirmation({ order: newOrder }),
-    })
+    const subject = "Order Confirmation"
+    await EmailSender(
+      user.email,
+      subject,
+      EmailOrderConfirmation({ order: newOrder }),
+    )
     if (
       (newOrder.pickUpTime.getTime() - new Date().getTime() <= // if pick up now or <= than 15 mins from now then send order immediately else cron job checks for future orders
         1000 * 60 * 15 ||

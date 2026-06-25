@@ -1,6 +1,5 @@
 import { Request, Response } from "express"
 import { db } from "../lib/db"
-import { Resend } from "resend"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import { storeHours, storeInfo } from "../lib/storeInfo"
@@ -10,8 +9,8 @@ import { announcements } from "../lib/announcements"
 import { homepageCards } from "../lib/homePageContent"
 import { privacyPolicy } from "../legal/privacy-policy"
 import { termAndConditions } from "../legal/term-and-conditions"
-
-const resend = new Resend(process.env.RESEND_API_KEY!)
+import VerifyEmail from "../email/verifyEmail"
+import emailSender from "../lib/emailSender"
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
@@ -91,20 +90,23 @@ export const getAvailableCustomisations = async (
 }
 
 export const getResetPasswordCode = async (req: Request, res: Response) => {
+  // this function is used to resend OTP to the user
   const { email } = req.body
   if (!email) {
     res.status(400).json({ message: "Email is required" })
     return
   }
+  const normalisedEmail = email.trim().toLowerCase()
   const existUser = await db.user.findFirst({
-    where: { email },
+    where: { email: normalisedEmail },
   })
   if (!existUser) {
     res.status(200) // to prevent email enumeration
     return
   }
+  const isEmailVerified = !!existUser.emailVerified
   const otp = Math.floor(100000 + Math.random() * 900000).toString()
-  const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000)
+  const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
   try {
     await db.user.update({
       where: { id: existUser.id },
@@ -113,29 +115,17 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
         otpExpiresAt,
       },
     })
-    await resend.emails.send({
-      from: '"Eversweet" <eversweet@eversweet.co.nz>',
-      to: email,
-      subject: "Reset your password",
-      react: ResetPasswordEmail({ otp }),
-    })
+    const subject = isEmailVerified
+      ? "Reset your password"
+      : "Verify your email address"
+    const react = isEmailVerified
+      ? ResetPasswordEmail({ otp })
+      : VerifyEmail({ otp })
+    await emailSender(existUser.email, subject, react)
     res.status(200).json({ success: true })
     return
   } catch (error) {
-    if ((error as Error).message.includes("limit")) {
-      res.status(429).json({
-        message: "We've reached our email limit. Please try again tomorrow.",
-      })
-      return
-    }
-
-    if ((error as Error).message.includes("domain")) {
-      res.status(400).json({
-        message: "Email service is not configured correctly.",
-      })
-      return
-    }
-    res.status(500).json({ message: error })
+    res.status(500).json({ message: (error as Error).message })
     return
   }
 }
