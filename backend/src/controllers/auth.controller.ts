@@ -27,7 +27,16 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
     select: { points: true },
   })
 
-  if (!existing) throw new Error("User loyalty record not found")
+  if (!existing) {
+    const newLoyalty = await db.loyalty.create({
+      data: {
+        userId: userId,
+        points: numericPoints,
+        records: { create: { change: numericPoints, reason: "EARNED" } },
+      },
+    })
+    return newLoyalty.points
+  }
 
   const updated = await db.loyalty.update({
     where: { userId },
@@ -263,7 +272,11 @@ export const signIn = async (req: Request, res: Response) => {
       expiresIn: "90d",
     },
   )
-  res.status(200).json({ token, name: user.firstName ?? "" })
+  res.status(200).json({
+    token,
+    name: user.firstName ?? "",
+    emailVerified: !!user.emailVerified,
+  })
   return
 }
 
@@ -272,6 +285,14 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
   try {
     const user = await db.user.findUnique({
       where: { email },
+      select: {
+        id: true,
+        otpExpiresAt: true,
+        otp: true,
+        email: true,
+        role: true,
+        firstName: true,
+      },
     })
     if (!user) {
       res.status(400).json({ message: "No user found" })
@@ -304,9 +325,17 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
       },
       process.env.JWT_SECRET!,
       {
-        expiresIn: "60d",
+        expiresIn: "90d",
       },
     )
+
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: new Date(),
+      },
+      select: { id: true },
+    })
 
     res.status(200).json({
       message: "Verification code is valid.",
