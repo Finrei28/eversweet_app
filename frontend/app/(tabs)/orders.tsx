@@ -96,7 +96,7 @@ export default function Orders() {
             onPress={() => {
               router.push({
                 pathname: "/signin",
-                params: { redirectTo: "/rewards" },
+                params: { redirectTo: "/orders" },
               })
             }}
             className="bg-primary p-3 rounded-lg w-1/3 items-center mt-5"

@@ -32,7 +32,6 @@ export default function SignUp() {
   const router = useRouter()
 
   const handleSignUp = async () => {
-    setIsCreating(true)
     if (!signupForm.email || !signupForm.password) {
       Alert.alert("Error", "Please enter both email and password.")
       return
@@ -60,6 +59,7 @@ export default function SignUp() {
       password: signupForm.password,
     }
     try {
+      setIsCreating(true)
       await createAccount(signupData)
       setVerifyEmail(true)
     } catch (error) {
