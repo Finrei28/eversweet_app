@@ -187,7 +187,7 @@ const OTPInput = ({
 
   return (
     <>
-      <Text className="mt-36 text-4xl font-bold text-primary text-center">
+      <Text className="mt-36 text-4xl font-bold text-primary text-center bg-background">
         Verify your email
       </Text>
       <View className="flex-1 justify-between items-center">

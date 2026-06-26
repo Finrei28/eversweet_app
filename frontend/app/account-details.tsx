@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
+  Alert,
 } from "react-native"
 import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
@@ -13,6 +14,7 @@ import BouncingLoader from "@/_components/loader"
 import useFetch from "@/services/use_fetch"
 import { getUserProfile, updateUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
+import parsePhoneNumberFromString from "libphonenumber-js"
 
 const FormField = ({
   label,
@@ -92,9 +94,16 @@ export default function AccountDetails() {
   }
 
   const handleSave = async () => {
+    const phone = parsePhoneNumberFromString(formData.phone, "NZ")
+    if (!phone?.isValid()) {
+      Alert.alert("Error", "Please enter a valid phone number")
+      return
+    }
     try {
+      const newData = { ...formData, phone: phone.format("E.164") }
+
       // Call API to update profile
-      await updateUserProfile(formData)
+      await updateUserProfile(newData)
       setIsEditing(false)
       refetchProfile()
     } catch (error) {

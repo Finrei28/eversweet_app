@@ -250,6 +250,10 @@ export const hasMembershipPopupExpired = async (): Promise<boolean> => {
 
 export async function syncPushToken() {
   try {
+    const authToken = await getToken()
+    if (!authToken) {
+      return
+    }
     const pushToken = await registerForPushNotificationsAsync()
 
     const storedToken = await getPushToken()

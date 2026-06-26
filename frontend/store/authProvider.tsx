@@ -13,13 +13,7 @@ import { getUsersMembership } from "@/services/stripe-api"
 import { getStoreHours } from "@/services/api"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
-import {
-  getPushToken,
-  registerForPushNotificationsAsync,
-  removePushToken,
-  savePushToken,
-  syncPushToken,
-} from "@/services/notifications"
+import { removePushToken, syncPushToken } from "@/services/notifications"
 
 interface DecodedToken {
   userId: string
