@@ -18,6 +18,7 @@ class newOrdersManager {
   }
 
   subscribe(callback: (order: Order | null) => void) {
+    callback(this.currentOrder)
     this.eventEmitter.on("orderChanged", callback)
 
     return () => {

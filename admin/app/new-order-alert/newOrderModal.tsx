@@ -9,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useAudioPlayer } from "expo-audio"
 import { router } from "expo-router"
 import { StatusBar } from "expo-status-bar"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Animated,
   Dimensions,
@@ -27,6 +27,7 @@ export default function NewOrderModal({
   visible: boolean
 }) {
   const { updateOrderStatus } = useOrderContext()
+  const [accepting, setAccepting] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
   const windowHeight = Dimensions.get("window").height
   const hasAccepted = useRef(false)
@@ -80,38 +81,46 @@ export default function NewOrderModal({
     }
 
     // Check if auto-accept is enabled
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
     const checkAutoAccept = async () => {
       const autoAccept = await AsyncStorage.getItem("autoAccept")
-      if (autoAccept === "true" && order) {
-        setTimeout(() => {
-          handleAccept()
-        }, 3000) // Auto-accept after 2 seconds
+
+      if (autoAccept === "true") {
+        timeout = setTimeout(handleAccept, 2500)
       }
     }
 
     checkAutoAccept()
-  }, [player])
 
-  if (!visible) {
-    return
-  }
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+      if (player.playing) {
+        player.pause()
+        void player.seekTo(0)
+      }
+    }
+  }, [player, order.id])
 
   const handleAccept = async () => {
     if (hasAccepted.current) return
-
+    setAccepting(true)
     hasAccepted.current = true
-
     try {
       await updateOrderStatus(order.id, "ACCEPTED")
+
+      newOrderServices.resolveCurrentAlert()
+      setAccepting(false)
 
       Animated.timing(fadeAnim, {
         toValue: 0,
         duration: 200,
         useNativeDriver: true,
-      }).start(() => {
-        newOrderServices.resolveCurrentAlert()
-      })
+      }).start()
     } catch (error) {
+      setAccepting(false)
       hasAccepted.current = false
       console.error(error)
     }
@@ -269,7 +278,7 @@ export default function NewOrderModal({
               <TouchableOpacity
                 className="flex-1 bg-green-500 py-3 rounded-lg items-center justify-center ml-2"
                 onPress={handleAccept}
-                disabled={hasAccepted.current}
+                disabled={accepting}
               >
                 <Text className="text-white font-medium">Accept</Text>
               </TouchableOpacity>

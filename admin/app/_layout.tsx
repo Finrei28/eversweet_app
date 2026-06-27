@@ -24,7 +24,7 @@ import "./global.css"
 import NewOrderModal from "./new-order-alert/newOrderModal"
 
 function AppLayout() {
-  const { authenticated, loading, setAuthenticated } = useAuth()
+  const { authenticated, loading } = useAuth()
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null)
   const router = useRouter()
   const [fontsLoaded] = useFonts({
