@@ -39,6 +39,8 @@ export default function Settings() {
       ? new Date(restaurantStatus.unavailableUntil)
       : new Date(),
   )
+  const [updatingRestaurantStatus, setUpdatingRestaurantStatus] =
+    useState(false)
 
   const getRestaurantStatus = async () => {
     const restaurantStatus = await getRestaurantStatusAPI()
@@ -142,6 +144,7 @@ export default function Settings() {
     date?: Date,
   ) => {
     try {
+      setUpdatingRestaurantStatus(true)
       await updateRestaurantStatus(availability, date)
       await getRestaurantStatus()
       Toast.show({
@@ -161,6 +164,8 @@ export default function Settings() {
         autoHide: true,
         bottomOffset: 60,
       })
+    } finally {
+      setUpdatingRestaurantStatus(false)
     }
   }
 
@@ -249,6 +254,7 @@ export default function Settings() {
                   !restaurantStatus?.dineInAvailability,
                 )
               }
+              disabled={updatingRestaurantStatus}
             >
               <Text className="text-white font-medium">
                 {restaurantStatus?.dineInAvailability
