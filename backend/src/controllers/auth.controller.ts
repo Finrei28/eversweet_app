@@ -506,26 +506,26 @@ export const createOrder = async (req: Request, res: Response) => {
       return
     }
 
-    const todayNZ = formatInTimeZone(
-      new Date(),
+    const pickUpNZDate = formatInTimeZone(
+      new Date(parsedBody.pickUpTime),
       "Pacific/Auckland",
       "yyyy-MM-dd",
     )
 
     let counter = await db.tempOrderCounter.findUnique({
-      where: { date: todayNZ },
+      where: { date: pickUpNZDate },
     })
 
     if (!counter) {
       counter = await db.tempOrderCounter.create({
         data: {
-          date: todayNZ,
+          date: pickUpNZDate,
           counter: 6000,
         },
       })
     } else {
       counter = await db.tempOrderCounter.update({
-        where: { date: todayNZ },
+        where: { date: pickUpNZDate },
         data: {
           counter: {
             increment: 1,
