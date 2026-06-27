@@ -9,13 +9,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useAudioPlayer } from "expo-audio"
 import { router } from "expo-router"
 import { StatusBar } from "expo-status-bar"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Animated,
-  Dimensions,
   Modal,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native"
 
@@ -29,7 +29,7 @@ export default function NewOrderModal({
   const { updateOrderStatus } = useOrderContext()
   const [accepting, setAccepting] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
-  const windowHeight = Dimensions.get("window").height
+  const { height } = useWindowDimensions()
   const hasAccepted = useRef(false)
   const player = useAudioPlayer(
     require("../../assets/sounds/chinese-justin.mp3"),
@@ -44,7 +44,31 @@ export default function NewOrderModal({
   }, [order.id])
 
   // Play notification sound and animation when component mounts
+  const handleAccept = useCallback(async () => {
+    if (hasAccepted.current) return
+
+    hasAccepted.current = true
+    setAccepting(true)
+
+    try {
+      await updateOrderStatus(order.id, "ACCEPTED")
+
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        newOrderServices.resolveCurrentAlert()
+      })
+    } catch (error) {
+      hasAccepted.current = false
+      setAccepting(false)
+      console.error(error)
+    }
+  }, [order.id, updateOrderStatus, fadeAnim])
+
   useEffect(() => {
+    fadeAnim.setValue(0)
     const fadeIn = Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 300,
@@ -52,33 +76,16 @@ export default function NewOrderModal({
     })
 
     fadeIn.start()
-    if (player) {
-      const checkSoundAndPlay = async () => {
-        const soundEnabled = await AsyncStorage.getItem("soundEnabled")
-        if (soundEnabled !== "false") {
-          player.play()
-        }
-      }
-      checkSoundAndPlay()
+    let cancelled = false
 
-      // Set up the listener for the looping logic
-      // player.addListener("playbackStatusUpdate", async (status) => {
-      //   const soundEnabled = await AsyncStorage.getItem("soundEnabled")
-      //   // If sound is not explicitly disabled
-      //   if (soundEnabled !== "false") {
-      //     try {
-      //       // Check if playback has finished
-      //       if (status.didJustFinish) {
-      //         // Rewind and play again
-      //         await player.seekTo(0)
-      //         player.play()
-      //       }
-      //     } catch (error) {
-      //       console.error("Error playing sound", error)
-      //     }
-      //   }
-      // })
+    const checkSoundAndPlay = async () => {
+      const soundEnabled = await AsyncStorage.getItem("soundEnabled")
+      if (cancelled) return
+      if (soundEnabled !== "false") {
+        player.play()
+      }
     }
+    void checkSoundAndPlay()
 
     // Check if auto-accept is enabled
     let timeout: ReturnType<typeof setTimeout> | undefined
@@ -86,45 +93,24 @@ export default function NewOrderModal({
     const checkAutoAccept = async () => {
       const autoAccept = await AsyncStorage.getItem("autoAccept")
 
+      if (cancelled) return
+
       if (autoAccept === "true") {
         timeout = setTimeout(handleAccept, 2500)
       }
     }
 
-    checkAutoAccept()
+    void checkAutoAccept()
 
     return () => {
+      cancelled = true
       if (timeout) {
         clearTimeout(timeout)
       }
-      if (player.playing) {
-        player.pause()
-        void player.seekTo(0)
-      }
+      player.pause()
+      void player.seekTo(0)
     }
-  }, [player, order.id])
-
-  const handleAccept = async () => {
-    if (hasAccepted.current) return
-    setAccepting(true)
-    hasAccepted.current = true
-    try {
-      await updateOrderStatus(order.id, "ACCEPTED")
-
-      newOrderServices.resolveCurrentAlert()
-      setAccepting(false)
-
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start()
-    } catch (error) {
-      setAccepting(false)
-      hasAccepted.current = false
-      console.error(error)
-    }
-  }
+  }, [player, order.id, handleAccept])
 
   // const handleDecline = async () => {
   //   // Fade out animation before closing
@@ -158,7 +144,7 @@ export default function NewOrderModal({
               {
                 translateY: fadeAnim.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [windowHeight * 0.1, 0],
+                  outputRange: [height * 0.1, 0],
                 }),
               },
             ],

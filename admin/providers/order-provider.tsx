@@ -115,7 +115,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           await AsyncStorage.getItem("auto_print_enabled")
 
         if (autoPrintSetting === "true") {
-          // store the order for printing
+          // store the order for printing and add to queue
 
           await addJob(existingOrder)
           printerService.enqueue({
@@ -125,8 +125,19 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             status: "pending",
           })
         }
+        setCurrentOrders((prev) => {
+          const exists = prev.some((o) => o.id === existingOrder.id)
 
-        await fetchOrders()
+          if (exists) {
+            return prev.map((order) =>
+              order.id === existingOrder.id
+                ? { ...order, status: "ACCEPTED" }
+                : order,
+            )
+          }
+
+          return [...prev, { ...existingOrder, status: "ACCEPTED" }]
+        }) // if duplicate -> update status, if new -> add to current orders
         // } else if (newStatus === "DECLINED") {
       } else if (newStatus === "PICKED_UP") {
         // Move from current to completed

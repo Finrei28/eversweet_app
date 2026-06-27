@@ -5,12 +5,10 @@ export type Order = {
   discountedAmountInCents: number
   GST: number
   createdAt: Date
-  updatedAt: Date
   customerFirstName: string
   customerLastName: string
   customerEmail: string
   customerPhoneNumber: string | null
-  completedAt: Date | null
   pickedUpAt: Date | null
   pickUpTime: Date
   dineIn: Boolean

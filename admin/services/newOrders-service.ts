@@ -54,7 +54,7 @@ class newOrdersManager {
         try {
           await this.alertNewOrder(queuedJob.order)
         } catch (error) {
-          console.error(`Failed to print order ${queuedJob.id}`, error)
+          console.error(`Failed to queue order ${queuedJob.id}`, error)
           this.queue.unshift(queuedJob)
           break
 
