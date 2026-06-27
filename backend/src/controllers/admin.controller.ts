@@ -566,7 +566,6 @@ export const getFutureOrders = async () => {
         priceInCents: true,
         discountedAmountInCents: true,
         dineIn: true,
-        source: true,
         notified: true,
         GST: true,
         appUserId: true,
@@ -607,16 +606,16 @@ export const getFutureOrders = async () => {
 
     //@ts-ignore
     const filteredOrders = orders.filter((order) => {
-      const timeBetween = order.pickUpTime.getTime() - order.createdAt.getTime()
       if (order.notified === true) return false
       // Calculate how early we should start preparing based on dessert count
       const count = order.desserts.reduce(
         (total, item) => total + item.quantity,
         0,
       )
-      let minutesBefore = 16 // default to item count >= 6, taking 15 minutes to prepare
-      if (count < 3) minutesBefore = 6
-      else if (count < 6) minutesBefore = 11
+      let minutesBefore = 21 // default to item count > 6, taking 20 minutes to prepare
+      if (count === 1) minutesBefore = 6
+      else if (count <= 3) minutesBefore = 11
+      else if (count <= 6) minutesBefore = 16
 
       const thresholdTime = new Date(
         order.pickUpTime.getTime() - minutesBefore * 60 * 1000,
@@ -626,7 +625,7 @@ export const getFutureOrders = async () => {
     })
 
     for (const order of filteredOrders) {
-      emitNewOrder(order) // change notified to true on the frontend when the frontend accepts the order.
+      emitNewOrder(order) // change notified to true when order is accepted at updateOrderStatus()
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)
