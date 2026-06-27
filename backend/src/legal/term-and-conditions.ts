@@ -58,11 +58,35 @@ export const termAndConditions = {
       ],
     },
     {
+      heading: "8. Discounts",
+      list: [
+        "Discounts available on the app or website are only valid online and may not be redeemable in-store",
+        "Only one discount can be applied per item, the highest discount will be applied if both membership and promotional discounts are on.",
+        "Discounts may be modified, suspended, or removed at any time without notice.",
+        "Discounts are non-transferable and may only be used by the account they are issued to.",
+        "Discounts have no cash value and cannot be exchanged for cash or credit.",
+        "We reserve the right to cancel discounts or orders if misuse, abuse, or fraud is suspected.",
+        "Discounts may only apply to selected items, categories, or user groups as specified.",
+      ],
+    },
+    {
       heading: "8. Loyalty Points & Promotions",
       list: [
         "Loyalty points have no cash value and cannot be exchanged for cash.",
         "We reserve the right to modify or cancel promotions at any time.",
         "Promotional offers cannot be combined unless stated otherwise.",
+      ],
+    },
+    {
+      heading: "8. Membership and Membership Offers",
+      list: [
+        "Membership will not be refundable if any membership offers have been used or past 24 hours after purchase.",
+        "Any membership offer that require additional purchase to unlock MUST be purchased TOGETHER in one order.",
+        "Membership pricing may change in the future.",
+        "Membership discount rates and benefits may be updated at any time.",
+        "Memberships are non-transferable and may only be used by the account they are issued to.",
+        "Membership benefits are only valid while the membership is active and in good standing.",
+        "We reserve the right to suspend or revoke membership benefits in cases of suspected misuse or fraud.",
       ],
     },
     {
