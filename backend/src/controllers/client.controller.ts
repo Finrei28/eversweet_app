@@ -231,9 +231,13 @@ export const getStoreInfo = (req: Request, res: Response) => {
 
 export const restaurantStatus = async (req: Request, res: Response) => {
   const restaurant = await db.restaurantStatus.findFirst()
+  if (!restaurant) {
+    res.status(404).json({ message: "Could not find selected store" })
+    return
+  }
   const restaurantStatus = {
-    dineInAvailability: restaurant?.dineInAvailability,
-    unavailableUntil: restaurant?.unavailableUntil,
+    dineInAvailability: restaurant.dineInAvailability,
+    unavailableUntil: restaurant.unavailableUntil,
   }
   res.status(200).json({ restaurantStatus })
   return

@@ -712,12 +712,6 @@ export const cancelMembership = async (req: Request, res: Response) => {
       return
     }
 
-    await db.membership.updateMany({
-      where: { stripeSubscriptionId: membership.stripeSubscriptionId },
-      data: {
-        endDate: new Date(subscription.cancel_at * 1000), // JS Date from timestamp
-      },
-    })
     res
       .status(201)
       .json({ success: true, endDate: new Date(subscription.cancel_at * 1000) })
