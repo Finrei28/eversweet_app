@@ -11,6 +11,7 @@ import {
   showOffers,
   signIn,
   signUp,
+  updateAnonymousStatus,
   updateUser,
 } from "../controllers/auth.controller"
 import { authenticateToken } from "../middleware/authentication"
@@ -29,5 +30,6 @@ router.post("/createOrder", authenticateToken, createOrder)
 router.get("/orderStatus/:id", authenticateToken, orderStatus)
 router.get("/showOffers", authenticateToken, showOffers)
 router.get("/getLeaderBoard", authenticateToken, getLeaderBoard)
+router.patch("/updateAnonymousStatus", authenticateToken, updateAnonymousStatus)
 
 export default router

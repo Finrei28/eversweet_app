@@ -274,6 +274,7 @@ export const getUser = async (req: Request, res: Response) => {
         firstName: true,
         lastName: true,
         phone: true,
+        anonymousEnabled: true,
         // exclude sensitive fields like password
       },
     })
@@ -285,6 +286,28 @@ export const getUser = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error fetching user:", error)
+    res.status(500).json({ message: "Internal server error" })
+    return
+  }
+}
+
+export const updateAnonymousStatus = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorised" })
+      return
+    }
+    const { value } = req.body
+    const user = await db.user.update({
+      where: { id: userId },
+      data: { anonymousEnabled: value },
+      select: { anonymousEnabled: true },
+    })
+    res.status(200).json({ value: user.anonymousEnabled })
+    return
+  } catch (error) {
+    console.error("Error updating anonymous status:", error)
     res.status(500).json({ message: "Internal server error" })
     return
   }

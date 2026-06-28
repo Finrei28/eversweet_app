@@ -43,6 +43,7 @@ model User {
   emailVerified        DateTime?
   image                String?
   role                 Role
+  anonymousEnabled     Boolean         @default(false)
   requires2FAExpiresAt DateTime?
   otp                  String?
   otpExpiresAt         DateTime?
