@@ -197,7 +197,6 @@ export default function AccountDetails() {
             field="phone"
             isEditing={isEditing}
             handleChange={handleChange}
-            editable={formData.phone ? false : true}
           />
         </View>
       </ScrollView>
