@@ -2,6 +2,7 @@ import { Router } from "express"
 import {
   checkVerificationCode,
   createOrder,
+  getLeaderBoard,
   getOrder,
   getUser,
   getUserLoyaltyPoints,
@@ -27,5 +28,6 @@ router.post("/getUserOrders", authenticateToken, getUserOrders)
 router.post("/createOrder", authenticateToken, createOrder)
 router.get("/orderStatus/:id", authenticateToken, orderStatus)
 router.get("/showOffers", authenticateToken, showOffers)
+router.get("/getLeaderBoard", authenticateToken, getLeaderBoard)
 
 export default router

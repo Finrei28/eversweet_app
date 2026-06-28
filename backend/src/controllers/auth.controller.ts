@@ -593,7 +593,7 @@ export const createOrder = async (req: Request, res: Response) => {
                 id: dessertItem.dessert.id, // Ensure dessert exists before connecting
               },
             },
-
+            offerId: dessertItem.offerId, // connects offer order item to offer by using foreign key
             quantity: dessertItem.quantity,
             priceInCents: dessertItem.itemPriceInCents, // get price from order item
             discountedAmountInCents: dessertItem.discountedAmountInCents,
@@ -637,6 +637,7 @@ export const createOrder = async (req: Request, res: Response) => {
             quantity: true,
             priceInCents: true,
             discountedAmountInCents: true,
+            offerId: true,
             dessert: {
               select: {
                 id: true,
@@ -882,6 +883,7 @@ export const showOffers = async (req: Request, res: Response) => {
     }
 
     const offers = await db.offer.findMany({
+      where: { isActive: true },
       include: {
         dessert: {
           select: {
@@ -946,5 +948,69 @@ export const showOffers = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({ message: error })
     return
+  }
+}
+
+export const getLeaderBoard = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorised" })
+      return
+    }
+    const date = new Date()
+    const start = new Date(date.getFullYear(), date.getMonth(), 1)
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 1)
+
+    const leaderboard = await db.loyaltyRecord.groupBy({
+      by: ["loyaltyId"],
+      where: {
+        change: {
+          gt: 0,
+        },
+        createdAt: {
+          gte: start,
+          lt: end,
+        },
+      },
+
+      _sum: {
+        change: true,
+      },
+      orderBy: {
+        _sum: {
+          change: "desc",
+        },
+      },
+      take: 10,
+    })
+
+    const loyalties = await db.loyalty.findMany({
+      where: {
+        id: {
+          in: leaderboard.map((l) => l.loyaltyId),
+        },
+      },
+      select: {
+        id: true,
+        User: { select: { id: true, firstName: true, lastName: true } },
+      },
+    })
+    const loyaltyMap = new Map(loyalties.map((l) => [l.id, l]))
+
+    const result = leaderboard.map((entry) => {
+      const loyalty = loyaltyMap.get(entry.loyaltyId)
+
+      return {
+        user: loyalty?.User,
+        pointsEarned: entry._sum.change ?? 0,
+      }
+    })
+    res.status(200).json({ leaderboard: result })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Error getting leaderboard: " + (error as Error).message,
+    })
   }
 }

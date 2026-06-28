@@ -96,6 +96,7 @@ model Offer {
   name             String
   description      String?
   image            String?
+  isActive         Boolean           @default(true)
   dessertId        String?
   categoryId       String?
   itemPriceInCents Int?
@@ -298,7 +299,7 @@ model OrderDessert {
   loyaltyPointsUsed Int?
   dessert           Dessert                     @relation(fields: [dessertId], references: [id])
   order             Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  offer             Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offer             Offer?                      @relation(fields: [offerId], references: [id], onDelete: Cascade)
   customisations    OrderDessertCustomisation[]
 
   @@unique([orderId, dessertId, id])
