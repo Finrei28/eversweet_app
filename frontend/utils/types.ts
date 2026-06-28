@@ -325,3 +325,27 @@ export type StoreInfo = {
 export type StoreHours = {
   [key: string]: [string, string] | null
 }
+
+export type LeaderBoard = {
+  user: {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    anonymousEnabled: boolean
+  } | null
+  pointsEarned: number
+}[]
+
+export type UserLeaderBoardRank = {
+  position: number
+  points: number
+} | null
+
+export type UserDetails = {
+  id: string
+  email: string
+  firstName: string | null
+  lastName: string | null
+  phone: string | null
+  anonymousEnabled: boolean
+}

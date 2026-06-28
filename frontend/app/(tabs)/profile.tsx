@@ -12,6 +12,7 @@ import {
 } from "@expo/vector-icons"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
+import { Trophy } from "lucide-react-native"
 
 export default function Profile() {
   const router = useRouter()
@@ -151,6 +152,11 @@ export default function Profile() {
             }
             title="Membership"
             onPress={() => navigateTo("/membership")}
+          />
+          <ProfileMenuItem
+            icon={<Trophy size={24} color="#6B7280" />}
+            title="Leaderboard"
+            onPress={() => navigateTo("/leaderboard")}
           />
           <ProfileMenuItem
             icon={<Feather name="user" size={24} color="#6B7280" />}

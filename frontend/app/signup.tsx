@@ -57,11 +57,11 @@ export default function SignUp() {
       return
     }
     if (!signupForm.firstName) {
-      Alert.alert("Error", "Please enter your name.")
+      Alert.alert("Error", "Please enter your first name.")
       return
     }
     if (!signupForm.lastName) {
-      Alert.alert("Error", "Please enter your name.")
+      Alert.alert("Error", "Please enter your last name.")
       return
     }
     const signupData = {

@@ -8,13 +8,6 @@ import AntDesign from "@expo/vector-icons/AntDesign"
 import { useAuth } from "@/store/authProvider"
 
 export default function _layout() {
-  const { refetchUsersMembership } = useAuth()
-  useEffect(() => {
-    const fetchData = async () => {
-      await refetchUsersMembership()
-    }
-    fetchData()
-  }, [])
   return (
     <Tabs>
       <Tabs.Screen

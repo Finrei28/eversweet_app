@@ -42,7 +42,7 @@ export default function Index() {
   const [homePageContents, setHomePageContents] = useState<HomePageContent[]>(
     [],
   )
-  const { token, usersMembership } = useAuth()
+  const { token, usersMembership, loading: authLoading } = useAuth()
   const progressValue = useSharedValue(0)
   const [activeIndex, setActiveIndex] = useState(0)
   const screen = Dimensions.get("window")
@@ -67,7 +67,7 @@ export default function Index() {
     loadContents()
   }, [])
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />

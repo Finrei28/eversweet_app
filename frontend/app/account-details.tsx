@@ -6,13 +6,15 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Switch,
 } from "react-native"
 import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
-import useFetch from "@/services/use_fetch"
-import { getUserProfile, updateUserProfile } from "@/services/api"
+import { updateAnonymousStatus, updateUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
 import parsePhoneNumberFromString from "libphonenumber-js"
 
@@ -38,6 +40,7 @@ const FormField = ({
       {isEditing && editable ? (
         <TextInput
           value={value}
+          keyboardType={field === "phone" ? "phone-pad" : "default"}
           onChangeText={(text) => handleChange(field, text)}
           className="border border-gray-300 rounded-lg p-3 bg-white"
         />
@@ -53,7 +56,15 @@ const FormField = ({
 export default function AccountDetails() {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
-  const { token, loading: loadingToken } = useAuth()
+  const {
+    token,
+    loading: loadingToken,
+    setUserDetails,
+    userDetails,
+    refetchUserDetails,
+  } = useAuth()
+
+  const [isChanging, setIsChanging] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -63,12 +74,6 @@ export default function AccountDetails() {
     phone: "",
   })
 
-  const {
-    data: userProfile,
-    loading: profileLoading,
-    refetch: refetchProfile,
-  } = useFetch(getUserProfile)
-
   useEffect(() => {
     if (!loadingToken && !token) {
       router.push("/signin")
@@ -76,15 +81,15 @@ export default function AccountDetails() {
   }, [token, loadingToken])
 
   useEffect(() => {
-    if (userProfile) {
+    if (userDetails) {
       setFormData({
-        firstName: userProfile.firstName || "",
-        lastName: userProfile.lastName || "",
-        email: userProfile.email || "",
-        phone: userProfile.phone || "",
+        firstName: userDetails.firstName || "",
+        lastName: userDetails.lastName || "",
+        email: userDetails.email || "",
+        phone: userDetails.phone || "",
       })
     }
-  }, [userProfile])
+  }, [])
 
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({
@@ -95,6 +100,14 @@ export default function AccountDetails() {
 
   const handleSave = async () => {
     const phone = parsePhoneNumberFromString(formData.phone, "NZ")
+    if (!formData.firstName) {
+      Alert.alert("Error", "Please enter your first name")
+      return
+    }
+    if (!formData.lastName) {
+      Alert.alert("Error", "Please enter your last name")
+      return
+    }
     if (!phone?.isValid()) {
       Alert.alert("Error", "Please enter a valid phone number")
       return
@@ -105,13 +118,29 @@ export default function AccountDetails() {
       // Call API to update profile
       await updateUserProfile(newData)
       setIsEditing(false)
-      refetchProfile()
+      refetchUserDetails()
     } catch (error) {
       console.error("Failed to update profile:", error)
     }
   }
 
-  if (loadingToken || profileLoading) {
+  const handleAnonymousChange = async (value: boolean) => {
+    try {
+      console.log(value)
+      setIsChanging(true)
+      setUserDetails((prev) => {
+        if (!prev) return prev
+        return { ...prev, anonymousEnabled: value }
+      })
+      await updateAnonymousStatus(value)
+    } catch (error) {
+      console.error("Failed to update anonymous status: ", error)
+    } finally {
+      setIsChanging(false)
+    }
+  }
+
+  if (loadingToken) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />
@@ -128,78 +157,108 @@ export default function AccountDetails() {
   }
 
   return (
-    <View className="flex-1 bg-background">
-      <CustomHeader />
-      <ScrollView className="flex-1 px-4">
-        <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
-          <Text className="text-2xl font-bold">Account Details</Text>
-          {!isEditing ? (
-            <TouchableOpacity
-              onPress={() => setIsEditing(true)}
-              className="flex-row items-center"
-            >
-              <Feather name="edit-2" size={18} color="#6B7280" />
-              <Text className="ml-1 text-gray-500">Edit</Text>
-            </TouchableOpacity>
-          ) : (
-            <View className="flex-row">
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      className="flex-1"
+    >
+      <View className="flex-1 bg-background">
+        <CustomHeader />
+        <ScrollView
+          className="flex-1 px-4"
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
+            <Text className="text-2xl font-bold">Account Details</Text>
+            {!isEditing ? (
               <TouchableOpacity
-                onPress={() => {
-                  setIsEditing(false)
-                  if (userProfile) {
-                    setFormData({
-                      firstName: userProfile.firstName || "",
-                      lastName: userProfile.lastName || "",
-                      email: userProfile.email || "",
-                      phone: userProfile.phone || "",
-                    })
-                  }
-                }}
-                className="mr-4"
+                onPress={() => setIsEditing(true)}
+                className="flex-row items-center"
               >
-                <Text className="text-gray-500">Cancel</Text>
+                <Feather name="edit-2" size={18} color="#6B7280" />
+                <Text className="ml-1 text-gray-500">Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleSave}>
-                <Text className="text-primary font-medium">Save</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+            ) : (
+              <View className="flex-row">
+                <TouchableOpacity
+                  onPress={() => {
+                    setIsEditing(false)
+                    if (userDetails) {
+                      setFormData({
+                        firstName: userDetails.firstName || "",
+                        lastName: userDetails.lastName || "",
+                        email: userDetails.email || "",
+                        phone: userDetails.phone || "",
+                      })
+                    }
+                  }}
+                  className="mr-4"
+                >
+                  <Text className="text-gray-500">Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleSave}>
+                  <Text className="text-primary font-medium">Save</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
-        {/* Personal Information */}
-        <View className="bg-white rounded-xl shadow-sm p-4 mb-6 mt-10">
-          <Text className="text-lg font-medium mb-3">Personal Information</Text>
-          <FormField
-            label="First Name"
-            value={formData.firstName}
-            field="firstName"
-            isEditing={isEditing}
-            handleChange={handleChange}
-          />
-          <FormField
-            label="Last Name"
-            value={formData.lastName}
-            field="lastName"
-            isEditing={isEditing}
-            handleChange={handleChange}
-          />
-          <FormField
-            label="Email"
-            value={formData.email}
-            field="email"
-            isEditing={isEditing}
-            handleChange={handleChange}
-            editable={false}
-          />
-          <FormField
-            label="Phone"
-            value={formData.phone}
-            field="phone"
-            isEditing={isEditing}
-            handleChange={handleChange}
-          />
-        </View>
-      </ScrollView>
-    </View>
+          {/* Personal Information */}
+          <View className="bg-white rounded-xl shadow-sm p-4 mb-6 mt-10">
+            <Text className="text-lg font-medium mb-3">
+              Personal Information
+            </Text>
+            <FormField
+              label="First Name"
+              value={formData.firstName}
+              field="firstName"
+              isEditing={isEditing}
+              handleChange={handleChange}
+            />
+            <FormField
+              label="Last Name"
+              value={formData.lastName}
+              field="lastName"
+              isEditing={isEditing}
+              handleChange={handleChange}
+            />
+            <FormField
+              label="Email"
+              value={formData.email}
+              field="email"
+              isEditing={isEditing}
+              handleChange={handleChange}
+              editable={false}
+            />
+            <FormField
+              label="Phone"
+              value={formData.phone}
+              field="phone"
+              isEditing={isEditing}
+              handleChange={handleChange}
+            />
+          </View>
+          <View className="flex-row justify-between items-center py-4 px-5 bg-white rounded-xl mb-3">
+            <View className="flex-1">
+              <Text className="text-base font-medium mb-1">
+                Anonymous Status
+              </Text>
+              <Text className="text-sm text-gray-500 w-4/5">
+                Toggle to be anonymous on the leaderboard
+              </Text>
+            </View>
+            <View>
+              <Switch
+                value={userDetails?.anonymousEnabled}
+                onValueChange={handleAnonymousChange}
+                disabled={isChanging}
+                trackColor={{ false: "#D1D5DB", true: "#10B981" }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   )
 }

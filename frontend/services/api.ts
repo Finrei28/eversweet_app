@@ -17,6 +17,9 @@ import {
   TermAndConditions,
   StoreHours,
   StoreInfo,
+  LeaderBoard,
+  UserLeaderBoardRank,
+  UserDetails,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -270,7 +273,7 @@ export async function getAvailableCustomisations(
 //   }
 // }
 
-export async function getUserProfile() {
+export async function getUserProfile(): Promise<UserDetails> {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Unauthenticated")
@@ -323,6 +326,33 @@ export async function updateUserProfile(formData: AccountData) {
       throw new Error(data?.message || "Server error. Please try again later.")
     }
     return data.user
+  } catch (error: any) {
+    throw new Error(error?.message || "Something went wrong.")
+  }
+}
+
+export async function updateAnonymousStatus(value: boolean): Promise<boolean> {
+  const token = await SecureStore.getItemAsync("token")
+  if (!token) {
+    throw new Error("Unauthenticated")
+  }
+
+  try {
+    const res = await fetch(`${url}/api/auth/updateAnonymousStatus`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ value }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data?.message || "Server error. Please try again later.")
+    }
+    return data.value
   } catch (error: any) {
     throw new Error(error?.message || "Something went wrong.")
   }
@@ -1099,6 +1129,30 @@ export const getEstimatedPickUpTime = async (
   } catch (error) {
     throw new Error(
       error instanceof Error ? error.message : "Could not get estimated time",
+    )
+  }
+}
+
+export const getLeaderBoard = async (): Promise<{
+  leaderboard: LeaderBoard
+  userRank: UserLeaderBoardRank
+}> => {
+  try {
+    const token = await getToken()
+    const res = await fetch(`${url}/api/auth/getLeaderBoard`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+
+    return data
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get leaderboard",
     )
   }
 }
