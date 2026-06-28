@@ -1018,7 +1018,7 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
       const loyalty = loyaltyMap.get(entry.loyaltyId)
 
       return {
-        user: loyalty?.User,
+        user: loyalty?.User ?? null,
         pointsEarned: entry._sum.change ?? 0,
       }
     })
