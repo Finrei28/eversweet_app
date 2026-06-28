@@ -14,14 +14,23 @@ export function calculateBestDiscountedPrice(
   )
 
   const membershipPrice = usersMembership?.isActive
-    ? originalPrice * (1 - maxMembershipDiscount / 100)
+    ? Math.round(originalPrice * (1 - maxMembershipDiscount / 100))
     : originalPrice
 
-  const promoPrice = dessert.promo?.isActive
-    ? dessert.promo.type === "PERCENTAGE"
-      ? originalPrice * (1 - dessert.promo.value / 100)
-      : Math.max(0, originalPrice - dessert.promo.value)
-    : originalPrice
+  let promoPrice = originalPrice
+  const promo = dessert.promo
+  if (promo) {
+    const now = new Date()
+    const isActive = promo?.isActive ?? false
+    const hasStarted = !promo?.startsAt || now >= new Date(promo.startsAt)
+    const hasEnded = !!promo?.endsAt && now >= new Date(promo.endsAt)
+    if (isActive && !hasEnded && hasStarted) {
+      promoPrice =
+        promo.type === "PERCENTAGE"
+          ? Math.round(originalPrice * (1 - promo.value / 100))
+          : Math.max(0, originalPrice - promo.value)
+    }
+  }
 
   const dessertPriceInCentsAfterDiscount = Math.min(
     originalPrice,
@@ -33,13 +42,24 @@ export function calculateBestDiscountedPrice(
 }
 
 export function calculatePriceAfterPromo(dessert: Dessert) {
+  const now = new Date()
   const originalPrice = dessert.priceInCents
+  const promo = dessert.promo
+  if (!promo) {
+    return originalPrice
+  }
+  const isActive = promo?.isActive ?? false
+  const hasStarted = !promo?.startsAt || now >= new Date(promo.startsAt)
+  const hasEnded = !!promo?.endsAt && now >= new Date(promo.endsAt)
 
-  const promoPrice = dessert.promo?.isActive
-    ? dessert.promo.type === "PERCENTAGE"
-      ? originalPrice * (1 - dessert.promo.value / 100)
-      : Math.max(0, originalPrice - dessert.promo.value)
-    : originalPrice
+  if (!isActive || hasEnded || !hasStarted) {
+    return originalPrice
+  }
+
+  const promoPrice =
+    promo.type === "PERCENTAGE"
+      ? Math.round(originalPrice * (1 - promo.value / 100))
+      : Math.max(0, originalPrice - promo.value)
 
   return promoPrice
 }
@@ -55,7 +75,7 @@ export function calculatePriceAfterMembershipDiscount(
   )
 
   const membershipPrice = usersMembership?.isActive
-    ? price * (1 - maxMembershipDiscount / 100)
+    ? Math.round(price * (1 - maxMembershipDiscount / 100))
     : price
 
   return membershipPrice
@@ -71,9 +91,9 @@ export function calculateMembershipDiscount(
       (usersMembership?.plan.membershipDiscount ?? 0),
   )
 
-  const membershipPrice = usersMembership?.isActive
-    ? price * (maxMembershipDiscount / 100)
+  const membershipDiscount = usersMembership?.isActive
+    ? Math.round(price * (maxMembershipDiscount / 100))
     : 0
 
-  return membershipPrice
+  return membershipDiscount
 }

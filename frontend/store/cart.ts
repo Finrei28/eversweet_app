@@ -98,7 +98,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         (!item.offerId &&
         !item.loyaltyPointsUsed &&
         membershipPrice <= promoPrice
-          ? item.discountedAmountInCents * item.quantity // find desserts that are not offers, loyaltlies and only if membership discount is > promo discount
+          ? item.discountedAmountInCents * item.quantity // find desserts that are not offers, loyaltlies and only if membership discount is > promo discount (lowest price)
           : 0) +
         customisationDiscountedAmount * item.quantity // find customisation discount separately because customisation is always member discounted
       )

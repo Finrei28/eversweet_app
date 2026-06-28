@@ -8,8 +8,8 @@ import React, {
 } from "react"
 import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
-import { StoreHours, UsersMembership } from "@/utils/types"
-import { getUsersMembership } from "@/services/stripe-api"
+import { MembershipDetails, StoreHours, UsersMembership } from "@/utils/types"
+import { getMembershipDetails, getUsersMembership } from "@/services/stripe-api"
 import { getStoreHours } from "@/services/api"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
@@ -27,6 +27,7 @@ interface DecodedToken {
 interface AuthContextType {
   token: string | null
   usersMembership: UsersMembership | null
+  membershipDetails: MembershipDetails | null
   refetchUsersMembership: () => Promise<void>
   signInProvider: (token: string) => Promise<void>
   signOutProvider: () => Promise<void>
@@ -51,30 +52,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
+  const [membershipDetails, setMembershipDetails] =
+    useState<MembershipDetails | null>(null)
   const [storeHours, setStoreHours] = useState<StoreHours>(fallbackHours)
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
     const getStoredToken = async () => {
-      const data = await getStoreHours()
-      setStoreHours(data)
-      const storedToken = await SecureStore.getItemAsync("token")
-      if (storedToken) {
-        const decoded: DecodedToken = jwtDecode(storedToken)
-        const now = Date.now() / 1000
-        if (decoded.exp > now) {
-          setToken(storedToken) // ✅ valid
-          const membership = await getUsersMembership()
-          setUsersMembership(membership)
-        } else {
-          await removeToken() // ❌ expired
-          setToken(null)
-          setUsersMembership(null)
+      try {
+        setLoading(true)
+
+        const data = await getStoreHours()
+        setStoreHours(data)
+
+        const storedToken = await SecureStore.getItemAsync("token")
+
+        if (storedToken) {
+          const decoded: DecodedToken = jwtDecode(storedToken)
+          const now = Date.now() / 1000
+
+          if (decoded.exp > now) {
+            setToken(storedToken)
+
+            const membership = await getUsersMembership()
+            const membershipDetails = await getMembershipDetails()
+
+            setMembershipDetails(membershipDetails)
+            setUsersMembership(membership)
+          } else {
+            await removeToken()
+            setToken(null)
+            setUsersMembership(null)
+          }
         }
+      } catch (error) {
+        console.error("Error in auth provider:", error)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
-    getStoredToken()
+
+    void getStoredToken()
   }, [])
 
   const refetchUsersMembership = async () => {
@@ -119,6 +137,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       value={{
         token,
         usersMembership,
+        membershipDetails,
         refetchUsersMembership,
         signInProvider,
         signOutProvider,

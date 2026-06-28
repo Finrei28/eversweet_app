@@ -376,7 +376,7 @@ export const createMembership = async (
   }
 }
 
-export const cancelMembership = async () => {
+export const cancelMembership = async (): Promise<Date> => {
   const token = await SecureStore.getItemAsync("token")
   if (!token) {
     throw new Error("Unauthenticated")

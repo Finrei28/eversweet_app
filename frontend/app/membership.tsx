@@ -1,22 +1,20 @@
 "use client"
 
-import React, { useState, useCallback, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  Switch,
   Alert,
   ActivityIndicator,
 } from "react-native"
-import { useFocusEffect, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
 import { Feather, Octicons } from "@expo/vector-icons"
 import Checkbox from "expo-checkbox"
 import CustomHeader from "@/_components/custom-header"
 import {
   createMembership,
-  getMembershipDetails,
   getSavedCards,
   pollMembershipStatus,
   resumeMembership,
@@ -24,7 +22,6 @@ import {
 } from "@/services/stripe-api"
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
-import { MembershipDetails } from "@/utils/types"
 import { formatCurrency, formatShortDate } from "@/lib/formatters"
 import ShowOffers from "@/_components/showOffersToMembers"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
@@ -50,6 +47,7 @@ function MembershipContent() {
     token,
     loading: loadingToken,
     usersMembership,
+    membershipDetails,
     refetchUsersMembership,
   } = useAuth()
   const { initPaymentSheet, presentPaymentSheet } = useStripe()
@@ -61,10 +59,6 @@ function MembershipContent() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [cancelMembership, setCancelMembership] = useState(false)
-  const [loadingMembershipDetails, setLoadingMembershipDetails] =
-    useState<boolean>(true)
-  const [membershipDetails, setMembershipDetails] =
-    useState<MembershipDetails | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
   const [isResuming, setIsResuming] = useState(false)
@@ -81,22 +75,11 @@ function MembershipContent() {
     }
 
     const init = async () => {
-      await Promise.all([
-        refetchUsersMembership(),
-        fetchSavedCards(),
-        getMembershipDetail(),
-      ])
+      await Promise.all([refetchUsersMembership(), fetchSavedCards()])
     }
 
     init()
   }, [token, loadingToken])
-
-  const getMembershipDetail = async () => {
-    setLoadingMembershipDetails(true)
-    const membershipDetails = await getMembershipDetails()
-    setMembershipDetails(membershipDetails)
-    setLoadingMembershipDetails(false)
-  }
 
   const handlePaymentSheet = async () => {
     setLoadingPaymentSheet(true)
@@ -281,7 +264,7 @@ function MembershipContent() {
     }
   }
 
-  if (loadingToken || loadingCards || loadingMembershipDetails) {
+  if (loadingToken || loadingCards) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />

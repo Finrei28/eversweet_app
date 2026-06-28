@@ -231,8 +231,8 @@ export type offerForClient = {
 export type Offers = Offer[]
 
 export type RestaurantStatus = {
-  dineInAvailability: boolean | undefined
-  unavailableUntil: Date | null | undefined
+  dineInAvailability: boolean
+  unavailableUntil: Date | null
 }
 
 export type LoyaltyRates = {

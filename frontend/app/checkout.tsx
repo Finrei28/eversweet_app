@@ -645,7 +645,7 @@ function CheckoutContent() {
       processOrder()
 
       router.replace("/orders")
-    } catch (error: any) {
+    } catch (error) {
       if (paymentIntentId) {
         Alert.alert(
           "Connection Issue",
@@ -662,10 +662,10 @@ function CheckoutContent() {
           ],
         )
       } else {
-        console.error(error)
+        console.error((error as Error).message)
         Toast.show({
           type: "error",
-          text1: `${error.message}`,
+          text1: `${(error as Error).message}`,
           position: "bottom",
           visibilityTime: undefined,
           autoHide: false,
