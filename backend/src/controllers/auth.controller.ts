@@ -965,15 +965,12 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
     const leaderboard = await db.loyaltyRecord.groupBy({
       by: ["loyaltyId"],
       where: {
-        change: {
-          gt: 0,
-        },
-        createdAt: {
-          gte: start,
-          lt: end,
-        },
+        change: { gt: 0 },
+        // createdAt: {
+        //   gte: start,
+        //   lt: end,
+        // },
       },
-
       _sum: {
         change: true,
       },
@@ -982,23 +979,42 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
           change: "desc",
         },
       },
-      take: 10,
     })
+
+    const usersLoyalty = await db.loyalty.upsert({
+      where: { userId },
+      create: {
+        userId,
+        points: 0,
+      },
+      update: {},
+    })
+
+    const userRankIndex = leaderboard.findIndex(
+      (r) => r.loyaltyId === usersLoyalty.id,
+    )
+
+    const top10 = leaderboard.slice(0, 10)
 
     const loyalties = await db.loyalty.findMany({
       where: {
-        id: {
-          in: leaderboard.map((l) => l.loyaltyId),
-        },
+        id: { in: top10.map((l) => l.loyaltyId) },
       },
       select: {
         id: true,
-        User: { select: { id: true, firstName: true, lastName: true } },
+        User: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
     })
+
     const loyaltyMap = new Map(loyalties.map((l) => [l.id, l]))
 
-    const result = leaderboard.map((entry) => {
+    const result = top10.map((entry) => {
       const loyalty = loyaltyMap.get(entry.loyaltyId)
 
       return {
@@ -1006,7 +1022,17 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
         pointsEarned: entry._sum.change ?? 0,
       }
     })
-    res.status(200).json({ leaderboard: result })
+
+    res.status(200).json({
+      leaderboard: result,
+      userRank:
+        userRankIndex === -1
+          ? null
+          : {
+              position: userRankIndex + 1,
+              points: leaderboard[userRankIndex]._sum.change ?? 0,
+            },
+    })
     return
   } catch (error) {
     res.status(500).json({
