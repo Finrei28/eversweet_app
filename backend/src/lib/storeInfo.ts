@@ -1,34 +1,45 @@
-import { parse, isAfter, isBefore } from "date-fns"
+import { parse, isAfter, isBefore, isEqual } from "date-fns"
+import { DateTime } from "luxon"
 
 type StoreHours = {
   [key: string]: [string, string] | null
 }
 
 const isStoreOpenNow = (storeHours: StoreHours): boolean => {
-  const now = new Date()
-  const dayName = now.toLocaleDateString("en-NZ", { weekday: "long" })
-  const hours = storeHours[dayName as keyof typeof storeHours]
+  const now = DateTime.now().setZone("Pacific/Auckland")
 
-  if (!hours) {
-    return false
-  }
+  const dayName = now.toFormat("cccc").toLowerCase() // Monday, Tuesday...
+
+  const hours = storeHours[dayName]
+  if (!hours) return false
 
   const [startStr, endStr] = hours
 
-  const start = parse(startStr, "hh:mm a", now)
-  const end = parse(endStr, "hh:mm a", now)
+  const start = DateTime.fromFormat(startStr, "h:mm a", {
+    zone: "Pacific/Auckland",
+  })
 
-  return isAfter(now, start) && isBefore(now, end)
+  const end = DateTime.fromFormat(endStr, "h:mm a", {
+    zone: "Pacific/Auckland",
+  })
+
+  if (!start.isValid || !end.isValid) return false
+
+  if (end < start) {
+    return now >= start || now <= end
+  }
+
+  return now >= start && now <= end
 }
 
 export const storeHours: StoreHours = {
-  Monday: ["12:30 PM", "9:30 PM"],
-  Tuesday: ["12:30 PM", "9:30 PM"],
-  Wednesday: ["12:30 PM", "9:30 PM"],
-  Thursday: ["12:30 PM", "9:30 PM"],
-  Friday: ["12:00 PM", "10:00 PM"],
-  Saturday: ["12:00 PM", "10:00 PM"],
-  Sunday: ["12:00 PM", "10:00 PM"],
+  monday: ["12:30 PM", "9:30 PM"],
+  tuesday: ["12:30 PM", "9:30 PM"],
+  wednesday: ["12:30 PM", "9:30 PM"],
+  thursday: ["12:30 PM", "9:30 PM"],
+  friday: ["12:00 PM", "10:00 PM"],
+  saturday: ["12:00 PM", "10:00 PM"],
+  sunday: ["12:00 PM", "10:00 PM"],
 }
 
 export const storeInfo = {
