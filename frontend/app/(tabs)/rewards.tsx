@@ -38,7 +38,7 @@ export default function Loyalty() {
     fetchCategoriesWithDesserts,
   )
 
-  const { token, loading: loadingToken } = useAuth()
+  const { token, authLoading } = useAuth()
 
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
 
@@ -114,7 +114,7 @@ export default function Loyalty() {
       <View className="flex-1 bg-background">
         <PageHeader />
         {cartItems?.length > 0 && <ViewCart />}
-        {categoriesLoading || loadingToken ? (
+        {categoriesLoading || authLoading ? (
           <View
             className={`flex-1 items-center justify-center ${
               Platform.OS === "ios" ? "mt-32" : "mt-24"

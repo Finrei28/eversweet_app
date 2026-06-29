@@ -21,7 +21,7 @@ import {
 
 export default function Orders() {
   const router = useRouter()
-  const { token, loading } = useAuth()
+  const { token, authLoading } = useAuth()
   const [refreshing, setRefreshing] = useState(false)
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
 
@@ -65,7 +65,7 @@ export default function Orders() {
   const completedOrders =
     orders?.filter((order) => order.status === "READY") || []
 
-  if (loading || ordersLoading) {
+  if (authLoading || ordersLoading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />

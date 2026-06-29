@@ -45,7 +45,8 @@ function MembershipContent() {
   const router = useRouter()
   const {
     token,
-    loading: loadingToken,
+    authLoading,
+    dataLoading,
     usersMembership,
     membershipDetails,
     refetchUsersMembership,
@@ -67,7 +68,7 @@ function MembershipContent() {
   // Fetch saved cards when component mounts
 
   useEffect(() => {
-    if (loadingToken) return
+    if (authLoading) return
 
     if (!token) {
       router.replace("/signin")
@@ -79,7 +80,7 @@ function MembershipContent() {
     }
 
     init()
-  }, [token, loadingToken])
+  }, [token, authLoading])
 
   const handlePaymentSheet = async () => {
     setLoadingPaymentSheet(true)
@@ -264,7 +265,7 @@ function MembershipContent() {
     }
   }
 
-  if (loadingToken || loadingCards) {
+  if (authLoading || dataLoading || loadingCards) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />

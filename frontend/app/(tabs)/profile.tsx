@@ -16,7 +16,13 @@ import { Trophy } from "lucide-react-native"
 
 export default function Profile() {
   const router = useRouter()
-  const { token, signOutProvider, loading } = useAuth()
+  const {
+    token,
+    signOutProvider,
+    authLoading,
+    leaderboardDetails,
+    dataLoading,
+  } = useAuth()
 
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
 
@@ -80,7 +86,7 @@ export default function Profile() {
     </TouchableOpacity>
   )
 
-  if (loading)
+  if (authLoading || dataLoading)
     return (
       <View className="flex-1 bg-background">
         <PageHeader />
@@ -153,11 +159,14 @@ export default function Profile() {
             title="Membership"
             onPress={() => navigateTo("/membership")}
           />
-          <ProfileMenuItem
-            icon={<Trophy size={24} color="#6B7280" />}
-            title="Leaderboard"
-            onPress={() => navigateTo("/leaderboard")}
-          />
+          {leaderboardDetails?.show && (
+            <ProfileMenuItem
+              icon={<Trophy size={24} color="#6B7280" />}
+              title="Leaderboard"
+              onPress={() => navigateTo("/leaderboard")}
+            />
+          )}
+
           <ProfileMenuItem
             icon={<Feather name="user" size={24} color="#6B7280" />}
             title="Account Details"

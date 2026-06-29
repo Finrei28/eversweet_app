@@ -56,12 +56,8 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
-  const {
-    token,
-    loading: loadingToken,
-    usersMembership,
-    storeHours,
-  } = useAuth()
+  const { token, authLoading, dataLoading, usersMembership, storeHours } =
+    useAuth()
   const { data: restaurantStatus, loading: loadingRestaurantStatus } = useFetch(
     () => getRestaurantStatus(),
   )
@@ -745,7 +741,8 @@ function CheckoutContent() {
   }
 
   if (
-    loadingToken ||
+    authLoading ||
+    dataLoading ||
     loadingCards ||
     cartOperations > 0 ||
     loading ||

@@ -30,7 +30,7 @@ export default function Menu() {
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [previousIndex, setPreviousIndex] = useState(0)
-  const { token, usersMembership, loading: authLoading } = useAuth()
+  const { token, usersMembership, authLoading, dataLoading } = useAuth()
   const flatListRef = useRef<FlatList<DessertCategory>>(null)
   const router = useRouter()
   const cartItems = useCartStore((state) => state.items)
@@ -113,7 +113,7 @@ export default function Menu() {
       <View className="flex-1 bg-background">
         <PageHeader />
         {cartItems?.length > 0 && <ViewCart />}
-        {loading || authLoading ? (
+        {loading || authLoading || dataLoading ? (
           <View
             className={`flex-1 items-center justify-center ${
               Platform.OS === "ios" ? "mt-32" : "mt-24"

@@ -16,16 +16,17 @@ const getRankStyle = (index: number) => {
 }
 
 export default function LeaderBoardPage() {
-  const { token, loading: loadingToken, userDetails } = useAuth()
+  const { token, authLoading, dataLoading, userDetails, leaderboardDetails } =
+    useAuth()
   const { data, loading } = useFetch(getLeaderBoard)
   useEffect(() => {
-    if (loadingToken) return
+    if (authLoading) return
 
     if (!token) {
       router.replace("/signin")
       return
     }
-  }, [token, loadingToken])
+  }, [token, authLoading])
   const leaderboard: LeaderBoard = useMemo(() => {
     const list = data?.leaderboard ?? []
 
@@ -44,7 +45,7 @@ export default function LeaderBoardPage() {
 
   const userRank: UserLeaderBoardRank = data?.userRank ?? null
 
-  if (loading || loadingToken) {
+  if (loading || authLoading || dataLoading) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />
@@ -128,23 +129,30 @@ export default function LeaderBoardPage() {
           )
         }}
         ListFooterComponent={
-          <View
-            style={{
-              marginVertical: 20,
-              padding: 14,
-              borderRadius: 12,
-              backgroundColor: "#e6aa6b",
-              flexDirection: "row",
-              justifyContent: "space-between",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "600" }}>
-              {`Your Rank: ${userRank ? "#" + userRank.position : "-"}`}
-            </Text>
+          <View>
+            <View
+              style={{
+                marginTop: 20,
+                padding: 14,
+                borderRadius: 12,
+                backgroundColor: "#e6aa6b",
+                flexDirection: "row",
+                justifyContent: "space-between",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600" }}>
+                {`Your Rank: ${userRank ? "#" + userRank.position : "-"}`}
+              </Text>
 
-            <Text style={{ color: "#fff" }}>
-              {userRank ? userRank.points.toLocaleString() : "-"} pts
-            </Text>
+              <Text style={{ color: "#fff" }}>
+                {userRank ? userRank.points.toLocaleString() : "-"} pts
+              </Text>
+            </View>
+            {leaderboardDetails?.description && (
+              <Text className="py-3 text-sm text-gray-500 px-5">
+                {leaderboardDetails?.description}
+              </Text>
+            )}
           </View>
         }
       />

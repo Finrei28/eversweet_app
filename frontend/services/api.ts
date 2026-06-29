@@ -8,7 +8,6 @@ import {
   DessertCategory,
   Offers,
   LoyaltyRates,
-  Promotions,
   Announcements,
   HomePageContent,
   RestaurantStatus,
@@ -20,6 +19,7 @@ import {
   LeaderBoard,
   UserLeaderBoardRank,
   UserDetails,
+  LeaderBoardDetails,
 } from "@/utils/types"
 import * as SecureStore from "expo-secure-store"
 import { Menu, Order } from "@/utils/types"
@@ -1009,21 +1009,27 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
   }
 }
 
-export const getPromotions = async (): Promise<Promotions> => {
+export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> => {
   try {
-    const res = await fetch(`${url}/api/getPromotions`, {
+    const res = await fetch(`${url}/api/getLeaderboardDetails`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
       },
     })
 
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
+
     const data = await res.json()
 
     return data
   } catch (error) {
     throw new Error(
-      error instanceof Error ? error.message : "Could not get promotions",
+      error instanceof Error
+        ? error.message
+        : "Could not get leaderboard details",
     )
   }
 }
@@ -1036,6 +1042,10 @@ export const getAnnouncements = async (): Promise<Announcements> => {
         "Content-Type": "application/json",
       },
     })
+
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
 
     const data = await res.json()
 
@@ -1055,6 +1065,10 @@ export const getHomepageCards = async (): Promise<HomePageContent[]> => {
         "Content-Type": "application/json",
       },
     })
+
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
 
     const data = await res.json()
 
@@ -1077,6 +1091,10 @@ export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> => {
       },
     })
 
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
+
     const data = await res.json()
 
     return data
@@ -1095,6 +1113,10 @@ export const getTermAndConditions = async (): Promise<TermAndConditions> => {
         "Content-Type": "application/json",
       },
     })
+
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
 
     const data = await res.json()
 
@@ -1123,6 +1145,10 @@ export const getEstimatedPickUpTime = async (
       body: JSON.stringify({ numOfItems }),
     })
 
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
+
     const data = await res.json()
 
     return new Date(data.estimatedTime)
@@ -1146,6 +1172,10 @@ export const getLeaderBoard = async (): Promise<{
         Authorization: `Bearer ${token}`,
       },
     })
+
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`)
+    }
 
     const data = await res.json()
 

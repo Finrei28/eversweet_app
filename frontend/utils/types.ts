@@ -125,8 +125,6 @@ export type CartItem = {
   quantity: number
   loyaltyPointsUsed: number | null
   offerId: string | null
-  isPromotionItem: boolean
-  promotionType: string | null
   discountedAmountInCents: number
 }
 
@@ -241,16 +239,10 @@ export type LoyaltyRates = {
   modifier: number
 }
 
-export type Promotion = {
-  id: string
-  title: string
-  text1: string
-  text2?: string
-  category: string
-  imagePath: string
+export type LeaderBoardDetails = {
+  show: boolean
+  description: string
 }
-
-export type Promotions = Promotion[]
 
 export type Announcement = {
   title: string

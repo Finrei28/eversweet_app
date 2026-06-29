@@ -40,7 +40,7 @@ function PaymentMethodsContent() {
   const router = useRouter()
   const { createPaymentMethod, initPaymentSheet, presentPaymentSheet } =
     useStripe()
-  const { token, loading: loadingToken, usersMembership } = useAuth()
+  const { token, authLoading, dataLoading, usersMembership } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
@@ -48,12 +48,12 @@ function PaymentMethodsContent() {
 
   // Fetch saved cards when component mounts
   useEffect(() => {
-    if (!token && !loadingToken) {
+    if (!token && !authLoading) {
       router.push("/signin")
     } else {
       fetchSavedCards()
     }
-  }, [token, loadingToken])
+  }, [token, authLoading])
 
   const fetchSavedCards = async () => {
     try {
@@ -126,7 +126,7 @@ function PaymentMethodsContent() {
     return brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase()
   }
 
-  if (loadingToken || loadingCards) {
+  if (authLoading || dataLoading || loadingCards) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />

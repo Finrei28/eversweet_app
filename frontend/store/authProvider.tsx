@@ -9,13 +9,18 @@ import React, {
 import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
 import {
+  LeaderBoardDetails,
   MembershipDetails,
   StoreHours,
   UserDetails,
   UsersMembership,
 } from "@/utils/types"
 import { getMembershipDetails, getUsersMembership } from "@/services/stripe-api"
-import { getStoreHours, getUserProfile } from "@/services/api"
+import {
+  getLeaderboardDetails,
+  getStoreHours,
+  getUserProfile,
+} from "@/services/api"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
 import { removePushToken, syncPushToken } from "@/services/notifications"
@@ -34,12 +39,14 @@ interface AuthContextType {
   usersMembership: UsersMembership | null
   membershipDetails: MembershipDetails | null
   userDetails: UserDetails | null
+  leaderboardDetails: LeaderBoardDetails | null
   setUserDetails: React.Dispatch<React.SetStateAction<UserDetails | null>>
   refetchUserDetails: () => Promise<void>
   refetchUsersMembership: () => Promise<void>
   signInProvider: (token: string) => Promise<void>
   signOutProvider: () => Promise<void>
-  loading: boolean
+  authLoading: boolean
+  dataLoading: boolean
   storeHours: StoreHours
 }
 
@@ -58,7 +65,10 @@ const fallbackHours: StoreHours = {
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null)
   const [userDetails, setUserDetails] = useState<UserDetails | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [dataLoading, setDataLoading] = useState(true)
+  const [leaderboardDetails, setLeaderboardDetails] =
+    useState<LeaderBoardDetails | null>(null)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
   const [membershipDetails, setMembershipDetails] =
@@ -91,7 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch (error) {
         console.error(error)
       } finally {
-        setLoading(false)
+        setAuthLoading(false)
       }
     }
 
@@ -103,22 +113,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserDetails(null)
       setUsersMembership(null)
       setMembershipDetails(null)
+      setLeaderboardDetails(null)
       return
     }
 
     const loadUserData = async () => {
       try {
-        const [membership, membershipDetails, user] = await Promise.all([
-          getUsersMembership(),
-          getMembershipDetails(),
-          getUserProfile(),
-        ])
-
+        setDataLoading(true)
+        const [membership, membershipDetails, user, leaderboardDetails] =
+          await Promise.all([
+            getUsersMembership(),
+            getMembershipDetails(),
+            getUserProfile(),
+            getLeaderboardDetails(),
+          ])
+        setLeaderboardDetails(leaderboardDetails)
         setUserDetails(user)
         setMembershipDetails(membershipDetails)
         setUsersMembership(membership)
       } catch (error) {
         console.error(error)
+      } finally {
+        setDataLoading(false)
       }
     }
 
@@ -127,14 +143,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const refetchUsersMembership = async () => {
     if (!token) return
-    const membership = await getUsersMembership()
-    setUsersMembership(membership)
+    try {
+      setDataLoading(true)
+      const membership = await getUsersMembership()
+      setUsersMembership(membership)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setDataLoading(false)
+    }
   }
 
   const refetchUserDetails = async () => {
     if (!token) return
-    const user = await getUserProfile()
-    setUserDetails(user)
+    try {
+      setDataLoading(true)
+      const user = await getUserProfile()
+      setUserDetails(user)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setDataLoading(false)
+    }
   }
 
   const signInProvider = async (token: string) => {
@@ -175,12 +205,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         usersMembership,
         membershipDetails,
         userDetails,
+        leaderboardDetails,
         setUserDetails,
         refetchUserDetails,
         refetchUsersMembership,
         signInProvider,
         signOutProvider,
-        loading,
+        authLoading,
+        dataLoading,
         storeHours,
       }}
     >

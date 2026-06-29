@@ -13,18 +13,9 @@ import Carousel from "react-native-reanimated-carousel"
 import { useSharedValue } from "react-native-reanimated"
 import { SplashScreen, useRouter } from "expo-router"
 import { FontAwesome } from "@expo/vector-icons"
-import {
-  getHomepageCards,
-  getPromotions,
-  showOfferForClient,
-} from "@/services/api"
+import { getHomepageCards, showOfferForClient } from "@/services/api"
 import BouncingLoader from "@/_components/loader"
-import {
-  HomePageContent,
-  offerForClient,
-  Offers,
-  Promotions,
-} from "@/utils/types"
+import { HomePageContent, offerForClient } from "@/utils/types"
 import {
   GestureHandlerRootView,
   PanGesture,
@@ -37,12 +28,11 @@ export { FontAwesome }
 
 export default function Index() {
   const router = useRouter()
-  const [promotions, setPromotions] = useState<Promotions>([])
   const [offers, setOffers] = useState<offerForClient[]>([])
   const [homePageContents, setHomePageContents] = useState<HomePageContent[]>(
     [],
   )
-  const { token, usersMembership, loading: authLoading } = useAuth()
+  const { token, usersMembership, authLoading, dataLoading } = useAuth()
   const progressValue = useSharedValue(0)
   const [activeIndex, setActiveIndex] = useState(0)
   const screen = Dimensions.get("window")
@@ -53,9 +43,7 @@ export default function Index() {
       try {
         setLoading(true)
         const homePageData = await getHomepageCards()
-        const promotionData = await getPromotions()
         const offerData = await showOfferForClient()
-        setPromotions(promotionData)
         setOffers(offerData)
         setHomePageContents(homePageData)
       } catch (error) {
@@ -67,7 +55,7 @@ export default function Index() {
     loadContents()
   }, [])
 
-  if (loading || authLoading) {
+  if (loading || authLoading || dataLoading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />

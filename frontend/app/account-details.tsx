@@ -58,7 +58,8 @@ export default function AccountDetails() {
   const [isEditing, setIsEditing] = useState(false)
   const {
     token,
-    loading: loadingToken,
+    authLoading,
+    dataLoading,
     setUserDetails,
     userDetails,
     refetchUserDetails,
@@ -75,10 +76,11 @@ export default function AccountDetails() {
   })
 
   useEffect(() => {
-    if (!loadingToken && !token) {
+    if (authLoading) return
+    if (!token) {
       router.push("/signin")
     }
-  }, [token, loadingToken])
+  }, [token, authLoading])
 
   useEffect(() => {
     if (userDetails) {
@@ -140,7 +142,7 @@ export default function AccountDetails() {
     }
   }
 
-  if (loadingToken) {
+  if (authLoading || dataLoading) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />

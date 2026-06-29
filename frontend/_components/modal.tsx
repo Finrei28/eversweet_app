@@ -562,8 +562,6 @@ export default function CustomModal({
                             itemPriceInCents: type === "points" ? 0 : price,
                             offerId: offerId ? offerId : null,
                             discountedAmountInCents: 0,
-                            isPromotionItem: cartItem?.isPromotionItem,
-                            promotionType: cartItem?.promotionType,
                           })
                         } else {
                           await addItem({
