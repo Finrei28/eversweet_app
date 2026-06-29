@@ -145,6 +145,9 @@ try {
   cron.schedule("0 0 * * *", updateDailySpecial, {
     timezone: "Pacific/Auckland",
   })
+  cron.schedule("0 0 1 * *", calculateMonthlyWinner, {
+    timezone: "Pacific/Auckland",
+  })
 } catch (err) {
   console.error("Failed to schedule task:", err)
 }
@@ -156,3 +159,6 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)
 })
+function calculateMonthlyWinner() {
+  throw new Error("Function not implemented.")
+}

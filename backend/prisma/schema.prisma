@@ -60,6 +60,7 @@ model User {
   membership           Membership?
   appOrders            Order[]         @relation("UserOrders")
   sessions             Session[]
+  loyaltyWinners       LoyaltyWinner[]
 }
 
 model Membership {
@@ -331,6 +332,21 @@ model LoyaltyRecord {
 
   loyaltyId  String
   loyalty    Loyalty  @relation(fields: [loyaltyId], references: [id])
+}
+
+model LoyaltyWinner {
+  id        String   @id @default(cuid())
+  userId    String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  month     Int
+  year      Int
+  points    Int
+  createdAt DateTime @default(now())
+  rewardPickedUp  DateTime?
+
+  @@unique([month, year])          // only one winner per month
+  @@index([userId])
 }
 
 model Cart {

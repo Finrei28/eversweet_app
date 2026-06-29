@@ -75,6 +75,7 @@ export const termAndConditions = {
         "Loyalty points have no cash value and cannot be exchanged for cash.",
         "We reserve the right to modify or cancel promotions at any time.",
         "Promotional offers cannot be combined unless stated otherwise.",
+        "We reserve the right to suspend or revoke loyalty rewards in cases of suspected misuse or fraud.",
       ],
     },
     {
@@ -95,6 +96,7 @@ export const termAndConditions = {
         "You are responsible for maintaining the confidentiality of your account.",
         "We are not liable for any unauthorized access to your account.",
         "We reserve the right to suspend or terminate accounts for misuse.",
+        "Offensive names are prohibited.",
       ],
     },
     {

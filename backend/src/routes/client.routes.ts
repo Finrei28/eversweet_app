@@ -8,7 +8,7 @@ import {
   getStoreHours,
   restaurantStatus,
   getLoyaltyRates,
-  getPromotions,
+  getLeaderboardDetails,
   getAnnouncements,
   getHomepageCards,
   showOfferForClient,
@@ -29,7 +29,7 @@ router.get("/getStoreHours", getStoreHours)
 router.get("/getStoreInfo", getStoreInfo)
 router.get("/restaurantStatus", restaurantStatus)
 router.get("/getLoyaltyRates", getLoyaltyRates)
-router.get("/getPromotions", getPromotions)
+router.get("/getLeaderboardDetails", getLeaderboardDetails)
 router.get("/getAnnouncements", getAnnouncements)
 router.get("/getHomepageCards", getHomepageCards)
 router.get("/showOfferForClient", showOfferForClient)

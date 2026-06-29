@@ -4,13 +4,13 @@ import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import { storeHours, storeInfo } from "../lib/storeInfo"
 import { loyaltyRates } from "../lib/loyaltyRates"
-import { promotions } from "../lib/promotions"
 import { announcements } from "../lib/announcements"
 import { homepageCards } from "../lib/homePageContent"
 import { privacyPolicy } from "../legal/privacy-policy"
 import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
+import { leaderboardDetails } from "../lib/leaderboardDetails"
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
@@ -248,9 +248,8 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
   return
 }
 
-export const getPromotions = (req: Request, res: Response) => {
-  const allOffers = {}
-  res.status(200).json(promotions)
+export const getLeaderboardDetails = (req: Request, res: Response) => {
+  res.status(200).json(leaderboardDetails)
   return
 }
 
@@ -308,4 +307,100 @@ export function getEstimatedPickUpTime(req: Request, res: Response) {
 
   res.status(200).json({ estimatedTime: minTime })
   return
+}
+
+export async function getLoyaltyWinnerForThisMonth() {
+  const now = new Date()
+
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const end = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  const month = start.getMonth() + 1
+  const year = start.getFullYear()
+  try {
+    const leaderboard = await db.loyaltyRecord.groupBy({
+      by: ["loyaltyId"],
+      where: {
+        change: {
+          gt: 0,
+        },
+        createdAt: {
+          gte: start,
+          lt: end,
+        },
+      },
+      _sum: {
+        change: true,
+      },
+      orderBy: {
+        _sum: {
+          change: "desc",
+        },
+      },
+    })
+
+    if (leaderboard.length === 0) {
+      return
+    }
+
+    const highestPoints = leaderboard[0]._sum.change ?? 0
+
+    const tied = leaderboard.filter(
+      (entry) => (entry._sum.change ?? 0) === highestPoints,
+    )
+
+    let winnerLoyaltyId: string
+
+    if (tied.length === 1) {
+      winnerLoyaltyId = tied[0].loyaltyId
+    } else {
+      const latestRecords = await Promise.all(
+        tied.map(async (entry) => {
+          const latestRecord = await db.loyaltyRecord.findFirst({
+            where: {
+              loyaltyId: entry.loyaltyId,
+              change: {
+                gt: 0,
+              },
+              createdAt: {
+                gte: start,
+                lt: end,
+              },
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+          })
+
+          return {
+            loyaltyId: entry.loyaltyId,
+            createdAt: latestRecord!.createdAt,
+          }
+        }),
+      )
+
+      latestRecords.sort(
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+      )
+
+      winnerLoyaltyId = latestRecords[0].loyaltyId
+    }
+
+    const winner = await db.loyalty.findUnique({
+      where: {
+        id: winnerLoyaltyId,
+      },
+    })
+
+    await db.loyaltyWinner.create({
+      data: {
+        userId: winner!.userId,
+        month,
+        year,
+        points: highestPoints,
+      },
+    })
+  } catch (error) {
+    console.error(error)
+  }
 }
