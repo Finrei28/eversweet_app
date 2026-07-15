@@ -335,14 +335,14 @@ model LoyaltyRecord {
 }
 
 model LoyaltyWinner {
-  id        String   @id @default(cuid())
-  userId    String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  month     Int
-  year      Int
-  points    Int
-  createdAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  results         String[]
+  month           Int
+  year            Int
+  points          Int
+  createdAt       DateTime @default(now())
   rewardPickedUp  DateTime?
 
   @@unique([month, year])          // only one winner per month

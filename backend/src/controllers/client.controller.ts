@@ -10,7 +10,7 @@ import { privacyPolicy } from "../legal/privacy-policy"
 import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
-import { leaderboardDetails } from "../lib/leaderboardDetails"
+import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
@@ -248,7 +248,8 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
   return
 }
 
-export const getLeaderboardDetails = (req: Request, res: Response) => {
+export const getLeaderboardDetails = async (req: Request, res: Response) => {
+  const leaderboardDetails = await organiseLeaderboardDetails()
   res.status(200).json(leaderboardDetails)
   return
 }
@@ -309,7 +310,7 @@ export function getEstimatedPickUpTime(req: Request, res: Response) {
   return
 }
 
-export async function getLoyaltyWinnerForThisMonth() {
+export async function calculateMonthlyWinner(numOfWinners: number) {
   const now = new Date()
 
   const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
