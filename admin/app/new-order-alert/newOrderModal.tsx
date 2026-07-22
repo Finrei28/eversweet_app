@@ -107,8 +107,12 @@ export default function NewOrderModal({
       if (timeout) {
         clearTimeout(timeout)
       }
-      player.pause()
-      void player.seekTo(0)
+      try {
+        player.pause()
+        player.seekTo(0)
+      } catch (e) {
+        console.warn("Could not clean up audio player on unmount:", e)
+      }
     }
   }, [player, order.id, handleAccept])
 
