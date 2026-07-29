@@ -310,7 +310,7 @@ export function getEstimatedPickUpTime(req: Request, res: Response) {
   return
 }
 
-export async function calculateMonthlyWinner(numOfWinners: number) {
+export async function calculateMonthlyWinner() {
   const now = new Date()
 
   const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
@@ -395,7 +395,7 @@ export async function calculateMonthlyWinner(numOfWinners: number) {
 
     await db.loyaltyWinner.create({
       data: {
-        userId: winner!.userId,
+        userId: winner ? winner.userId : null,
         month,
         year,
         points: highestPoints,

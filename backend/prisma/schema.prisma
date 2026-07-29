@@ -336,8 +336,8 @@ model LoyaltyRecord {
 
 model LoyaltyWinner {
   id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   results         String[]
   month           Int
   year            Int

@@ -19,6 +19,7 @@ import {
 import jwt from "jsonwebtoken"
 import bodyParser from "body-parser"
 import { stripeWebhook } from "./controllers/stripe.controller"
+import { calculateMonthlyWinner } from "./controllers/client.controller"
 
 // Extend Socket type to include userId
 declare module "socket.io" {
@@ -50,9 +51,6 @@ io.use((socket, next) => {
   if (!token) {
     return next(new Error("Authentication error"))
   }
-
-  // In a real app, verify the token here
-  // For example: verifyJWT(token)
 
   jwt.verify(token, process.env.JWT_SECRET!, (err: jwt.VerifyErrors | null) => {
     if (err) {
@@ -105,7 +103,7 @@ const corsOptions: CorsOptions = {
     } else {
       callback(new Error(`Not allowed by CORS ${origin}`)) // Block
     }
-  }, // Change this to your frontend URL
+  }, // maintains a whitelist of approved clients, which is vital for security and reliability
   methods: "GET,POST,PATCH,PUT",
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: false, // do not allow cookies
@@ -159,6 +157,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)
 })
-function calculateMonthlyWinner() {
-  throw new Error("Function not implemented.")
-}
