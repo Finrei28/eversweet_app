@@ -14,6 +14,7 @@ export type FullOrderType = {
   pickedUpAt: Date | null
   pickUpTime: Date
   status: StatusType // Assuming $Enums.Status refers to an enum for order status
+  dineIn: boolean
   desserts: {
     id: string
     orderId: string
@@ -25,7 +26,6 @@ export type FullOrderType = {
       name: string
       chineseName: string
       imagePath: string
-      categoryId: string
     }
     customisations: {
       id: string

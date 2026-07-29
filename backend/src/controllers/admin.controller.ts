@@ -625,7 +625,8 @@ export const getFutureOrders = async () => {
     })
 
     for (const order of filteredOrders) {
-      emitNewOrder(order) // change notified to true when order is accepted at updateOrderStatus()
+      const { notified, ...orderWithoutNotified } = order
+      emitNewOrder(orderWithoutNotified) // change notified to true when order is accepted at updateOrderStatus()
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)

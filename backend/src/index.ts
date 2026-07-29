@@ -20,6 +20,7 @@ import jwt from "jsonwebtoken"
 import bodyParser from "body-parser"
 import { stripeWebhook } from "./controllers/stripe.controller"
 import { calculateMonthlyWinner } from "./controllers/client.controller"
+import { FullOrderType } from "./types/types"
 
 // Extend Socket type to include userId
 declare module "socket.io" {
@@ -78,8 +79,8 @@ io.on("connection", (socket) => {
 })
 
 // Function to emit new order event
-//@ts-ignore
-export const emitNewOrder = (order) => {
+
+export const emitNewOrder = (order: FullOrderType) => {
   io.to("admin-room").emit("new-order", order)
 }
 
