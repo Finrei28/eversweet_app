@@ -290,7 +290,7 @@ export const getTermAndConditions = (req: Request, res: Response) => {
   return
 }
 
-export const getDaysOff = async (res: Response) => {
+export const getDaysOff = async (req: Request, res: Response) => {
   try {
     const daysOff = await db.daysOff.findMany({ select: { date: true } })
     const dates = daysOff.map((day) => day.date)
@@ -303,7 +303,7 @@ export const getDaysOff = async (res: Response) => {
   }
 }
 
-export const getLoyaltyWinner = async (res: Response) => {
+export const getLoyaltyWinner = async (req: Request, res: Response) => {
   try {
     const now = new Date()
     const month = now.getMonth()
