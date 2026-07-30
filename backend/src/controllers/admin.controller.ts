@@ -534,10 +534,7 @@ export const updateRestaurantStatus = async (req: Request, res: Response) => {
 
 export const updateDaysOff = async (req: Request, res: Response) => {
   const { newDates }: { newDates: Date[] } = req.body
-  if (!newDates || newDates.length === 0) {
-    res.status(200)
-    return
-  }
+
   const dates = newDates.map((date) => new Date(date))
   try {
     const toDateKey = (date: Date) => date.toISOString().split("T")[0]
