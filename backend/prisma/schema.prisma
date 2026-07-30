@@ -398,6 +398,13 @@ model RestaurantStatus {
   unavailableUntil    DateTime?
 }
 
+model DaysOff {
+  id                String    @id @default(cuid())
+  date              DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now())
+}
+
 enum OfferStatus {
   AVAILABLE
   REDEEMED

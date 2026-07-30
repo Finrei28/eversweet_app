@@ -9,7 +9,9 @@ import {
   getPastOrders,
   getPendingOrders,
   updateOrderStatus,
+  updateDaysOff,
 } from "../controllers/admin.controller"
+import { getLoyaltyWinner } from "../controllers/client.controller"
 
 const router = Router()
 
@@ -19,41 +21,54 @@ router.get(
   "/getPendingOrders",
   authenticateToken,
   authorizeRole("ADMIN"),
-  getPendingOrders
+  getPendingOrders,
 )
 
 router.get(
   "/getCurrentOrders",
   authenticateToken,
   authorizeRole("ADMIN"),
-  getCurrentOrders
+  getCurrentOrders,
 )
 router.post(
   "/getPastOrders",
   authenticateToken,
   authorizeRole("ADMIN"),
-  getPastOrders
+  getPastOrders,
 )
 
 router.patch(
   "/updateOrderStatus",
   authenticateToken,
   authorizeRole("ADMIN"),
-  updateOrderStatus
+  updateOrderStatus,
 )
 
 router.get(
   "/getOverview",
   authenticateToken,
   authorizeRole("ADMIN"),
-  getOverview
+  getOverview,
 )
 
 router.patch(
   "/updateRestaurantStatus",
   authenticateToken,
   authorizeRole("ADMIN"),
-  updateRestaurantStatus
+  updateRestaurantStatus,
+)
+
+router.patch(
+  "/updateDaysOff",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  updateDaysOff,
+)
+router.get(
+  "/getLoyaltyWinner",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  getLoyaltyWinner,
 )
 
 export default router

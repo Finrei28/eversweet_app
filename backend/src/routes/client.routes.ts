@@ -16,6 +16,7 @@ import {
   getTermAndConditions,
   getStoreInfo,
   getEstimatedPickUpTime,
+  getDaysOff,
 } from "../controllers/client.controller"
 
 const router = Router()
@@ -36,5 +37,6 @@ router.get("/showOfferForClient", showOfferForClient)
 router.get("/getPrivacyPolicy", getPrivacyPolicy)
 router.get("/getTermAndConditions", getTermAndConditions)
 router.post("/getEstimatedPickUpTime", getEstimatedPickUpTime)
+router.get("/getDaysOff", getDaysOff)
 
 export default router

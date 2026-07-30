@@ -16,6 +16,8 @@ import {
 import { emitNewOrder } from "../index"
 import { OrderType, Status } from "../types/types"
 import { Prisma } from "@prisma/client"
+import { DateTime } from "luxon"
+import { es } from "date-fns/locale"
 const expo = new Expo()
 
 export const adminSignIn = async (req: Request, res: Response) => {
@@ -527,6 +529,70 @@ export const updateRestaurantStatus = async (req: Request, res: Response) => {
       error: (error as Error).message,
     })
     return
+  }
+}
+
+export const updateDaysOff = async (req: Request, res: Response) => {
+  const { newDates }: { newDates: Date[] } = req.body
+  if (!newDates || newDates.length === 0) {
+    res.status(200)
+    return
+  }
+  try {
+    const toDateKey = (date: Date) => date.toISOString().split("T")[0]
+    const existingDates = await db.daysOff.findMany({
+      select: {
+        id: true,
+        date: true,
+      },
+    })
+
+    const existingKeys = new Set(existingDates.map((d) => toDateKey(d.date)))
+
+    const selectedKeys = new Set(newDates.map((date) => toDateKey(date)))
+
+    // Dates to add
+    const datesToAdd = newDates.filter(
+      (date) => !existingKeys.has(toDateKey(date)),
+    )
+
+    // Records to delete
+    const daysOffToDelete = existingDates.filter(
+      (dayOff) => !selectedKeys.has(toDateKey(dayOff.date)),
+    )
+
+    await db.$transaction([
+      ...(datesToAdd.length
+        ? [
+            db.daysOff.createMany({
+              data: datesToAdd.map((date: Date) => ({ date })),
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
+
+      ...(daysOffToDelete.length
+        ? [
+            db.daysOff.deleteMany({
+              where: {
+                id: {
+                  in: daysOffToDelete.map((d) => d.id),
+                },
+              },
+            }),
+          ]
+        : []),
+    ])
+    res.status(200).json({ success: true })
+
+    return
+  } catch (error) {
+    console.error("Error adding days off:", error)
+    res
+      .status(500)
+      .json({
+        message: `Failed to add days off: ${error instanceof Error ? error.message : "Unknown error"}`,
+      })
   }
 }
 

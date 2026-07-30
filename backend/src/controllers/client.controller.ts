@@ -290,6 +290,50 @@ export const getTermAndConditions = (req: Request, res: Response) => {
   return
 }
 
+export const getDaysOff = async (res: Response) => {
+  try {
+    const daysOff = await db.daysOff.findMany({ select: { date: true } })
+    const dates = daysOff.map((day) => day.date)
+    res.status(200).json({ dates })
+    return
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: "Failed to fetch days off" })
+    return
+  }
+}
+
+export const getLoyaltyWinner = async (res: Response) => {
+  try {
+    const now = new Date()
+    const month = now.getMonth()
+    const year = now.getFullYear()
+    const winner = await db.loyaltyWinner.findUnique({
+      where: {
+        month_year: { month, year },
+      },
+      select: {
+        userId: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+    })
+    if (!winner) {
+      res.status(204)
+      return
+    }
+    const winnerDetails = {
+      userId: winner.userId ?? null,
+      firstName: winner.user?.firstName ?? null,
+      lastName: winner.user?.lastName ?? null,
+    }
+    res.status(200).json({ winnerDetails })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: "Failed to get loyalty winner" })
+    return
+  }
+}
+
 export function getEstimatedPickUpTime(req: Request, res: Response) {
   const { numOfItems } = req.body
   const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
