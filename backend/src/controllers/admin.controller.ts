@@ -584,8 +584,9 @@ export const updateDaysOff = async (req: Request, res: Response) => {
           ]
         : []),
     ])
-    res.status(200).json({ success: true })
-
+    const newDates = await db.daysOff.findMany({ select: { date: true } })
+    const destructuredDates = newDates.map((day) => day.date)
+    res.status(200).json({ newDates: destructuredDates })
     return
   } catch (error) {
     console.error("Error adding days off:", error)
