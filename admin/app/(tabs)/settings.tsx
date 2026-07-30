@@ -1,10 +1,15 @@
 "use client"
 
 import { DashboardHeader } from "@/components/dashboard-header"
+import DaysOffSetting from "@/components/daysOff-settings"
 import { formatTime } from "@/lib/formatters"
 import { RestaurantStatus } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
-import { getRestaurantStatusAPI, updateRestaurantStatus } from "@/services/api"
+import {
+  getDaysOff,
+  getRestaurantStatusAPI,
+  updateRestaurantStatus,
+} from "@/services/api"
 import thermalPrinter from "@/services/thermal-printer"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
@@ -42,6 +47,11 @@ export default function Settings() {
   const [updatingRestaurantStatus, setUpdatingRestaurantStatus] =
     useState(false)
 
+  const [showDaysOffSetting, setShowDaysOffSetting] = useState(false)
+  const [allDaysOff, setAllDaysOff] = useState<Date[]>([])
+  const [selectedDates, setSelectedDates] = useState<Set<Date>>(new Set())
+  const [loadingDaysOff, setLoadingDaysOff] = useState(true)
+
   const getRestaurantStatus = async () => {
     const restaurantStatus = await getRestaurantStatusAPI()
     setRestaurantStatus(restaurantStatus)
@@ -52,9 +62,42 @@ export default function Settings() {
     )
   }
 
+  /**
+   * API call to fetch all days off and initialize the local state.
+   */
+  const loadDaysOff = useCallback(async () => {
+    setLoadingDaysOff(true)
+    try {
+      // Call the assumed API function
+      const initialDaysOff = await getDaysOff() // Assuming this returns an array of Date objects or strings convertible to Date
+
+      // Process dates: store them as a Set<Date> for easy lookup and unique storage.
+      const dateSet = new Set<Date>()
+      initialDaysOff.forEach((date) => {
+        dateSet.add(new Date(date))
+      })
+
+      setAllDaysOff(Array.from(dateSet))
+      setSelectedDates(new Set(dateSet)) // Initialize selection with all fetched dates (if user can't deselect them) or an empty set if they start fresh.
+    } catch (error) {
+      console.error("Error loading days off:", error)
+      Toast.show({
+        type: "error",
+        text1: "Failed to load existing days off.",
+        position: "bottom",
+        visibilityTime: 3000,
+        autoHide: false,
+        bottomOffset: 60,
+      })
+    } finally {
+      setLoadingDaysOff(false)
+    }
+  }, [])
+
   useFocusEffect(
     useCallback(() => {
       getRestaurantStatus()
+      loadDaysOff()
     }, []),
   )
 
@@ -294,6 +337,35 @@ export default function Settings() {
             }}
           />
         )}
+
+        {/* DaysOff Settings */}
+        <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
+          <View className=" justify-between px-4 py-4">
+            <Text className=" text-lg font-semibold pb-2">
+              Days Off Settings
+            </Text>
+            {!showDaysOffSetting && (
+              <TouchableOpacity
+                className="bg-indigo-600 py-3 rounded-lg items-center mb-2"
+                onPress={() => setShowDaysOffSetting(!showDaysOffSetting)}
+              >
+                <Text className="text-white font-medium"> Show Calendar</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Date Selector UI */}
+          {showDaysOffSetting && (
+            <DaysOffSetting
+              selectedDates={selectedDates}
+              allDaysOff={allDaysOff}
+              loadingDaysOff={loadingDaysOff}
+              setAllDaysOff={setAllDaysOff}
+              setSelectedDates={setSelectedDates}
+              setShowDaysOffSetting={setShowDaysOffSetting}
+            />
+          )}
+        </View>
 
         {/* Notification Settings */}
         <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">

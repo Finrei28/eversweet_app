@@ -7,11 +7,11 @@ import { OrderQueueIndicator } from "@/components/order-queue-indicator"
 import { OrdersOverviewChart } from "@/components/orders-overview-chart"
 import { SummaryCard } from "@/components/summary-card"
 import { formatCurrency } from "@/lib/formatters"
-import { Overview } from "@/lib/types"
+import { Overview, WinnerDetails } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
 import { useOrderContext } from "@/providers/order-provider"
 import { useSocket } from "@/providers/socket-provider"
-import { getOverviewAPI } from "@/services/api"
+import { getLoyaltyWinner, getOverviewAPI } from "@/services/api"
 import { Ionicons } from "@expo/vector-icons"
 import { useFocusEffect, useRouter } from "expo-router"
 import { useCallback, useState } from "react"
@@ -33,12 +33,19 @@ export default function Dashboard() {
   const { isConnected, reconnect } = useSocket()
   const [overview, setOverview] = useState<Overview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
+  const [loyaltyWinner, setLoyaltyWinner] = useState<WinnerDetails | null>(null)
 
   const getOverview = async () => {
     try {
       setLoadingOverview(true)
-      const overview = await getOverviewAPI()
-      setOverview(overview)
+      const overViewData = await getOverviewAPI()
+      const winnerDetails = await getLoyaltyWinner()
+      setOverview(overViewData)
+      if (winnerDetails.firstName && winnerDetails.lastName) {
+        setLoyaltyWinner(winnerDetails)
+      } else {
+        setLoyaltyWinner(null)
+      }
     } catch (error) {
     } finally {
       setLoadingOverview(false)
@@ -48,14 +55,14 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       getOverview()
-    }, [])
+    }, []),
   )
 
   // We'll show the 5 most recent orders on the dashboard
   const recentOrders = [...currentOrders]
     .sort(
       (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
     .slice(0, 5)
 
@@ -123,11 +130,22 @@ export default function Dashboard() {
             title="Avg. Order Value"
             value={formatCurrency(
               overview && overview.today && overview.today > 0
-                ? ((overview.todaySales ?? 0) / overview.today)
-                : 0
+                ? (overview.todaySales ?? 0) / overview.today
+                : 0,
             )}
             icon="stats-chart-outline"
             color="#EF4444"
+            isLoading={loadingOverview}
+          />
+          <SummaryCard
+            title="Loyalty Winner"
+            value={
+              loyaltyWinner
+                ? loyaltyWinner.firstName + " " + loyaltyWinner.lastName
+                : "No winner"
+            }
+            icon="medal-outline"
+            color="#FFD700"
             isLoading={loadingOverview}
           />
         </View>

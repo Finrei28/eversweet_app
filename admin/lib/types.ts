@@ -49,7 +49,10 @@ export type OrderStatus =
   | "PICKED_UP"
 
 export type Overview = {
-  overview: []
+  overview: {
+    label: string
+    value: number
+  }[]
   today: number
   week: number
   month: number
@@ -79,4 +82,10 @@ export type QueuedOrder = {
   order: Order
   createdAt: string
   status: "pending"
+}
+
+export type WinnerDetails = {
+  userId: string | null
+  firstName: string | null
+  lastName: string | null
 }

@@ -1,4 +1,10 @@
-import { Order, OrderStatus, Overview, RestaurantStatus } from "@/lib/types"
+import {
+  Order,
+  OrderStatus,
+  Overview,
+  RestaurantStatus,
+  WinnerDetails,
+} from "@/lib/types"
 import { getToken, isUserAuthorised } from "./auth"
 
 const url = process.env.EXPO_PUBLIC_SERVER_URL!
@@ -262,6 +268,90 @@ export const updateRestaurantStatus = async (
       error instanceof Error
         ? error.message
         : "Could not update the restaurant status",
+    )
+  }
+}
+
+export const getDaysOff = async (): Promise<Date[]> => {
+  try {
+    const res = await fetch(`${url}/api/getDaysOff`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data?.message || "Server error. Please try again later.")
+    }
+
+    return data.dates.map((date: string) => new Date(date))
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not get days off",
+    )
+  }
+}
+
+export const updateDaysOff = async (newDates: Date[]): Promise<Date[]> => {
+  try {
+    const token = await getToken()
+    const isAuthorised = await isUserAuthorised()
+    if (!isAuthorised) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const res = await fetch(`${url}/api/admin/updateDaysOff`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ newDates }),
+    })
+
+    const data = await res.json()
+
+    if (res.status === 403) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.message || "Server error. Please try again later.")
+    }
+    return data.newDates.map((date: string) => new Date(date))
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not update days off",
+    )
+  }
+}
+
+export const getLoyaltyWinner = async (): Promise<WinnerDetails> => {
+  try {
+    const token = await getToken()
+    const isAuthorised = await isUserAuthorised()
+    if (!isAuthorised) {
+      throw new Error("You're unauthorised to access this!")
+    }
+    const res = await fetch(`${url}/api/admin/getLoyaltyWinner`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data?.message || "Failed to get loyalty winner")
+    }
+
+    return data.winnerDetails
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "Could not fetch loyalty winner",
     )
   }
 }

@@ -23,6 +23,7 @@ import Toast from "react-native-toast-message"
 type OrderContextType = {
   currentOrders: Order[]
   completedOrders: Order[]
+  pendingOrders: Order[]
   isLoading: boolean
   fetchOrders: () => Promise<void>
   fetchCompletedOrders: (date?: Date) => Promise<void>
@@ -181,6 +182,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       value={{
         currentOrders,
         completedOrders,
+        pendingOrders,
         isLoading,
         fetchOrders,
         fetchCompletedOrders,

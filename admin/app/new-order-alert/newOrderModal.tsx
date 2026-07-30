@@ -53,13 +53,7 @@ export default function NewOrderModal({
     try {
       await updateOrderStatus(order.id, "ACCEPTED")
 
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        newOrderServices.resolveCurrentAlert()
-      })
+      newOrderServices.resolveCurrentAlert()
     } catch (error) {
       hasAccepted.current = false
       setAccepting(false)
