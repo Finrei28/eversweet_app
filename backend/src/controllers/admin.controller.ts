@@ -538,6 +538,7 @@ export const updateDaysOff = async (req: Request, res: Response) => {
     res.status(200)
     return
   }
+  const dates = newDates.map((date) => new Date(date))
   try {
     const toDateKey = (date: Date) => date.toISOString().split("T")[0]
     const existingDates = await db.daysOff.findMany({
@@ -549,10 +550,10 @@ export const updateDaysOff = async (req: Request, res: Response) => {
 
     const existingKeys = new Set(existingDates.map((d) => toDateKey(d.date)))
 
-    const selectedKeys = new Set(newDates.map((date) => toDateKey(date)))
+    const selectedKeys = new Set(dates.map((date) => toDateKey(date)))
 
     // Dates to add
-    const datesToAdd = newDates.filter(
+    const datesToAdd = dates.filter(
       (date) => !existingKeys.has(toDateKey(date)),
     )
 
@@ -588,11 +589,9 @@ export const updateDaysOff = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error adding days off:", error)
-    res
-      .status(500)
-      .json({
-        message: `Failed to add days off: ${error instanceof Error ? error.message : "Unknown error"}`,
-      })
+    res.status(500).json({
+      message: `Failed to add days off: ${error instanceof Error ? error.message : "Unknown error"}`,
+    })
   }
 }
 
