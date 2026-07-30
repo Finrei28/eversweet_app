@@ -317,14 +317,11 @@ export const getLoyaltyWinner = async (req: Request, res: Response) => {
         user: { select: { firstName: true, lastName: true } },
       },
     })
-    if (!winner) {
-      res.status(204)
-      return
-    }
+
     const winnerDetails = {
-      userId: winner.userId ?? null,
-      firstName: winner.user?.firstName ?? null,
-      lastName: winner.user?.lastName ?? null,
+      userId: winner?.userId ?? null,
+      firstName: winner?.user?.firstName ?? null,
+      lastName: winner?.user?.lastName ?? null,
     }
     res.status(200).json({ winnerDetails })
   } catch (error) {
