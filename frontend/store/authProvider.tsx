@@ -127,7 +127,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             getUserProfile(),
             getLeaderboardDetails(),
           ])
-        setLeaderboardDetails(leaderboardDetails)
+        setLeaderboardDetails(
+          leaderboardDetails ?? { show: true, description: "" },
+        )
         setUserDetails(user)
         setMembershipDetails(membershipDetails)
         setUsersMembership(membership)

@@ -2,7 +2,7 @@ import { formatCurrency } from "@/lib/formatters"
 import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
-import React from "react"
+import React, { useMemo } from "react"
 import { View, Image, Text, TouchableOpacity, Dimensions } from "react-native"
 
 type DessertCardProps = {
@@ -27,17 +27,15 @@ export const DessertCard = React.memo(
     currency = "cents",
     loyaltyPoints,
   }: DessertCardProps) => {
-    const { height, width } = Dimensions.get("window")
-    const dessertPriceInCentsAfterDiscount = calculateBestDiscountedPrice(
-      dessert,
-      usersMembership,
-    )
+    const dessertPriceInCentsAfterDiscount = useMemo(() => {
+      return calculateBestDiscountedPrice(dessert, usersMembership)
+    }, [dessert, usersMembership])
     return (
-      <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 p-5">
+      <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 pb-5 p-1">
         <Image
           source={{ uri: dessert.imagePath }}
-          className="relative rounded-lg w-full"
-          style={{ height: height * 0.3 }}
+          className="relative rounded-lg w-full h-72"
+          alt={dessert.name}
           resizeMode="cover"
         />
 

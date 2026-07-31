@@ -62,6 +62,19 @@ export default function LeaderBoardPage() {
       <Text className="text-center pt-5 pb-3 text-2xl font-bold">
         Leaderboard:{" "}
       </Text>
+      {leaderboardDetails?.lastMonthsWinner && (
+        <View className="items-center">
+          <Text className="text-sm text-gray-500 mb-2">
+            Last Months Winner:{" "}
+            <Text className="font-semibold text-primary">
+              {!userDetails?.anonymousEnabled
+                ? leaderboardDetails?.lastMonthsWinner
+                : "Anonymous"}
+            </Text>{" "}
+            👑
+          </Text>
+        </View>
+      )}
       <FlatList
         data={leaderboard}
         keyExtractor={(item, index) => item.user?.id ?? `empty-${index}`}

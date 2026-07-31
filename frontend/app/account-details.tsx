@@ -128,7 +128,6 @@ export default function AccountDetails() {
 
   const handleAnonymousChange = async (value: boolean) => {
     try {
-      console.log(value)
       setIsChanging(true)
       setUserDetails((prev) => {
         if (!prev) return prev

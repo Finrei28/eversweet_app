@@ -242,6 +242,7 @@ export type LoyaltyRates = {
 export type LeaderBoardDetails = {
   show: boolean
   description: string
+  lastMonthsWinner: string | null
 }
 
 export type Announcement = {
