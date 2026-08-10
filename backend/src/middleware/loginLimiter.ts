@@ -68,7 +68,7 @@ export const userNameMediumLimiter = rateLimit({
   },
   message: {
     status: 429,
-    error: "This account has been temporarily locked. Try again in 15 minutes.",
+    error: "This account has been temporarily locked for 15 minutes.",
   },
 })
 
