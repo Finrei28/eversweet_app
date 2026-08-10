@@ -50,7 +50,7 @@ export const ipLongLimiter = rateLimit({
 // ==========================================
 
 // 2A. Standard Email Window: Blocks targeted brute-force
-export const emailMediumLimiter = rateLimit({
+export const userNameMediumLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Max 5 failed attempts per email address
   skipSuccessfulRequests: true,
@@ -62,9 +62,9 @@ export const emailMediumLimiter = rateLimit({
   }),
   // Crucial: Tell the limiter to track the email from the body instead of the IP
   keyGenerator: (req: Request): string => {
-    const email = req.body?.email
-    return typeof email === "string"
-      ? email.toLowerCase().trim()
+    const userName = req.body?.email ?? req.body?.username
+    return typeof userName === "string"
+      ? userName.toLowerCase().trim()
       : (req.ip ?? "")
   },
   message: {
@@ -74,7 +74,7 @@ export const emailMediumLimiter = rateLimit({
 })
 
 // 2B. Long Email Window: Catches ultra-slow, sneaky automated bots
-export const emailLongLimiter = rateLimit({
+export const userNameLongLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000, // 24 hours
   max: 20, // Max 20 attempts on one account per day
   skipSuccessfulRequests: true,
@@ -85,9 +85,9 @@ export const emailLongLimiter = rateLimit({
       redisClient.call(args[0], ...args.slice(1)) as Promise<RedisReply>,
   }),
   keyGenerator: (req: Request): string => {
-    const email = req.body?.email
-    return typeof email === "string"
-      ? email.toLowerCase().trim()
+    const userName = req.body?.email ?? req.body?.username
+    return typeof userName === "string"
+      ? userName.toLowerCase().trim()
       : (req.ip ?? "")
   },
   message: {

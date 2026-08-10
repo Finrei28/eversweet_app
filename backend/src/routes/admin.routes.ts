@@ -12,10 +12,23 @@ import {
   updateDaysOff,
 } from "../controllers/admin.controller"
 import { getLoyaltyWinner } from "../controllers/client.controller"
+import {
+  ipLongLimiter,
+  ipShortLimiter,
+  userNameLongLimiter,
+  userNameMediumLimiter,
+} from "../middleware/loginLimiter"
 
 const router = Router()
 
-router.post("/signin", adminSignIn)
+router.post(
+  "/signin",
+  ipShortLimiter,
+  ipLongLimiter,
+  userNameMediumLimiter,
+  userNameLongLimiter,
+  adminSignIn,
+)
 
 router.get(
   "/getPendingOrders",

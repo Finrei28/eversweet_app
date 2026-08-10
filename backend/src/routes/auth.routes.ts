@@ -16,8 +16,8 @@ import {
 } from "../controllers/auth.controller"
 import { authenticateToken } from "../middleware/authentication"
 import {
-  emailLongLimiter,
-  emailMediumLimiter,
+  userNameMediumLimiter,
+  userNameLongLimiter,
   ipLongLimiter,
   ipShortLimiter,
 } from "../middleware/loginLimiter"
@@ -29,8 +29,8 @@ router.post(
   "/signin",
   ipShortLimiter,
   ipLongLimiter,
-  emailMediumLimiter,
-  emailLongLimiter,
+  userNameMediumLimiter,
+  userNameLongLimiter,
   signIn,
 )
 router.post("/checkVerificationCode", checkVerificationCode)
