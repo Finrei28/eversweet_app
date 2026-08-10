@@ -412,7 +412,7 @@ export const getUserOrders = async (req: Request, res: Response) => {
       return
     }
     if (!userId) {
-      res.status(401).json({ message: "Unauthorised" })
+      res.status(401).json({ message: "Unauthenticated" })
       return
     }
     const orders = await db.user.findUnique({

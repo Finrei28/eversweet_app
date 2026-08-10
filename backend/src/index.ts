@@ -118,6 +118,7 @@ app.post(
 
 app.use(cors(corsOptions))
 app.use(express.json())
+app.set("trust proxy", 1) // Crucial for accurate IP tracking behind proxies
 
 app.use((req, res, next) => {
   req.io = io

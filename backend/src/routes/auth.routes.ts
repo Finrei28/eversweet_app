@@ -15,11 +15,24 @@ import {
   updateUser,
 } from "../controllers/auth.controller"
 import { authenticateToken } from "../middleware/authentication"
+import {
+  emailLongLimiter,
+  emailMediumLimiter,
+  ipLongLimiter,
+  ipShortLimiter,
+} from "../middleware/loginLimiter"
 
 const router = Router()
 
 router.post("/signup", signUp)
-router.post("/signin", signIn)
+router.post(
+  "/signin",
+  ipShortLimiter,
+  ipLongLimiter,
+  emailMediumLimiter,
+  emailLongLimiter,
+  signIn,
+)
 router.post("/checkVerificationCode", checkVerificationCode)
 router.get("/getUser", authenticateToken, getUser)
 router.patch("/updateUser", authenticateToken, updateUser)
