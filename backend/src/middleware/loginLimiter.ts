@@ -4,8 +4,7 @@ import { RedisReply, RedisStore } from "rate-limit-redis"
 import Redis from "ioredis"
 
 // Connect to your Redis instance
-const redisUrl =
-  "redis://default:*******@neolight-crayon-deluxe-90321.db.redis.io:13890"
+const redisUrl = process.env.REDIS_URL!
 const redisClient = new Redis(redisUrl)
 
 redisClient.on("error", (err) => console.log("Redis Error:", err))
