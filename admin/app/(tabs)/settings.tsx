@@ -1,7 +1,9 @@
 "use client"
 
 import { DashboardHeader } from "@/components/dashboard-header"
-import DaysOffSetting from "@/components/daysOff-settings"
+import DaysOffSetting, {
+  formatCalendarDate,
+} from "@/components/daysOff-settings"
 import { formatTime } from "@/lib/formatters"
 import { RestaurantStatus } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
@@ -49,7 +51,7 @@ export default function Settings() {
 
   const [showDaysOffSetting, setShowDaysOffSetting] = useState(false)
   const [allDaysOff, setAllDaysOff] = useState<Date[]>([])
-  const [selectedDates, setSelectedDates] = useState<Set<Date>>(new Set())
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set())
   const [loadingDaysOff, setLoadingDaysOff] = useState(true)
 
   const getRestaurantStatus = async () => {
@@ -77,8 +79,10 @@ export default function Settings() {
         dateSet.add(new Date(date))
       })
 
-      setAllDaysOff(Array.from(dateSet))
-      setSelectedDates(new Set(dateSet)) // Initialize selection with all fetched dates (if user can't deselect them) or an empty set if they start fresh.
+      const daysOff = Array.from(dateSet)
+
+      setAllDaysOff(daysOff)
+      setSelectedDates(new Set(daysOff.map((date) => formatCalendarDate(date)))) // Initialize selection with all fetched dates (if user can't deselect them) or an empty set if they start fresh.
     } catch (error) {
       console.error("Error loading days off:", error)
       Toast.show({

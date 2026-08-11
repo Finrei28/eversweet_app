@@ -28,19 +28,39 @@ export async function signInAPI({
         "Content-Type": "application/json",
       },
     })
-    const data = await res.json()
 
-    if (res.status === 401) {
-      // Email doesn't exist
-      throw new Error("Incorrect username or password.")
+    // 1. Read the RateLimit tracking headers
+    const remaining = res.headers.get("RateLimit-Remaining")
+    const resetTimeInSeconds = res.headers.get("RateLimit-Reset")
+
+    // 3. Handle when the rate limit triggers (HTTP 429)
+    if (res.status === 429) {
+      const errorData = await res.json()
+      const minutesLeft = Math.ceil(Number(resetTimeInSeconds) / 60)
+
+      // Update your UI state with this text
+      throw new Error(
+        `${errorData.error} Try again in ${minutesLeft} minutes or reset your password.`,
+      )
     }
+
+    // Handle normal validation errors (e.g. status 401 wrong password)
+
     if (res.status === 403) {
       // Email doesn't exist
       throw new Error("You're unauthorised to access this!")
     }
+
     if (!res.ok) {
+      if (remaining !== null) {
+        throw new Error(
+          `Incorrect email or password. ${Number(remaining) <= 5 ? `You have ${remaining} attempts remaining.` : ""}`,
+        )
+      }
       throw new Error(`Failed to sign in, please try again later`)
     }
+
+    const data = await res.json()
 
     // const data = await res.json()
     return data.token

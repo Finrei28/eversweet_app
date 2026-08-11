@@ -45,13 +45,7 @@ export default function signin() {
       })
     } catch (error) {
       const message = (error as Error).message
-      if (message.includes("invalid login credentials")) {
-        Alert.alert("Invalid email or password.")
-      } else if (message.includes("User not found")) {
-        Alert.alert("User not found. Please sign up.")
-      } else {
-        Alert.alert("Error", (error as Error).message)
-      }
+      Alert.alert("Error", message)
     } finally {
       setIsLoading(false)
     }

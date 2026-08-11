@@ -1,16 +1,16 @@
 import { updateDaysOff } from "@/services/api"
 import { Ionicons } from "@expo/vector-icons"
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { Text, TouchableOpacity, View } from "react-native"
 import { Calendar } from "react-native-calendars"
 import Toast from "react-native-toast-message"
 
 type DaysOffSettingProps = {
-  selectedDates: Set<Date>
+  selectedDates: Set<string>
   allDaysOff: Date[]
   loadingDaysOff: boolean
   setAllDaysOff: React.Dispatch<React.SetStateAction<Date[]>>
-  setSelectedDates: React.Dispatch<React.SetStateAction<Set<Date>>>
+  setSelectedDates: React.Dispatch<React.SetStateAction<Set<string>>>
   setShowDaysOffSetting: React.Dispatch<React.SetStateAction<boolean>>
 }
 
@@ -21,37 +21,9 @@ type MultiDateSelectorProp = {
 }
 
 type DayOffConfirmationProp = {
-  selectedDates: Set<Date>
+  selectedDates: Set<string>
   handleDateSelect: (date: Date, isSelected: boolean) => void
 }
-
-// Helper component to render selected/available dates for confirmation
-const DayOffConfirmation = ({
-  selectedDates,
-  handleDateSelect,
-}: DayOffConfirmationProp) => (
-  <View className="mt-4 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
-    <Text className="text-sm font-semibold text-indigo-700 mb-2">
-      Selected Days Off ({selectedDates.size}):
-    </Text>
-    <View className="flex-row flex-wrap gap-2 max-h-32 overflow-y-auto py-1">
-      {Array.from(selectedDates).map((date, index) => (
-        <View
-          key={index}
-          className="bg-indigo-100 px-3 py-1 rounded-full flex-row items-center"
-        >
-          <Text className="text-sm text-indigo-800">
-            {formatDateForDisplay(date)}
-          </Text>
-          {/* Deletion button */}
-          <TouchableOpacity onPress={() => handleDateSelect(date, false)}>
-            <Ionicons name="close" size={14} color="#6366F1" />
-          </TouchableOpacity>
-        </View>
-      ))}
-    </View>
-  </View>
-)
 
 // Helper component for the Date Picker (Simulated Android/Multi-select UI)
 
@@ -71,31 +43,77 @@ export const formatCalendarDate = (date: Date) => {
   return `${year}-${month}-${day}`
 }
 
-export default function DaysOffSetting({
+export const parseCalendarDate = (dateString: string) => {
+  const [year, month, day] = dateString.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+// Helper component to render selected/available dates for confirmation
+const DayOffConfirmation = ({
   selectedDates,
-  allDaysOff,
+  handleDateSelect,
+}: DayOffConfirmationProp) => (
+  <View className="mt-4 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+    <Text className="text-sm font-semibold text-indigo-700 mb-2">
+      Selected Days Off ({selectedDates.size}):
+    </Text>
+    <View className="flex-row flex-wrap gap-2 max-h-32 overflow-y-auto py-1">
+      {Array.from(selectedDates).map((date, index) => (
+        <View
+          key={index}
+          className="bg-indigo-100 px-3 py-1 rounded-full flex-row items-center"
+        >
+          <Text className="text-sm text-indigo-800">
+            {formatDateForDisplay(parseCalendarDate(date))}
+          </Text>
+          {/* Deletion button */}
+          <TouchableOpacity
+            onPress={() => handleDateSelect(parseCalendarDate(date), false)}
+          >
+            <Ionicons name="close" size={14} color="#6366F1" />
+          </TouchableOpacity>
+        </View>
+      ))}
+    </View>
+  </View>
+)
+
+export default function DaysOffSetting({
+  selectedDates, // Set of currently selected dates including previous dates off
+  allDaysOff, // Array of all previously saved days off
   loadingDaysOff,
   setAllDaysOff,
   setSelectedDates,
   setShowDaysOffSetting,
 }: DaysOffSettingProps) {
-  const isConfirmButtonDisabled =
-    loadingDaysOff || selectedDates.size === allDaysOff.length
-  const parseCalendarDate = (dateString: string) => {
-    const [year, month, day] = dateString.split("-").map(Number)
-    return new Date(year, month - 1, day)
-  }
+  const [isUpdating, setIsUpdating] = useState(false)
+  const allDaysOffKeys = new Set(
+    allDaysOff.map((date) => formatCalendarDate(date)),
+  )
+
+  const sameDates =
+    selectedDates.size === allDaysOffKeys.size &&
+    [...selectedDates].every((date) => allDaysOffKeys.has(date))
+
+  const isConfirmButtonDisabled = loadingDaysOff || sameDates
+
+  const changesInDaysOff =
+    [...selectedDates].filter(
+      (date) =>
+        !new Set(allDaysOff.map((d) => formatCalendarDate(d))).has(date),
+    ).length +
+    [...allDaysOff].filter(
+      (date) => !selectedDates.has(formatCalendarDate(date)),
+    ).length
 
   const isDateSelected = (dateString: string) =>
-    Array.from(selectedDates).some(
-      (date) => formatCalendarDate(date) === dateString,
-    )
+    Array.from(selectedDates).some((date) => date === dateString)
   // get marked dates for react-native-calendar
   const getMarkedDates = () => {
     const marked: Record<string, { selected: boolean; selectedColor: string }> =
       {}
     selectedDates.forEach((date) => {
-      marked[formatCalendarDate(date)] = {
+      marked[date] = {
         selected: true,
         selectedColor: "#6366F1",
       }
@@ -106,49 +124,59 @@ export default function DaysOffSetting({
    * Handler for date changes in the date picker/selector (simulated multi-select logic).
    * Adds or removes a date from the local state.
    */
-  const handleDateSelect = useCallback(
-    (date: Date, isSelected: boolean) => {
-      const normalizedDate = new Date(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate(),
-      )
-      const normalizedKey = formatCalendarDate(normalizedDate)
+  const handleDateSelect = useCallback((date: Date) => {
+    const normalizedDate = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+    )
 
-      setSelectedDates((prevSelectedDates) => {
-        const nextDates = new Set<Date>()
-        let alreadySelected = false
+    const key = formatCalendarDate(normalizedDate)
 
-        Array.from(prevSelectedDates).forEach((prevDate) => {
-          if (formatCalendarDate(prevDate) === normalizedKey) {
-            alreadySelected = true
-            if (isSelected) {
-              nextDates.add(prevDate)
-            }
-          } else {
-            nextDates.add(prevDate)
-          }
+    setSelectedDates((prev) => {
+      const next = new Set(prev)
+
+      if (next.has(key)) {
+        next.delete(key)
+
+        return next
+      }
+
+      // Don't allow adding a past date
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      if (date < today) {
+        Toast.show({
+          type: "info",
+          text1: `Cannot select past dates.`,
+          position: "bottom",
+          visibilityTime: 3000,
+          autoHide: true,
+          bottomOffset: 60,
         })
 
-        if (isSelected && !alreadySelected) {
-          nextDates.add(normalizedDate)
-        }
+        return prev
+      }
 
-        return nextDates
-      })
-    },
-    [allDaysOff],
-  )
+      next.add(key)
+
+      return next
+    })
+  }, [])
 
   const handleCancelDaysOff = () => {
     setShowDaysOffSetting(false)
-    setSelectedDates(new Set(allDaysOff))
+    setSelectedDates(
+      new Set(allDaysOff.map((date) => formatCalendarDate(date))),
+    )
   }
 
   /**
    * Handles the confirmation button press, calling the API update function.
    */
   const handleConfirmUpdate = async () => {
+    setIsUpdating(true)
     if (selectedDates.size === 0 && allDaysOff.length === 0) {
       Toast.show({
         type: "error",
@@ -158,15 +186,18 @@ export default function DaysOffSetting({
         autoHide: true,
         bottomOffset: 60,
       })
+      setIsUpdating(false)
       return
     }
 
     try {
-      const datesArray = Array.from(selectedDates)
+      const datesArray = Array.from(selectedDates).map((dateString) =>
+        parseCalendarDate(dateString),
+      )
 
       Toast.show({
         type: "info",
-        text1: `Updating ${Math.abs(allDaysOff.length - datesArray.length)} day/s off...`,
+        text1: `Updating ${changesInDaysOff} day/s off...`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
@@ -175,7 +206,9 @@ export default function DaysOffSetting({
 
       const newDates = await updateDaysOff(datesArray)
       setAllDaysOff(newDates)
-      setSelectedDates(new Set(newDates))
+      setSelectedDates(
+        new Set(newDates.map((date) => formatCalendarDate(date))),
+      )
       setShowDaysOffSetting(false)
 
       Toast.show({
@@ -198,6 +231,8 @@ export default function DaysOffSetting({
         autoHide: true,
         bottomOffset: 60,
       })
+    } finally {
+      setIsUpdating(false)
     }
   }
 
@@ -206,11 +241,14 @@ export default function DaysOffSetting({
       <Calendar
         markedDates={getMarkedDates()}
         onDayPress={(day) => {
+          if (isUpdating) {
+            return
+          }
           const date = parseCalendarDate(day.dateString)
-          handleDateSelect(date, !isDateSelected(day.dateString))
+
+          handleDateSelect(date)
         }}
-        minDate={formatCalendarDate(new Date())}
-        enableSwipeMonths
+        enableSwipeMonths={!isUpdating}
       />
       {/* Confirmation and Action Buttons */}
       <View className="p-4 border-t border-gray-100">
@@ -237,7 +275,7 @@ export default function DaysOffSetting({
             <Text
               className={`font-medium ${allDaysOff.length > 0 ? "text-white" : "cursor-not-allowed"}`}
             >
-              Confirm Update ({selectedDates.size}/{allDaysOff.length})
+              Confirm {changesInDaysOff} Update{changesInDaysOff > 1 ? "s" : ""}
             </Text>
           </TouchableOpacity>
         </View>
