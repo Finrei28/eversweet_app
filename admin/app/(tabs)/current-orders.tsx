@@ -5,7 +5,7 @@ import { OrderCard } from "@/components/order-card"
 import { OrderQueueIndicator } from "@/components/order-queue-indicator"
 import { StatusFilterChip } from "@/components/status-filter-chip"
 import { useAuth } from "@/providers/auth-provider"
-import { useOrderContext } from "@/providers/order-provider"
+import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { useMemo, useState } from "react"
@@ -20,7 +20,9 @@ import {
 
 export default function CurrentOrders() {
   const router = useRouter()
-  const { currentOrders, fetchOrders, isLoading } = useOrderContext()
+  const currentOrders = useOrderStore((state) => state.currentOrders)
+  const fetchOrders = useOrderStore((state) => state.fetchOrders)
+  const isLoading = useOrderStore((state) => state.isLoading)
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const { authenticated, loading } = useAuth()
@@ -51,10 +53,6 @@ export default function CurrentOrders() {
       setRefreshing(false)
     }
   }
-
-  // const handleDeclineOrder = async (orderId: string) => {
-  //   await updateOrderStatus(orderId, "DECLINED")
-  // }
 
   if (loading) {
     return (

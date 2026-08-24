@@ -1,7 +1,7 @@
 "use client"
 
 import { useAuth } from "@/providers/auth-provider"
-import { useOrderContext } from "@/providers/order-provider"
+import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
 import { Redirect, Tabs } from "expo-router"
 import { ActivityIndicator, View } from "react-native"
@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 export default function TabsLayout() {
   const insets = useSafeAreaInsets()
   const { authenticated, loading } = useAuth()
+  const currentOrders = useOrderStore((state) => state.currentOrders)
 
   // useEffect(() => {
   //   ScreenOrientation.lockAsync(
@@ -28,7 +29,6 @@ export default function TabsLayout() {
   if (!authenticated) {
     return <Redirect href="/sign-in" />
   }
-  const { currentOrders } = useOrderContext()
 
   return (
     <Tabs

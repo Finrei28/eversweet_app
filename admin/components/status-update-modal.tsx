@@ -51,13 +51,6 @@ export function StatusUpdateModal({
       color: "#10B981", // green
       description: "Order has been picked up by the customer",
     },
-    {
-      value: "DECLINED",
-      label: "Declined",
-      icon: "close-circle-outline",
-      color: "#EF4444", // red
-      description: "Order has been declined and canceled",
-    },
   ]
   return (
     <Modal visible={visible} animationType="slide" transparent={true}>

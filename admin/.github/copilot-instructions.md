@@ -16,10 +16,11 @@ High-level architecture
 
 - Expo (managed) React Native app using Expo Router (file-based routing). Root UI lives in the app/ directory. Entry: expo-router/entry (see package.json).
 - Routing: app/ uses file-based routes. Route groups use parentheses (e.g. (tabs)) to group/hide paths.
-- Providers (global state): AuthProvider -> controls authentication (expo-secure-store). After AuthProvider: OrderProvider, SocketProvider, ThemeProvider. The app relies on this provider nesting (see app/_layout.tsx).
+- Providers (global state): AuthProvider -> controls authentication (expo-secure-store), wraps the app; ThemeProvider is mounted inside the authenticated tree (see app/_layout.tsx). Order and socket state live in Zustand stores (store/order-store.ts, store/socket-store.ts) rather than React Context — they're global singletons, not tied to provider nesting.
 - Core domains:
-  - services/: API calls, auth token helpers, printer management (BLE thermal printers), new-order queueing, permissions helpers.
-  - providers/: React context providers (auth, order, socket, theme).
+  - services/: API calls, auth token helpers, printer management (BLE thermal printers), new-order queueing, socket connection lifecycle (socket-service.ts), permissions helpers.
+  - store/: Zustand stores for order data (order-store.ts) and socket connection state (socket-store.ts). Read with selectors, e.g. `useOrderStore((s) => s.currentOrders)`.
+  - providers/: remaining React context providers (auth, theme).
   - components/: UI primitives (headers, lists, indicators, charts).
   - app/: route screens and UI (tabs, dashboard, order details, sign-in, printer setup).
 - Printing & devices: BLE thermal-printer implementation (services/thermal-printer.ts) + persistent print queue (AsyncStorage). Printer jobs are retried on reconnect.
@@ -28,7 +29,7 @@ High-level architecture
 Key conventions and repo-specific rules
 
 - File-based routing: use the app/ folder and follow Expo Router naming; put tab groups in parentheses (e.g., (tabs)).
-- Provider ordering: AuthProvider must wrap the rest. Do NOT mount OrderProvider inside the unauthenticated branch — the code relies on auth state before initialising order/socket providers (see comment in app/_layout.tsx).
+- Provider ordering: AuthProvider must wrap the rest. Order-store fetching and the socket connection are started/stopped from an `authenticated`-keyed effect in app/_layout.tsx (calls useOrderStore.getState().fetchOrders()/reset() and socketService.connect()/disconnect()) — do not fetch orders or connect the socket before auth is confirmed.
 - State persistence keys (AsyncStorage):
   - Print queue saved under key: "print_queue"
   - Saved printers: "thermal_printers"
@@ -51,7 +52,7 @@ Notes from README
 Helpful pointers for future Copilot sessions
 
 - Root: work from the app/ and providers/ and services/ folders first to understand UI flows and side effects (printing, sockets, persistence).
-- When changing auth or socket code, check services/auth.ts and providers/socket-provider.ts together — token handling affects socket connections.
+- When changing auth or socket code, check services/auth.ts and services/socket-service.ts together — token handling affects socket connections.
 - Printer changes often require physical device testing; keep AsyncStorage keys and retry logic in mind to avoid losing pending jobs.
 
 Files consulted while authoring: package.json, README.md, tsconfig.json, app/_layout.tsx, providers/*, services/*

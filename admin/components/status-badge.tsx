@@ -39,12 +39,6 @@ export function StatusBadge({ status }: StatusBadgeProps) {
           textColor: "text-green-800",
           label: "Picked up",
         }
-      case "DECLINED":
-        return {
-          bgColor: "bg-red-100",
-          textColor: "text-red-800",
-          label: "Declined",
-        }
       default:
         return {
           bgColor: "bg-gray-100",

@@ -75,6 +75,7 @@ export type QueuedPrintJob = {
   printJob: PrintJob
   resolve: (success: boolean) => void
   reject: (error: Error) => void
+  failCount?: number
 }
 
 export type QueuedOrder = {

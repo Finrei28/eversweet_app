@@ -30,11 +30,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const checkAuth = async () => {
       const storedToken = await SecureStore.getItemAsync("token")
       if (storedToken) {
-        const decoded: DecodedToken = jwtDecode(storedToken)
-        const now = Date.now() / 1000
-        if (decoded.exp && decoded.exp > now && decoded.role === "ADMIN") {
-          setAuthenticated(true)
-        } else {
+        try {
+          const decoded: DecodedToken = jwtDecode(storedToken)
+          const now = Date.now() / 1000
+          if (decoded.exp && decoded.exp > now && decoded.role === "ADMIN") {
+            setAuthenticated(true)
+          } else {
+            await signOut()
+          }
+        } catch (error) {
+          console.error("Failed to decode stored token:", error)
           await signOut()
         }
       }

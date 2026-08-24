@@ -1,12 +1,12 @@
 "use client"
 import { Order } from "@/lib/types"
 import { AuthProvider, useAuth } from "@/providers/auth-provider"
-import { OrderProvider } from "@/providers/order-provider"
-import { SocketProvider } from "@/providers/socket-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 import newOrderServices from "@/services/newOrders-service"
 import printerService from "@/services/printer-service"
+import socketService from "@/services/socket-service"
 import thermalPrinter from "@/services/thermal-printer"
+import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
 import { useFonts } from "expo-font"
 import { Stack, useRouter } from "expo-router"
@@ -61,6 +61,22 @@ function AppLayout() {
     }
   }, [authenticated])
 
+  // Order data + socket connection are only relevant while authenticated
+  useEffect(() => {
+    if (!authenticated) {
+      socketService.disconnect()
+      useOrderStore.getState().reset()
+      return
+    }
+
+    useOrderStore.getState().fetchOrders()
+    socketService.connect()
+
+    return () => {
+      socketService.disconnect()
+    }
+  }, [authenticated])
+
   if (!fontsLoaded || loading) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
@@ -70,7 +86,6 @@ function AppLayout() {
   }
 
   if (!authenticated) {
-    // ⚠️ DO NOT include OrderProvider here!
     return (
       <Stack>
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
@@ -80,61 +95,51 @@ function AppLayout() {
 
   return (
     <ThemeProvider>
-      <OrderProvider>
-        <SocketProvider>
-          <StatusBar style="auto" />
-          {currentOrder && (
-            <NewOrderModal order={currentOrder} visible={!!currentOrder} />
-          )}
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="order-details/[id]"
-              options={{
-                headerShown: Platform.OS === "ios" ? true : false,
-                presentation: Platform.OS === "ios" ? "modal" : "formSheet",
-              }}
-            />
-            <Stack.Screen
-              name="bluetooth-printer-setup"
-              options={{
-                title: "Bluetooth Printer Setup",
-                headerShown: true,
-                headerTitleStyle: {
-                  fontFamily: "Inter-SemiBold",
-                },
-                headerLeft: () => (
-                  <TouchableOpacity
-                    onPress={() => router.back()}
-                    className="ml-2"
-                  >
-                    <Ionicons name="arrow-back" size={24} color="#000" />
-                  </TouchableOpacity>
-                ),
-              }}
-            />
-            <Stack.Screen
-              name="printer-test"
-              options={{
-                title: "Printer Test",
-                headerShown: true,
-                headerTitleStyle: {
-                  fontFamily: "Inter-SemiBold",
-                },
-                headerLeft: () => (
-                  <TouchableOpacity
-                    onPress={() => router.back()}
-                    className="ml-2"
-                  >
-                    <Ionicons name="arrow-back" size={24} color="#000" />
-                  </TouchableOpacity>
-                ),
-              }}
-            />
-          </Stack>
-          <Toast />
-        </SocketProvider>
-      </OrderProvider>
+      <StatusBar style="auto" />
+      {currentOrder && (
+        <NewOrderModal order={currentOrder} visible={!!currentOrder} />
+      )}
+      <Stack>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="order-details/[id]"
+          options={{
+            headerShown: Platform.OS === "ios" ? true : false,
+            presentation: Platform.OS === "ios" ? "modal" : "formSheet",
+          }}
+        />
+        <Stack.Screen
+          name="bluetooth-printer-setup"
+          options={{
+            title: "Bluetooth Printer Setup",
+            headerShown: true,
+            headerTitleStyle: {
+              fontFamily: "Inter-SemiBold",
+            },
+            headerLeft: () => (
+              <TouchableOpacity onPress={() => router.back()} className="ml-2">
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+            ),
+          }}
+        />
+        <Stack.Screen
+          name="printer-test"
+          options={{
+            title: "Printer Test",
+            headerShown: true,
+            headerTitleStyle: {
+              fontFamily: "Inter-SemiBold",
+            },
+            headerLeft: () => (
+              <TouchableOpacity onPress={() => router.back()} className="ml-2">
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+            ),
+          }}
+        />
+      </Stack>
+      <Toast />
     </ThemeProvider>
   )
 }

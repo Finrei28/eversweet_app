@@ -4,7 +4,7 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { PastOrderCard } from "@/components/past-order-card"
 import { formatDate } from "@/lib/formatters"
 import { useAuth } from "@/providers/auth-provider"
-import { useOrderContext } from "@/providers/order-provider"
+import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
 import { useRouter } from "expo-router"
@@ -21,7 +21,11 @@ import {
 
 export default function PastOrders() {
   const router = useRouter()
-  const { completedOrders, fetchCompletedOrders, isLoading } = useOrderContext()
+  const completedOrders = useOrderStore((state) => state.completedOrders)
+  const fetchCompletedOrders = useOrderStore(
+    (state) => state.fetchCompletedOrders,
+  )
+  const isLoading = useOrderStore((state) => state.isLoading)
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [showDatePicker, setShowDatePicker] = useState(false)

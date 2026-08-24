@@ -5,8 +5,9 @@ import { StatusBadge } from "@/components/status-badge"
 import { StatusUpdateModal } from "@/components/status-update-modal"
 import { formatCurrency, formatDate } from "@/lib/formatters"
 import { OrderStatus } from "@/lib/types"
-import { useOrderContext } from "@/providers/order-provider"
 import printerService from "@/services/printer-service"
+import { useOrderStore } from "@/store/order-store"
+import { getErrorMessage } from "@/utilities/getError"
 import { Ionicons } from "@expo/vector-icons"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
@@ -30,10 +31,12 @@ const getScreenOptions = () => ({
 export default function OrderDetails() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { findOrderById, updateOrderStatus } = useOrderContext()
+  const updateOrderStatus = useOrderStore((state) => state.updateOrderStatus)
   const [statusModalVisible, setStatusModalVisible] = useState(false)
 
-  const order = findOrderById(id)
+  // Selector re-runs state.findOrderById(id) on every store change, so this
+  // stays reactive to order updates instead of reading a stale snapshot.
+  const order = useOrderStore((state) => state.findOrderById(id))
 
   const handleStatusUpdate = async (newStatus: OrderStatus) => {
     try {
@@ -51,6 +54,15 @@ export default function OrderDetails() {
       // }, 100) // You can fine-tune the delay if needed
     } catch (error) {
       console.error("Failed to update order status:", error)
+      Toast.show({
+        type: "error",
+        text1: "Update Failed",
+        text2: getErrorMessage(error),
+        position: "bottom",
+        visibilityTime: 4000,
+        autoHide: true,
+        bottomOffset: 60,
+      })
       // Optionally show a toast/snackbar or error message
     }
   }
@@ -79,9 +91,10 @@ export default function OrderDetails() {
     } catch (error) {
       Toast.show({
         type: "error",
-        text1: error instanceof Error ? error.message : "Something went wrong",
+        text1: "Print Failed",
+        text2: getErrorMessage(error),
         position: "bottom",
-        visibilityTime: 3000,
+        visibilityTime: 4000,
         autoHide: true,
         bottomOffset: 60,
       })
@@ -156,13 +169,6 @@ export default function OrderDetails() {
                   >
                     <Text className="text-white font-medium">Accept</Text>
                   </TouchableOpacity>
-
-                  {/* <TouchableOpacity
-                    className="flex-1 ml-1 bg-red-500 py-3 rounded-lg items-center justify-center"
-                    onPress={() => handleStatusUpdate("DECLINED")}
-                  >
-                    <Text className="text-white font-medium">Decline</Text>
-                  </TouchableOpacity> */}
                 </View>
               ) : (
                 <TouchableOpacity

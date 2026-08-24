@@ -82,3 +82,9 @@ yarn-error.*
 *.tsbuildinfo
 
 # @end expo-cli
+
+# Scripts
+scripts/
+
+# Claude
+.claudeignore

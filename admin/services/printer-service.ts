@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import thermalPrinter from "./thermal-printer"
 
 const PRINT_QUEUE_KEY = "print_queue"
+const MAX_JOB_FAILURES = 3
 
 class PrinterManager {
   private queue: QueuedPrintJob[] = []
@@ -48,6 +49,22 @@ class PrinterManager {
           await removeJob(queuedJob.printJob.id)
           queuedJob.resolve(true)
         } catch (error) {
+          queuedJob.failCount = (queuedJob.failCount ?? 0) + 1
+
+          if (queuedJob.failCount >= MAX_JOB_FAILURES) {
+            // Give up on this job for now so it doesn't block orders behind it.
+            // It stays in AsyncStorage and will be retried by retryPendingJobs()
+            // (e.g. on app start or when the printer reconnects).
+            console.error(
+              `Giving up on order ${queuedJob.printJob.id} after ${queuedJob.failCount} failed attempts`,
+              error,
+            )
+            queuedJob.reject(
+              error instanceof Error ? error : new Error(String(error)),
+            )
+            continue
+          }
+
           console.error(`Failed to print order ${queuedJob.printJob.id}`, error)
           this.queue.unshift(queuedJob)
           break
@@ -61,9 +78,7 @@ class PrinterManager {
   }
 
   async printNow(order: Order) {
-    try {
-      return this.printOrderWithRetry(order)
-    } catch (error) {}
+    return this.printOrderWithRetry(order)
   }
 
   private async printOrder(order: Order) {

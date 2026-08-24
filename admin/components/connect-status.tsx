@@ -1,11 +1,11 @@
 "use client"
 
-import { useSocket } from "@/providers/socket-provider"
+import { useSocketStore } from "@/store/socket-store"
 import { Ionicons } from "@expo/vector-icons"
 import { Text, View } from "react-native"
 
 export function ConnectionStatus() {
-  const { isConnected } = useSocket()
+  const isConnected = useSocketStore((state) => state.isConnected)
 
   if (isConnected) {
     return null // Don't show anything when connected

@@ -4,7 +4,7 @@ import { formatCurrency, formatDate, getCollectionTime } from "@/lib/formatters"
 import { Ionicons } from "@expo/vector-icons"
 
 import { Order, OrderStatus } from "@/lib/types"
-import { useOrderContext } from "@/providers/order-provider"
+import { useOrderStore } from "@/store/order-store"
 import { useRouter } from "expo-router"
 import { useState } from "react"
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native"
@@ -17,7 +17,7 @@ type OrderCardProps = {
 
 export function OrderCard({ order, onPress }: OrderCardProps) {
   const [updatingStatus, setUpdatingStatus] = useState(false)
-  const { updateOrderStatus } = useOrderContext()
+  const updateOrderStatus = useOrderStore((state) => state.updateOrderStatus)
   const hasCustomizations = order.desserts.some(
     (item) => item.customisations && item.customisations.length > 0,
   )

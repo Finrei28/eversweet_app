@@ -2,8 +2,8 @@
 
 import { formatCurrency, getCollectionTime } from "@/lib/formatters"
 import { Order } from "@/lib/types"
-import { useOrderContext } from "@/providers/order-provider"
 import newOrderServices from "@/services/newOrders-service"
+import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useAudioPlayer } from "expo-audio"
@@ -26,7 +26,7 @@ export default function NewOrderModal({
   order: Order
   visible: boolean
 }) {
-  const { updateOrderStatus } = useOrderContext()
+  const updateOrderStatus = useOrderStore((state) => state.updateOrderStatus)
   const [accepting, setAccepting] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
   const { height } = useWindowDimensions()
@@ -110,21 +110,6 @@ export default function NewOrderModal({
     }
   }, [player, order.id, handleAccept])
 
-  // const handleDecline = async () => {
-  //   // Fade out animation before closing
-  //   await updateOrderStatus(order.id, "DECLINED")
-  //   Animated.timing(fadeAnim, {
-  //     toValue: 0,
-  //     duration: 200,
-  //     useNativeDriver: true,
-  //   }).start(() => {
-  //     // if (router.canGoBack?.()) {
-  //     //   router.back()
-  //     // }
-  //   })
-
-  //   return
-  // }
   return (
     <Modal
       visible={visible}
@@ -252,13 +237,6 @@ export default function NewOrderModal({
 
             {/* Accept/Decline buttons */}
             <View className="flex-row mt-2">
-              {/* <TouchableOpacity
-              className="flex-1 bg-red-500 py-3 rounded-lg items-center justify-center mr-2"
-              onPress={handleDecline}
-            >
-              <Text className="text-white font-medium">Decline</Text>
-            </TouchableOpacity> */}
-
               <TouchableOpacity
                 className="flex-1 bg-green-500 py-3 rounded-lg items-center justify-center ml-2"
                 onPress={handleAccept}

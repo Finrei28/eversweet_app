@@ -9,9 +9,10 @@ import { SummaryCard } from "@/components/summary-card"
 import { formatCurrency } from "@/lib/formatters"
 import { Overview, WinnerDetails } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
-import { useOrderContext } from "@/providers/order-provider"
-import { useSocket } from "@/providers/socket-provider"
 import { getLoyaltyWinner, getOverviewAPI } from "@/services/api"
+import socketService from "@/services/socket-service"
+import { useOrderStore } from "@/store/order-store"
+import { useSocketStore } from "@/store/socket-store"
 import { Ionicons } from "@expo/vector-icons"
 import { useFocusEffect, useRouter } from "expo-router"
 import { useCallback, useState } from "react"
@@ -26,11 +27,13 @@ import {
 
 export default function Dashboard() {
   const router = useRouter()
-  const { currentOrders, pendingOrders, fetchOrders, isLoading } =
-    useOrderContext()
+  const currentOrders = useOrderStore((state) => state.currentOrders)
+  const pendingOrders = useOrderStore((state) => state.pendingOrders)
+  const fetchOrders = useOrderStore((state) => state.fetchOrders)
+  const isLoading = useOrderStore((state) => state.isLoading)
   const [refreshing, setRefreshing] = useState(false)
   const { authenticated, loading } = useAuth()
-  const { isConnected, reconnect } = useSocket()
+  const isConnected = useSocketStore((state) => state.isConnected)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
   const [loyaltyWinner, setLoyaltyWinner] = useState<WinnerDetails | null>(null)
@@ -70,7 +73,7 @@ export default function Dashboard() {
     setRefreshing(true)
     // If socket is disconnected, try to reconnect
     if (!isConnected) {
-      reconnect()
+      socketService.reconnect()
     }
     await fetchOrders()
     await getOverview()
