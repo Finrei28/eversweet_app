@@ -42,8 +42,10 @@ export default function Index() {
     async function loadContents() {
       try {
         setLoading(true)
-        const homePageData = await getHomepageCards()
-        const offerData = await showOfferForClient()
+        const [homePageData, offerData] = await Promise.all([
+          getHomepageCards(),
+          showOfferForClient(),
+        ])
         setOffers(offerData)
         setHomePageContents(homePageData)
       } catch (error) {

@@ -34,10 +34,13 @@ export default function Orders() {
     refetch: refetchOrders,
   } = useFetch(() => getUserOrders("PENDING")) // Gets pending and completed orders from backend
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true)
-    refetchOrders()
-    setRefreshing(false)
+    try {
+      await refetchOrders()
+    } finally {
+      setRefreshing(false)
+    }
   }, [refetchOrders])
 
   // Poll for updates every 30 seconds for pending orders

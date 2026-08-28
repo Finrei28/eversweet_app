@@ -10,6 +10,7 @@ type LoyaltyStore = {
   fetchPoints: () => Promise<void>
   setPoints: (points: number) => void
   addPoints: (value: number) => void
+  reset: () => void
 }
 
 export const useLoyaltyStore = create<LoyaltyStore>()(
@@ -17,13 +18,21 @@ export const useLoyaltyStore = create<LoyaltyStore>()(
     (set) => ({
       points: 0,
       fetchPoints: async () => {
-        const token = await getToken()
-        if (!token) return
-        const points = await getUserLoyaltyPoints()
-        set({ points })
+        try {
+          const token = await getToken()
+          if (!token) return
+          const points = await getUserLoyaltyPoints()
+          set({ points })
+        } catch (error) {
+          // Most call sites fire this without awaiting it, so an escaping
+          // rejection shows up as an unhandled promise rejection rather than a
+          // stale points count.
+          console.error("Failed to fetch loyalty points", error)
+        }
       },
       setPoints: (points) => set({ points }),
       addPoints: (value) => set((state) => ({ points: state.points + value })),
+      reset: () => set({ points: 0 }),
     }),
     {
       name: "loyalty-points", // persist key

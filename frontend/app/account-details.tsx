@@ -91,7 +91,9 @@ export default function AccountDetails() {
         phone: userDetails.phone || "",
       })
     }
-  }, [])
+    // userDetails arrives asynchronously from AuthProvider, so this has to
+    // re-run once it lands or the form renders blank.
+  }, [userDetails])
 
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({

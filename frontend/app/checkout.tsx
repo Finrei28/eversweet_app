@@ -36,13 +36,21 @@ import {
 import DateTimePickerModal from "react-native-modal-datetime-picker"
 import { isOutsideBusinessHours } from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
-import { getNextValidPickupTime, getOpenCloseTime } from "@/lib/checkoutHelpers"
+import {
+  getLastOrderTime,
+  getNextValidPickupTime,
+  getOpenCloseTime,
+  LAST_ORDER_OFFSET_MINUTES,
+} from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
 import {
   formatCurrency,
+  formatDayMonthTime,
   formatShortDate,
+  formatTime,
   roundToNearest5,
 } from "@/lib/formatters"
+import { addNZMonths, NZ_TIMEZONE, withNZTimeOfDay } from "@/lib/nzTime"
 import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
@@ -95,6 +103,10 @@ function CheckoutContent() {
   const [eatInDate, setEatInDate] = useState<Date | null>(null)
   const [pickupNow, setPickupNow] = useState(true)
   const [pickupDate, setPickupDate] = useState<Date | null>(null)
+  // Read inside the pickup-time effect without making it a dependency, so
+  // toggling "as soon as possible" doesn't trigger a refetch.
+  const pickupNowRef = useRef(pickupNow)
+  pickupNowRef.current = pickupNow
 
   // const nextValidTime = useMemo(
   //   () => getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
@@ -109,6 +121,11 @@ function CheckoutContent() {
     eatIn ? eatInDate : pickupDate,
     storeHours,
   )
+
+  // Eat-in has to be ordered further ahead of closing than a pickup does.
+  const lastOrderOffsetMinutes = eatIn
+    ? LAST_ORDER_OFFSET_MINUTES.eatIn
+    : LAST_ORDER_OFFSET_MINUTES.pickup
 
   // Fetch saved cards when component mounts
 
@@ -125,35 +142,75 @@ function CheckoutContent() {
   }, [cartOperations])
 
   useEffect(() => {
+    // Depends on token: it arrives from AuthProvider a tick after mount, and
+    // on an empty dep list the cards were never fetched, leaving loadingCards
+    // true and the screen stuck on its loader.
     if (token) {
       fetchSavedCards()
     }
-    const init = async () => {
-      const next = await getNextValidPickupTime(
-        new Date(),
-        totalItems,
-        storeHours,
-      )
+  }, [token])
 
-      setNextValidTime(next)
-      setPickupDate(next)
+  useEffect(() => {
+    // storeHours starts as AuthProvider's fallback and is replaced once the
+    // real hours load, so the first valid pickup time has to be recomputed
+    // rather than settled on mount against the placeholder.
+    let cancelled = false
+
+    const init = async () => {
+      try {
+        const next = await getNextValidPickupTime(
+          new Date(),
+          totalItems,
+          storeHours,
+          { lastOrderOffsetMinutes },
+        )
+        if (cancelled) return
+
+        setNextValidTime(next)
+        // Only steer the chosen time while it is still derived ("as soon as
+        // possible"). A time the customer chose themselves must not be moved.
+        if (pickupNowRef.current) {
+          eatIn ? setEatInDate(next) : setPickupDate(next)
+        }
+      } catch (error) {
+        console.error("Failed to work out the next valid pickup time", error)
+      }
     }
 
     init()
-  }, [])
+
+    return () => {
+      cancelled = true
+    }
+    // Depends on eatIn: switching mode changes the cut-off, which can move the
+    // soonest bookable slot to the next trading day.
+  }, [storeHours, eatIn, lastOrderOffsetMinutes])
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date()
+    let cancelled = false
 
-      const run = async () => {
+    const interval = setInterval(async () => {
+      // Nothing on this screen is visible while the app is backgrounded, so
+      // polling then just burns the customer's data and battery.
+      if (AppState.currentState !== "active") return
+
+      try {
+        const now = new Date()
         const estimatedPickupTime = await getEstimatedPickUpTime(totalItems)
 
+        // Hand the estimate over rather than letting this refetch it: the two
+        // calls hit the same endpoint with the same argument.
         const nextValidPickupTime = await getNextValidPickupTime(
           now,
           totalItems,
           storeHours,
+          {
+            earliestReadyTime: estimatedPickupTime,
+            lastOrderOffsetMinutes,
+          },
         )
+        if (cancelled) return
+
         setNextValidTime(nextValidPickupTime)
 
         setPickupDate((prev) => {
@@ -166,13 +223,16 @@ function CheckoutContent() {
           }
           return prev
         })
+      } catch (error) {
+        console.error("Failed to refresh the pickup time", error)
       }
-
-      run()
     }, 60 * 1000)
 
-    return () => clearInterval(interval)
-  }, [totalItems, storeHours])
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [totalItems, storeHours, lastOrderOffsetMinutes])
 
   useEffect(() => {
     const subscription = AppState.addEventListener(
@@ -357,21 +417,9 @@ function CheckoutContent() {
     } else if (pickupNow) {
       return "As soon as possible"
     } else {
-      const day =
-        eatIn && eatInDate ? eatInDate.getDate() : pickupDate.getDate()
-      const month =
-        eatIn && eatInDate
-          ? eatInDate.getMonth() + 1
-          : pickupDate.getMonth() + 1
-      const hours =
-        eatIn && eatInDate ? eatInDate.getHours() : pickupDate.getHours()
-      const minutes =
-        eatIn && eatInDate ? eatInDate.getMinutes() : pickupDate.getMinutes()
-      const ampm = hours >= 12 ? "PM" : "AM"
-      const formattedHours = hours % 12 || 12
-      const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes
-
-      return `${day}/${month} ${formattedHours}:${formattedMinutes} ${ampm}`
+      // Shown in store time: the customer is choosing a slot at an Auckland
+      // counter, and the picker beside this label is displaying the same clock.
+      return formatDayMonthTime(eatIn && eatInDate ? eatInDate : pickupDate)
     }
   }
 
@@ -381,7 +429,12 @@ function CheckoutContent() {
         "Invalid Time",
         "Please select a valid pickup time during our business hours.",
       )
+      // Without this the function carries on and stacks a second alert on top:
+      // getOpenCloseTime(null) reports no opening hours, so the branch below
+      // fires "Sorry, we are closed on that day..." as well.
+      return
     }
+
     const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
 
     if (!openTime || !closeTime) {
@@ -389,34 +442,59 @@ function CheckoutContent() {
     } else {
       Alert.alert(
         "Sorry, we are closed at that time",
-        `Please choose a time during store hours. We are open ${openTime.toLocaleTimeString(
-          "en-NZ",
-          {
-            hour: "2-digit",
-            minute: "2-digit",
-          },
-        )} to ${closeTime.toLocaleTimeString("en-NZ", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })} on a ${dayName}.`,
+        `Please choose a time during store hours. We are open ${formatTime(
+          openTime,
+        )} to ${formatTime(closeTime)} on a ${dayName}.`,
       )
     }
   }
 
-  const handleConfirm = async (date: Date) => {
+  const setChosenDate = (date: Date) => {
+    eatIn ? setEatInDate(date) : setPickupDate(date)
+  }
+
+  type PickOutcome =
+    | { status: "none" } // nothing valid all week — nothing to commit
+    | { status: "moved"; time: Date } // had to shift to the nearest open slot
+    | { status: "exact" } // the choice was already valid
+
+  /**
+   * Shared by all three pickers: check what the customer chose against the
+   * store's hours and tell them if it cannot stand. The caller commits, so the
+   * time picker can keep its own day-preserving merge.
+   */
+  const validatePickedTime = async (picked: Date): Promise<PickOutcome> => {
     const validTime = await getNextValidPickupTime(
-      date,
+      picked,
       getTotalItems(),
       storeHours,
+      { lastOrderOffsetMinutes },
     )
+
     if (!validTime) {
+      // No valid slot exists, so leave the current selection alone. This used
+      // to write nextValidTime, which is Date | null — only the "we are
+      // closed" render guard kept a null out of eatInDate/pickupDate.
       alertTimeChange(null)
-    } else if (validTime.getTime() !== date.getTime()) {
-      alertTimeChange(date)
-      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
-    } else {
-      eatIn ? setEatInDate(date) : setPickupDate(date)
+      return { status: "none" }
     }
+
+    if (validTime.getTime() !== picked.getTime()) {
+      alertTimeChange(picked)
+      return { status: "moved", time: validTime }
+    }
+
+    return { status: "exact" }
+  }
+
+  const handleConfirm = async (date: Date) => {
+    const outcome = await validatePickedTime(date)
+
+    // On "moved" this used to commit nextValidTime — the soonest slot from now
+    // — rather than validTime, the slot nearest what was actually picked. Both
+    // Android handlers already used validTime; iOS now agrees with them.
+    if (outcome.status === "moved") setChosenDate(outcome.time)
+    else if (outcome.status === "exact") setChosenDate(date)
 
     setShowDatePicker(false)
   }
@@ -425,67 +503,41 @@ function CheckoutContent() {
     event: DateTimePickerEvent,
     selectedDate?: Date,
   ) => {
-    if (event.type === "dismissed") {
+    if (event.type === "dismissed" || !selectedDate) {
       setShowDate(false)
       return
     }
-    if (!selectedDate) return
-    const validTime = await getNextValidPickupTime(
-      selectedDate,
-      getTotalItems(),
-      storeHours,
-    )
-    if (!validTime) {
-      alertTimeChange(null)
-      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
-    } else if (selectedDate) {
-      if (validTime.getTime() !== selectedDate.getTime()) {
-        alertTimeChange(selectedDate)
-        eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
-      } else {
-        eatIn ? setEatInDate(selectedDate) : setPickupDate(selectedDate)
-      }
-    }
-    if (event.type === "set") {
-      setShowDate(false)
-      setShowTime(true)
-    } else {
-      setShowDate(false)
-    }
+
+    const outcome = await validatePickedTime(selectedDate)
+
+    if (outcome.status === "moved") setChosenDate(outcome.time)
+    else if (outcome.status === "exact") setChosenDate(selectedDate)
+
+    setShowDate(false)
+    if (event.type === "set") setShowTime(true)
   }
 
   const onAndroidChangeTime = async (
     event: DateTimePickerEvent,
     selectedTime?: Date,
   ) => {
-    if (event.type === "dismissed") {
+    if (event.type === "dismissed" || !selectedTime) {
       setShowTime(false)
       return
     }
-    if (!selectedTime) return
-    const validTime = await getNextValidPickupTime(
-      selectedTime,
-      getTotalItems(),
-      storeHours,
-    )
-    if (!validTime) {
-      alertTimeChange(null)
-      eatIn ? setEatInDate(nextValidTime) : setPickupDate(nextValidTime)
-    } else if (selectedTime) {
-      if (validTime.getTime() !== selectedTime.getTime()) {
-        alertTimeChange(selectedTime)
-        eatIn ? setEatInDate(validTime) : setPickupDate(validTime)
-      } else {
-        const baseDate = eatIn ? eatInDate : pickupDate
-        const newDate = new Date(baseDate ?? new Date())
-        newDate.setHours(selectedTime.getHours())
-        newDate.setMinutes(selectedTime.getMinutes())
-        eatIn ? setEatInDate(newDate) : setPickupDate(newDate)
-      }
+
+    const outcome = await validatePickedTime(selectedTime)
+
+    if (outcome.status === "moved") {
+      setChosenDate(outcome.time)
+    } else if (outcome.status === "exact") {
+      // Keep the day already chosen and take only the time from this picker,
+      // resolved in store time — setHours would have applied the device's.
+      const baseDate = eatIn ? eatInDate : pickupDate
+      setChosenDate(withNZTimeOfDay(baseDate ?? new Date(), selectedTime))
     }
-    if (event.type === "set") {
-      setShowTime(false)
-    }
+
+    if (event.type === "set") setShowTime(false)
   }
 
   const handleOpenDatePicker = () => {
@@ -566,8 +618,10 @@ function CheckoutContent() {
           selectedCardId,
         )
 
-        setPaymentIntentId(paymentIntentId)
         paymentIntentId = id
+        // Track it in state too, so handleAppStateChange can recover the payment
+        // if the app is backgrounded mid-confirmation.
+        setPaymentIntentId(id)
 
         // Confirm the payment with Stripe
         const { error, paymentIntent } = await confirmPayment(clientSecret, {
@@ -641,6 +695,8 @@ function CheckoutContent() {
 
       router.replace("/orders")
     } catch (error) {
+      setPaymentSuccess(false)
+      setCreatingOrderLoading(false)
       if (paymentIntentId) {
         Alert.alert(
           "Connection Issue",
@@ -722,6 +778,25 @@ function CheckoutContent() {
       ? roundToNearest5(unavailableUntilDate)
       : roundToNearest5(minTime)
   }
+
+  // The latest slot on the selected day: 30 minutes before close for eat-in,
+  // 10 for pickup. This bound was rebuilt inline at each of the three pickers
+  // and only ever applied the eat-in offset.
+  //
+  // No closing time means no upper bound. Falling back to Date.now() here made
+  // the bound 30 minutes in the *past*, so it landed before minimumDate — which
+  // happens whenever the selected date falls on a day the store is shut,
+  // reachable via restaurantStatus.unavailableUntil.
+  const lastOrderTime = useMemo(
+    () =>
+      closeTime ? getLastOrderTime(closeTime, lastOrderOffsetMinutes) : undefined,
+    [closeTime, lastOrderOffsetMinutes],
+  )
+
+  // How far ahead a pickup can be booked, stepped on the store's calendar.
+  const pickupMaxDate = useMemo(() => addNZMonths(new Date(), 1), [])
+
+  const getMaxTime = () => (eatIn ? lastOrderTime : pickupMaxDate)
 
   if (creatingOrderLoading) {
     return (
@@ -984,6 +1059,9 @@ function CheckoutContent() {
                     <DateTimePickerModal
                       isVisible={showDatePicker}
                       mode="datetime"
+                      // Show store time: pickup slots are validated against
+                      // Auckland opening hours, so the wheel has to agree.
+                      timeZoneName={NZ_TIMEZONE}
                       date={roundToNearest5(
                         eatIn
                           ? (eatInDate ?? nextValidTime)
@@ -993,20 +1071,7 @@ function CheckoutContent() {
                       onConfirm={handleConfirm}
                       onCancel={() => setShowDatePicker(false)}
                       minimumDate={getMinTime()}
-                      maximumDate={
-                        eatIn
-                          ? new Date(
-                              (closeTime
-                                ? closeTime.getTime()
-                                : new Date().getTime()) -
-                                30 * 60 * 1000,
-                            )
-                          : (() => {
-                              const date = new Date() // Create a new Date object
-                              date.setMonth(date.getMonth() + 1)
-                              return date
-                            })()
-                      }
+                      maximumDate={getMaxTime()}
                     />
                   )}
 
@@ -1019,22 +1084,10 @@ function CheckoutContent() {
                       }
                       mode="date"
                       display="calendar"
+                      timeZoneName={NZ_TIMEZONE}
                       onChange={onAndroidChangeDate}
                       minimumDate={getMinTime()}
-                      maximumDate={
-                        eatIn
-                          ? new Date(
-                              (closeTime
-                                ? closeTime.getTime()
-                                : new Date().getTime()) -
-                                30 * 60 * 1000,
-                            )
-                          : (() => {
-                              const date = new Date() // Create a new Date object
-                              date.setMonth(date.getMonth() + 1)
-                              return date
-                            })()
-                      }
+                      maximumDate={getMaxTime()}
                     />
                   )}
 
@@ -1048,18 +1101,12 @@ function CheckoutContent() {
                       mode="time"
                       display="spinner"
                       minuteInterval={5}
+                      timeZoneName={NZ_TIMEZONE}
                       onChange={onAndroidChangeTime}
                       minimumDate={getMinTime()}
-                      maximumDate={
-                        eatIn
-                          ? new Date(
-                              (closeTime
-                                ? closeTime.getTime()
-                                : new Date().getTime()) -
-                                30 * 60 * 1000,
-                            )
-                          : (closeTime ?? undefined)
-                      }
+                      // The time wheel is bounded by the day's cut-off in both
+                      // modes; pickup used to run right up to closing.
+                      maximumDate={lastOrderTime}
                     />
                   )}
                   {Platform.OS === "ios" &&

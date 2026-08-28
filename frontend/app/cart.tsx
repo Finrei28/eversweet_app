@@ -46,11 +46,21 @@ export default function CartPage() {
   )
   const totalCost = getTotalCost()
   useEffect(() => {
+    // This refires whenever the cart total changes, so a slow response from an
+    // earlier edit must not overwrite the result of a later one.
+    let cancelled = false
     const fetchPoints = async () => {
-      const points = await getEarnablePoints(usersMembership)
-      setEarnablePoints(points)
+      try {
+        const points = await getEarnablePoints(usersMembership)
+        if (!cancelled) setEarnablePoints(points)
+      } catch (error) {
+        console.error("Failed to work out earnable points", error)
+      }
     }
     fetchPoints()
+    return () => {
+      cancelled = true
+    }
   }, [usersMembership, totalCost])
 
   // if (cartOperations === 1) {

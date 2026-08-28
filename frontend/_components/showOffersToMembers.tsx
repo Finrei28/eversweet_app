@@ -23,10 +23,17 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null)
 
   const getOffers = async () => {
-    setLoadingoffers(true)
-    const currentOffers = await showOffers()
-    setOffers(currentOffers ?? [])
-    setLoadingoffers(false)
+    try {
+      setLoadingoffers(true)
+      const currentOffers = await showOffers()
+      setOffers(currentOffers ?? [])
+    } catch (error) {
+      // Without this the spinner never clears and the rejection goes unhandled.
+      console.error("Failed to load member offers", error)
+      setOffers([])
+    } finally {
+      setLoadingoffers(false)
+    }
   }
 
   useFocusEffect(
@@ -117,7 +124,7 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
                 </Text>
               ) : (
                 <Text className="text-gray-800 font-medium">
-                  {formatCurrency(offer.dessert?.priceInCents ?? 0 / 100)}
+                  {formatCurrency((offer.dessert?.priceInCents ?? 0) / 100)}
                 </Text>
               )}
             </View>

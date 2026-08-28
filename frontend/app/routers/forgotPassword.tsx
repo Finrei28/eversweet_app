@@ -18,7 +18,7 @@ import OTPInput from "@/_components/emailVerification"
 import ResetPassword from "@/_components/resetPassword"
 import { getErrorMessage } from "@/utils/getError"
 
-export default function forgotPassword() {
+export default function ForgotPassword() {
   const [email, setEmail] = useState("")
   const [verifyCode, setVerifyCode] = useState(false)
   const [isResettingPassword, setIsResettingPassword] = useState(false)

@@ -5,6 +5,7 @@ import { getToken } from "./authToken"
 import * as SecureStore from "expo-secure-store"
 import { getUsersMembership } from "./stripe-api"
 import { getErrorMessage } from "../utils/getError"
+import { addNZMonths } from "../lib/nzTime"
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -219,8 +220,9 @@ export function handleNotification(
 }
 
 export const setMembershipPopupExpiration = async () => {
-  const expiration = new Date()
-  expiration.setMonth(expiration.getMonth() + 1) // 1 month later
+  // Stored and compared as an instant, so the timezone only decides how long
+  // "a month" is. Stepping the store's calendar keeps that one definition.
+  const expiration = addNZMonths(new Date(), 1) // 1 month later
 
   await SecureStore.setItemAsync(
     "showMembershipPopup",

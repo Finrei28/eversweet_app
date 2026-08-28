@@ -21,6 +21,7 @@ import {
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
+import { getNZYearMonth } from "@/lib/nzTime"
 import Toast from "react-native-toast-message"
 
 export default function PaymentMethodsStripe() {
@@ -56,8 +57,12 @@ function PaymentMethodsContent() {
   const fetchSavedCards = async () => {
     try {
       setLoadingCards(true)
-      const cards = await getSavedCards()
-      const id = await getCurrentSubscriptionPaymentMethodId()
+      // Users without a subscription have no subscription payment method, and
+      // that lookup 404s for them — it must not take the card list down with it.
+      const [cards, id] = await Promise.all([
+        getSavedCards(),
+        getCurrentSubscriptionPaymentMethodId().catch(() => null),
+      ])
       setPaymentMethodId(id)
       setSavedCards(cards)
     } catch (error) {
@@ -220,9 +225,10 @@ function PaymentMethodsContent() {
             <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
               {savedCards.map((card, index) => {
                 const checkIfCardExpired = () => {
-                  const currentDate = new Date()
-                  const currentYear = currentDate.getFullYear()
-                  const currentMonth = currentDate.getMonth() + 1 // getMonth is zero-indexed
+                  // "This month" as the store sees it, so the badge doesn't
+                  // depend on where the customer's phone is.
+                  const { year: currentYear, month: currentMonth } =
+                    getNZYearMonth(new Date())
                   const cardYear = card.card.exp_year
                   const cardMonth = card.card.exp_month
                   return (

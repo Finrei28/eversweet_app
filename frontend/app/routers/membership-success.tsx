@@ -1,31 +1,12 @@
 "use client"
 
-import React, { useState, useCallback } from "react"
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Switch,
-  Alert,
-  ActivityIndicator,
-} from "react-native"
-import { useFocusEffect, useNavigation, useRouter } from "expo-router"
-import { Feather, Octicons } from "@expo/vector-icons"
-import Checkbox from "expo-checkbox"
+import React from "react"
+import { View, Text, TouchableOpacity } from "react-native"
+import { useRouter } from "expo-router"
+import { Octicons } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
-import {
-  createMembership,
-  getMembershipDetails,
-  getSavedCards,
-  pollMembershipStatus,
-} from "@/services/stripe-api"
-import { useAuth } from "@/store/authProvider"
-import BouncingLoader from "@/_components/loader"
-import { MembershipDetails } from "@/utils/types"
-import { formatCurrency } from "@/lib/formatters"
 
-export default function membershipSuccessPage() {
+export default function MembershipSuccessPage() {
   const router = useRouter()
 
   const handleGoToHome = () => {

@@ -136,6 +136,7 @@ function MembershipContent() {
                 `${membershipStatus.paymentFailureMessage ?? "please check your bank and try again."}`,
               ),
             )
+            return // without this the poll keeps hitting the API forever
           } else if (Date.now() - startTime > timeout) {
             reject(
               new Error("Membership activation timed out. Please try again."),
@@ -608,6 +609,7 @@ function MembershipContent() {
           modalVisible={cancelMembership}
           setModalVisible={setCancelMembership}
           membershipDetails={membershipDetails}
+          onCancelled={refetchUsersMembership}
         />
       )}
     </View>
