@@ -18,7 +18,7 @@ export const getErrorMessage = (
     return error
   }
 
-  // Handle backend/API error response shapes, e.g. { message } or { error }
+  // Handle third-party/API error shapes, e.g. { message } or { error }
   if (error && typeof error === "object") {
     const { message, error: errorField } = error as {
       message?: unknown

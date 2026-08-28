@@ -36,31 +36,36 @@ model Session {
 }
 
 model User {
-  id                   String          @id @default(cuid())
-  username             String?         @unique
-  password             String
-  email                String          @unique
-  emailVerified        DateTime?
-  image                String?
-  role                 Role
-  anonymousEnabled     Boolean         @default(false)
-  requires2FAExpiresAt DateTime?
-  otp                  String?
-  otpExpiresAt         DateTime?
-  firstName            String?
-  lastName             String?
-  phone                String?
-  stripeCustomerId     String?
-  pushToken            String?
-  createdAt            DateTime        @default(now())
-  accounts             Account[]
-  Authenticator        Authenticator[]
-  cart                 Cart?
-  Loyalty              Loyalty?
-  membership           Membership?
-  appOrders            Order[]         @relation("UserOrders")
-  sessions             Session[]
-  loyaltyWinners       LoyaltyWinner[]
+  id                        String          @id @default(cuid())
+  username                  String?         @unique
+  password                  String
+  email                     String          @unique
+  emailVerified             DateTime?
+  image                     String?
+  role                      Role
+  anonymousEnabled          Boolean         @default(false)
+  requires2FAExpiresAt      DateTime?
+  otp                       String?
+  otpExpiresAt              DateTime?
+  passwordResetOtp          String?
+  passwordResetOtpExpiresAt DateTime?
+  resetToken                String?
+  resetTokenExpiresAt       DateTime?
+  passwordChangedAt         DateTime?
+  firstName                 String?
+  lastName                  String?
+  phone                     String?
+  stripeCustomerId          String?
+  pushToken                 String?
+  createdAt                 DateTime        @default(now())
+  accounts                  Account[]
+  Authenticator             Authenticator[]
+  cart                      Cart?
+  Loyalty                   Loyalty?
+  membership                Membership?
+  appOrders                 Order[]         @relation("UserOrders")
+  sessions                  Session[]
+  loyaltyWinners            LoyaltyWinner[]
 }
 
 model Membership {
@@ -94,51 +99,51 @@ model MembershipPlan {
 }
 
 model Offer {
-  id               String            @id @default(cuid())
+  id               String             @id @default(cuid())
   name             String
   description      String?
   image            String?
-  isActive         Boolean           @default(true)
+  isActive         Boolean            @default(true)
   dessertId        String?
   categoryId       String?
   itemPriceInCents Int?
   discountAmount   Decimal?
-  limit            Int               @default(1)
+  limit            Int                @default(1)
   requirements     OfferRequirement[]
   cartItems        CartItem[]
-  category         Category?         @relation(fields: [categoryId], references: [id])
-  dessert          Dessert?          @relation(fields: [dessertId], references: [id])
+  category         Category?          @relation(fields: [categoryId], references: [id])
+  dessert          Dessert?           @relation(fields: [dessertId], references: [id])
   redemptions      OfferRedemption[]
   orderDessert     OrderDessert[]
 }
 
 model OfferRequirement {
-  id          String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  offerId     String
+  offerId String
 
-  dessertId   String?
-  categoryId  String?
+  dessertId  String?
+  categoryId String?
 
-  quantity    Int
+  quantity Int
 
-  offer       Offer @relation(fields: [offerId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
 
-  dessert     Dessert? @relation(fields: [dessertId], references: [id])
-  category    Category? @relation(fields: [categoryId], references: [id])
+  dessert  Dessert?  @relation(fields: [dessertId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
 }
 
 model OfferRedemption {
-  id           String     @id @default(cuid())
+  id           String      @id @default(cuid())
   offerId      String
   membershipId String
-  unlockedAt   DateTime   @default(now())
-  redeemedAt   DateTime? 
+  unlockedAt   DateTime    @default(now())
+  redeemedAt   DateTime?
   renewsAt     DateTime?
   status       OfferStatus
-  used         Int        @default(0)
-  membership   Membership @relation(fields: [membershipId], references: [id])
-  offer        Offer      @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  used         Int         @default(0)
+  membership   Membership  @relation(fields: [membershipId], references: [id])
+  offer        Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   @@unique([offerId, membershipId])
 }
@@ -166,51 +171,51 @@ model VerificationToken {
 }
 
 model Dessert {
-  id                       String              @id @default(cuid())
-  name                     String
-  chineseName              String
-  description              String?
-  priceInCents             Int
-  imagePath                String
-  imagePublicId            String
-  isAvailableForPurchase   Boolean             @default(false)
-  createdAt                DateTime            @default(now())
-  updatedAt                DateTime            @updatedAt
-  categoryId               String
-  priceInLoyaltyPoints     Int                 @default(500)
-  cartItems                CartItem[]
-  category                 Category            @relation(fields: [categoryId], references: [id])
-  ingredients              DessertIngredient[]
-  offers                   Offer[]
-  offerRequirements        OfferRequirement[]
-  orders                   OrderDessert[]
-  promoId                  String?
-  promo                    Promo?             @relation(fields: [promoId], references: [id])
+  id                     String              @id @default(cuid())
+  name                   String
+  chineseName            String
+  description            String?
+  priceInCents           Int
+  imagePath              String
+  imagePublicId          String
+  isAvailableForPurchase Boolean             @default(false)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  categoryId             String
+  priceInLoyaltyPoints   Int                 @default(500)
+  cartItems              CartItem[]
+  category               Category            @relation(fields: [categoryId], references: [id])
+  ingredients            DessertIngredient[]
+  offers                 Offer[]
+  offerRequirements      OfferRequirement[]
+  orders                 OrderDessert[]
+  promoId                String?
+  promo                  Promo?              @relation(fields: [promoId], references: [id])
 }
 
 model Category {
-  id                       String                  @id @default(cuid())
-  name                     String
-  chineseName              String
-  sortOrder                Int?
-  customisations           CategoryCustomisation[]
-  desserts                 Dessert[]
-  offers                   Offer[]
-  offerRequirements        OfferRequirement[]
-  promoId                  String?
-  promo                    Promo?                 @relation(fields: [promoId], references: [id])
+  id                String                  @id @default(cuid())
+  name              String
+  chineseName       String
+  sortOrder         Int?
+  customisations    CategoryCustomisation[]
+  desserts          Dessert[]
+  offers            Offer[]
+  offerRequirements OfferRequirement[]
+  promoId           String?
+  promo             Promo?                  @relation(fields: [promoId], references: [id])
 }
 
 model Promo {
-  id        String      @id @default(cuid())
-  name      String
-  type      PromoType
-  value     Int
-  isActive  Boolean     @default(true)
-  startsAt  DateTime?
-  endsAt    DateTime?
+  id       String    @id @default(cuid())
+  name     String
+  type     PromoType
+  value    Int
+  isActive Boolean   @default(true)
+  startsAt DateTime?
+  endsAt   DateTime?
 
-  desserts  Dessert[]
+  desserts   Dessert[]
   categories Category[]
 }
 
@@ -246,63 +251,63 @@ model CategoryCustomisation {
 }
 
 model TempOrderCounter {
-  id      String   @id @default(cuid())
+  id      String @id @default(cuid())
   date    String @unique
   counter Int
 }
 
 model Order {
-  id                  String         @id @default(cuid())
-  tempOrderId         String
-  priceInCents        Int
-  discountedAmountInCents  Int       @default(0)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  customerFirstName   String
-  customerLastName    String
-  customerEmail       String
-  customerPhoneNumber String?
-  completedAt         DateTime?
-  pickedUpAt          DateTime?
-  status              Status
-  dineIn              Boolean        @default(false)
-  pickUpTime          DateTime       @default(now())
-  GST                 Int
-  appUserId           String?
-  source              OrderSource    @default(WEBSITE)
-  paymentIntentId     String?
-  paymentMethodId     String?
-  notified            Boolean        @default(false)
-  appUser             User?          @relation("UserOrders", fields: [appUserId], references: [id])
-  desserts            OrderDessert[]
+  id                      String         @id @default(cuid())
+  tempOrderId             String
+  priceInCents            Int
+  discountedAmountInCents Int            @default(0)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  customerFirstName       String
+  customerLastName        String
+  customerEmail           String
+  customerPhoneNumber     String?
+  completedAt             DateTime?
+  pickedUpAt              DateTime?
+  status                  Status
+  dineIn                  Boolean        @default(false)
+  pickUpTime              DateTime       @default(now())
+  GST                     Int
+  appUserId               String?
+  source                  OrderSource    @default(WEBSITE)
+  paymentIntentId         String?
+  paymentMethodId         String?
+  notified                Boolean        @default(false)
+  appUser                 User?          @relation("UserOrders", fields: [appUserId], references: [id])
+  desserts                OrderDessert[]
 
   @@index([status])
 }
 
 model OrderDessertCustomisation {
-  id              String       @id @default(cuid())
-  orderDessertId  String
-  customisationId String
-  discountedAmountInCents Int  @default(0)
-  quantity        Int          @default(1)
-  customisation   Ingredient   @relation(fields: [customisationId], references: [id], onDelete: Cascade)
-  orderDessert    OrderDessert @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
+  id                      String       @id @default(cuid())
+  orderDessertId          String
+  customisationId         String
+  discountedAmountInCents Int          @default(0)
+  quantity                Int          @default(1)
+  customisation           Ingredient   @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  orderDessert            OrderDessert @relation(fields: [orderDessertId], references: [id], onDelete: Cascade)
 }
 
 model OrderDessert {
-  id                String                      @id @default(cuid())
-  orderId           String
-  dessertId         String
-  offerId           String?
-  quantity          Int
-  priceInCents      Int                         @default(0)
-  discountedAmountInCents  Int                  @default(0)
-  promoId                  String?
-  loyaltyPointsUsed Int?
-  dessert           Dessert                     @relation(fields: [dessertId], references: [id])
-  order             Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  offer             Offer?                      @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  customisations    OrderDessertCustomisation[]
+  id                      String                      @id @default(cuid())
+  orderId                 String
+  dessertId               String
+  offerId                 String?
+  quantity                Int
+  priceInCents            Int                         @default(0)
+  discountedAmountInCents Int                         @default(0)
+  promoId                 String?
+  loyaltyPointsUsed       Int?
+  dessert                 Dessert                     @relation(fields: [dessertId], references: [id])
+  order                   Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  offer                   Offer?                      @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  customisations          OrderDessertCustomisation[]
 
   @@unique([orderId, dessertId, id])
 }
@@ -317,35 +322,35 @@ model Feedback {
 }
 
 model Loyalty {
-  id     String @id @default(cuid())
-  points Int
-  userId String @unique
-  User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id      String          @id @default(cuid())
+  points  Int
+  userId  String          @unique
+  User    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   records LoyaltyRecord[]
 }
 
 model LoyaltyRecord {
-  id         String   @id @default(cuid())
-  change     Int      // positive = earned, negative = spent
-  reason     String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  change    Int // positive = earned, negative = spent
+  reason    String
+  createdAt DateTime @default(now())
 
-  loyaltyId  String
-  loyalty    Loyalty  @relation(fields: [loyaltyId], references: [id])
+  loyaltyId String
+  loyalty   Loyalty @relation(fields: [loyaltyId], references: [id])
 }
 
 model LoyaltyWinner {
-  id              String   @id @default(cuid())
-  userId          String?
-  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  results         String[]
-  month           Int
-  year            Int
-  points          Int
-  createdAt       DateTime @default(now())
-  rewardPickedUp  DateTime?
+  id             String    @id @default(cuid())
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  results        String[]
+  month          Int
+  year           Int
+  points         Int
+  createdAt      DateTime  @default(now())
+  rewardPickedUp DateTime?
 
-  @@unique([month, year])          // only one winner per month
+  @@unique([month, year]) // only one winner per month
   @@index([userId])
 }
 
@@ -361,48 +366,48 @@ model Cart {
 }
 
 model CartItem {
-  id                          String                    @id @default(cuid())
-  dessertId                   String
-  itemPriceInCents            Int
-  discountedAmountInCents     Int                       @default(0)
-  isPromotionItem             Boolean                   @default(false)
-  promotionType               String?
-  createdAt                   DateTime                  @default(now())
-  quantity                    Int
-  loyaltyPointsUsed           Int?
-  cartId                      String
-  offerId                     String?
-  cart                        Cart                      @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  dessert                     Dessert                   @relation(fields: [dessertId], references: [id])
-  offer                       Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  customisations              CustomisationInCartItem[]
+  id                      String                    @id @default(cuid())
+  dessertId               String
+  itemPriceInCents        Int
+  discountedAmountInCents Int                       @default(0)
+  isPromotionItem         Boolean                   @default(false)
+  promotionType           String?
+  createdAt               DateTime                  @default(now())
+  quantity                Int
+  loyaltyPointsUsed       Int?
+  cartId                  String
+  offerId                 String?
+  cart                    Cart                      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  dessert                 Dessert                   @relation(fields: [dessertId], references: [id])
+  offer                   Offer?                    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  customisations          CustomisationInCartItem[]
 
   @@unique([cartId, promotionType, dessertId])
 }
 
 model CustomisationInCartItem {
-  id              String      @id @default(cuid())
-  cartItemId      String
-  customisationId String
-  discountedAmountInCents     Int                       @default(0)
-  quantity        Int         @default(1)
-  cartItem        CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
-  customisation   Ingredient  @relation(fields: [customisationId], references: [id], onDelete: Cascade)
+  id                      String     @id @default(cuid())
+  cartItemId              String
+  customisationId         String
+  discountedAmountInCents Int        @default(0)
+  quantity                Int        @default(1)
+  cartItem                CartItem   @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  customisation           Ingredient @relation(fields: [customisationId], references: [id], onDelete: Cascade)
 
   @@unique([cartItemId, customisationId])
 }
 
 model RestaurantStatus {
-  id                  String    @id @default(cuid())
-  dineInAvailability  Boolean
-  unavailableUntil    DateTime?
+  id                 String    @id @default(cuid())
+  dineInAvailability Boolean
+  unavailableUntil   DateTime?
 }
 
 model DaysOff {
-  id                String    @id @default(cuid())
-  date              DateTime
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @default(now())
+  id        String   @id @default(cuid())
+  date      DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
 }
 
 enum OfferStatus {

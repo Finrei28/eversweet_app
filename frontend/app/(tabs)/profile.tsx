@@ -12,6 +12,7 @@ import {
 } from "@expo/vector-icons"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
+import { getErrorMessage } from "@/utils/getError"
 import { Trophy } from "lucide-react-native"
 
 export default function Profile() {
@@ -39,7 +40,7 @@ export default function Profile() {
           } catch (error) {
             console.error(
               "Error",
-              error instanceof Error ? error.message : "Failed to log you out",
+              getErrorMessage(error, "Failed to log you out"),
             )
             Alert.alert("Error", "Failed to log you out.")
           }

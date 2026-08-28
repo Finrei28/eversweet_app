@@ -1,4 +1,5 @@
 import { Resend } from "resend"
+import { getErrorMessage } from "../utils/getError"
 
 export default async function EmailSender(
   to: string,
@@ -14,16 +15,16 @@ export default async function EmailSender(
       react: react,
     })
   } catch (error) {
-    if ((error as Error).message.includes("limit")) {
+    if (getErrorMessage(error).includes("limit")) {
       throw new Error(
         "We've reached our email limit. Please try again tomorrow.",
       )
     }
 
-    if ((error as Error).message.includes("domain")) {
+    if (getErrorMessage(error).includes("domain")) {
       throw new Error("Email service is not configured correctly.")
     }
 
-    throw new Error("Error sending email: " + (error as Error).message)
+    throw new Error("Error sending email: " + getErrorMessage(error))
   }
 }

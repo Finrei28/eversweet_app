@@ -19,22 +19,26 @@ import PageHeader from "./pageheader"
 import {
   checkVerificationCode,
   getResetPasswordCode,
+  resendVerificationCode,
   verifyResetPasswordCode,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useRouter } from "expo-router"
 import { useAuth } from "@/store/authProvider"
+import { getErrorMessage } from "@/utils/getError"
 
 const OTPInput = ({
   onChange,
   email,
   setIsResettingPassword,
+  setResetToken,
   setIsLoading,
   isLoading,
 }: {
   onChange?: (code: string) => void
   email: string
   setIsResettingPassword?: React.Dispatch<React.SetStateAction<boolean>>
+  setResetToken?: React.Dispatch<React.SetStateAction<string>>
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>
   isLoading: boolean
 }) => {
@@ -100,7 +104,8 @@ const OTPInput = ({
       if (setIsResettingPassword) {
         // reset password verification
         const data = await verifyResetPasswordCode(email, code.join(""))
-        if (data?.success) {
+        if (data?.success && data?.resetToken) {
+          setResetToken?.(data.resetToken)
           setIsResettingPassword(true)
         } else {
           Toast.show({
@@ -142,17 +147,20 @@ const OTPInput = ({
         router.replace("/")
       }
     } catch (error) {
-      Alert.alert(`${(error as Error).message}`)
+      Alert.alert(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleResendCode = async () => {
-    // getResetPasswordCode() sends a new otp code to the users email so it works for both reset password and sign up verification
+    // The two flows keep their codes in separate columns now, so resend has to
+    // ask the endpoint matching the flow this component was opened for.
     try {
-      const data = await getResetPasswordCode(email)
-      if (data?.success) {
+      const success = setIsResettingPassword
+        ? await getResetPasswordCode(email)
+        : await resendVerificationCode(email)
+      if (success) {
         setCounter(60)
         Toast.show({
           type: "success",
@@ -181,7 +189,7 @@ const OTPInput = ({
         })
       }
     } catch (error) {
-      Alert.alert(`${(error as Error).message}`)
+      Alert.alert(getErrorMessage(error))
     }
   }
 

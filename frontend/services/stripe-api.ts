@@ -2,18 +2,21 @@
 import {
   MembershipDetails,
   MembershipStatus,
+  PaymentStatusResult,
+  SavedCard,
   SetUpIntent,
   UsersMembership,
 } from "@/utils/types"
-import * as SecureStore from "expo-secure-store"
+import { getToken } from "./authToken"
+import { getErrorMessage } from "@/utils/getError"
 /**
  * Fetches saved cards from the server
  * @returns Array of saved payment methods
  */
 const url = process.env.EXPO_PUBLIC_URL!
 
-export const getSavedCards = async (): Promise<any[]> => {
-  const token = await SecureStore.getItemAsync("token")
+export const getSavedCards = async (): Promise<SavedCard[]> => {
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -27,21 +30,20 @@ export const getSavedCards = async (): Promise<any[]> => {
     })
     const data = await response.json()
     if (!response.ok) {
-      throw new Error("Failed to fetch payment methods: " + data.message)
+      throw new Error(getErrorMessage(data, "Failed to fetch payment methods"))
     }
 
     return data.paymentMethods || []
   } catch (error) {
-    console.error(
-      "Error fetching saved cards:",
-      error instanceof Error ? error.message : error,
+    console.error("Error fetching saved cards:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Failed to fetch saved cards. Please try again."),
     )
-    throw new Error("Failed to fetch saved cards. Please try again.")
   }
 }
 
 export const createSetupIntent = async (): Promise<SetUpIntent> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -55,20 +57,19 @@ export const createSetupIntent = async (): Promise<SetUpIntent> => {
     })
     const data = await response.json()
     if (!response.ok) {
-      throw new Error(data.message || "Failed to create setup intent")
+      throw new Error(getErrorMessage(data, "Failed to create setup intent"))
     }
     return data
   } catch (error) {
-    console.error(
-      "Error creating setup intent:",
-      error instanceof Error ? error.message : error,
+    console.error("Error creating setup intent:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Failed to create setup intent. Please try again."),
     )
-    throw new Error("Failed to create setup intent. Please try again.")
   }
 }
 
 export const retryPayment = async () => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -82,22 +83,21 @@ export const retryPayment = async () => {
     })
     const data = await response.json()
     if (!response.ok) {
-      throw new Error(data.message || "Retry payment failed")
+      throw new Error(getErrorMessage(data, "Retry payment failed"))
     }
     return data.success
   } catch (error) {
-    console.error(
-      "Error retrying payment:",
-      error instanceof Error ? error.message : error,
+    console.error("Error retrying payment:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Payment retry failed. Please try again."),
     )
-    throw new Error("Payment retry failed. Please try again.")
   }
 }
 
 export const setCardForMembershipPayments = async (
   setupIntentId: string,
 ): Promise<void> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -116,14 +116,13 @@ export const setCardForMembershipPayments = async (
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to save card")
+      throw new Error(getErrorMessage(errorData, "Failed to save card"))
     }
   } catch (error) {
-    console.error(
-      "Error saving card:",
-      error instanceof Error ? error.message : error,
+    console.error("Error saving card:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Failed to save card. Please try again."),
     )
-    throw new Error("Failed to save card. Please try again.")
   }
 }
 
@@ -132,7 +131,7 @@ export const setCardForMembershipPayments = async (
  * @param paymentMethodId The Stripe payment method ID to save
  */
 export const saveCard = async (paymentMethodId: string): Promise<void> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -148,14 +147,13 @@ export const saveCard = async (paymentMethodId: string): Promise<void> => {
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to save card")
+      throw new Error(getErrorMessage(errorData, "Failed to save card"))
     }
   } catch (error) {
-    console.error(
-      "Error saving card:",
-      error instanceof Error ? error.message : error,
+    console.error("Error saving card:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Failed to save card. Please try again."),
     )
-    throw new Error("Failed to save card. Please try again.")
   }
 }
 
@@ -164,7 +162,7 @@ export const saveCard = async (paymentMethodId: string): Promise<void> => {
  * @param paymentMethodId The Stripe payment method ID to remove
  */
 export const removeCard = async (paymentMethodId: string): Promise<void> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -180,14 +178,13 @@ export const removeCard = async (paymentMethodId: string): Promise<void> => {
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to remove card")
+      throw new Error(getErrorMessage(errorData, "Failed to remove card"))
     }
   } catch (error) {
-    console.error(
-      "Error removing card:",
-      error instanceof Error ? error.message : error,
+    console.error("Error removing card:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(error, "Failed to remove card. Please try again."),
     )
-    throw new Error("Failed to remove card. Please try again.")
   }
 }
 
@@ -196,7 +193,7 @@ export const createPaymentIntent = async (
   currency = "nzd",
   paymentMethodId?: string,
 ): Promise<{ clientSecret: string; paymentIntentId: string }> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -216,7 +213,9 @@ export const createPaymentIntent = async (
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to create payment intent")
+      throw new Error(
+        getErrorMessage(errorData, "Failed to create payment intent"),
+      )
     }
 
     const data = await response.json()
@@ -225,11 +224,13 @@ export const createPaymentIntent = async (
       paymentIntentId: data.paymentIntentId,
     }
   } catch (error) {
-    console.error(
-      "Error creating payment intent:",
-      error instanceof Error ? error.message : error,
+    console.error("Error creating payment intent:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(
+        error,
+        "Failed to create payment intent. Please try again.",
+      ),
     )
-    throw new Error("Failed to create payment intent. Please try again.")
   }
 }
 
@@ -238,8 +239,10 @@ export const createPaymentIntent = async (
  * @param paymentIntentId The ID of the payment intent to check
  * @returns Object with success, pending, or error status
  */
-export const checkPaymentStatus = async (paymentIntentId: string) => {
-  const token = await SecureStore.getItemAsync("token")
+export const checkPaymentStatus = async (
+  paymentIntentId: string,
+): Promise<PaymentStatusResult> => {
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -257,22 +260,26 @@ export const checkPaymentStatus = async (paymentIntentId: string) => {
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to check payment status")
+      throw new Error(
+        getErrorMessage(errorData, "Failed to check payment status"),
+      )
     }
 
     const data = await response.json()
     return data
   } catch (error) {
-    console.error(
-      "Error checking payment status:",
-      error instanceof Error ? error.message : error,
+    console.error("Error checking payment status:", getErrorMessage(error))
+    throw new Error(
+      getErrorMessage(
+        error,
+        "Failed to check payment status. Please try again.",
+      ),
     )
-    throw new Error("Failed to check payment status. Please try again.")
   }
 }
 
 export const getMembershipDetails = async (): Promise<MembershipDetails> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -290,20 +297,17 @@ export const getMembershipDetails = async (): Promise<MembershipDetails> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
     return data
-  } catch (error: any) {
-    console.error(
-      "Error fetching membership details:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error fetching membership details:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const getUsersMembership = async (): Promise<UsersMembership | null> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
 
   if (!token) {
     throw new Error("Unauthenticated")
@@ -326,16 +330,13 @@ export const getUsersMembership = async (): Promise<UsersMembership | null> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data
-  } catch (error: any) {
-    console.error(
-      "Error fetching membership details:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error fetching membership details:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -343,7 +344,7 @@ export const createMembership = async (
   paymentMethodId: string,
   stripePriceId: string,
 ) => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to join our membership.")
   }
@@ -363,21 +364,18 @@ export const createMembership = async (
       throw new Error("Please sign in to join our membership.")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data
-  } catch (error: any) {
-    console.error(
-      "Error creating membership:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error creating membership:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const cancelMembership = async (): Promise<Date> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -398,21 +396,18 @@ export const cancelMembership = async (): Promise<Date> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data.endDate
-  } catch (error: any) {
-    console.error(
-      "Error canceling membership:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error canceling membership:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const resumeMembership = async () => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -433,21 +428,18 @@ export const resumeMembership = async () => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data.success
-  } catch (error: any) {
-    console.error(
-      "Error canceling membership:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error canceling membership:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -468,22 +460,19 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data
-  } catch (error: any) {
-    console.error(
-      "Error fetching membership details:",
-      error instanceof Error ? error.message : error,
-    )
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    console.error("Error fetching membership details:", getErrorMessage(error))
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const getCurrentSubscriptionPaymentMethodId =
   async (): Promise<string> => {
-    const token = await SecureStore.getItemAsync("token")
+    const token = await getToken()
     if (!token) {
       throw new Error("Unauthenticated")
     }
@@ -507,15 +496,15 @@ export const getCurrentSubscriptionPaymentMethodId =
         throw new Error("Unauthenticated")
       }
       if (!res.ok) {
-        throw new Error(`Error: ${data.message}`)
+        throw new Error(getErrorMessage(data))
       }
 
       return data.paymentMethodId
-    } catch (error: any) {
+    } catch (error) {
       console.error(
         "Error fetching current subscription payment method ID:",
-        error instanceof Error ? error.message : error,
+        getErrorMessage(error),
       )
-      throw new Error(error?.message || "Something went wrong.")
+      throw new Error(getErrorMessage(error))
     }
   }

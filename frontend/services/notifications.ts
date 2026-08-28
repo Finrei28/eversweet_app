@@ -4,6 +4,7 @@ import { Alert, Linking, Platform } from "react-native"
 import { getToken } from "./authToken"
 import * as SecureStore from "expo-secure-store"
 import { getUsersMembership } from "./stripe-api"
+import { getErrorMessage } from "../utils/getError"
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -62,7 +63,7 @@ export async function registerForPushNotificationsAsync() {
         })
       ).data
     } catch (error) {
-      console.error((error as Error).message)
+      console.error(getErrorMessage(error))
     }
   } else {
     console.log("Must use physical device for push notifications")

@@ -13,6 +13,7 @@ import {
   updateRestaurantStatus,
 } from "@/services/api"
 import thermalPrinter from "@/services/thermal-printer"
+import { getErrorMessage } from "@/utilities/getError"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import DateTimePicker from "@react-native-community/datetimepicker"
@@ -205,7 +206,7 @@ export default function Settings() {
     } catch (error) {
       Toast.show({
         type: "error",
-        text1: `Failed to change restaurant status: ${error instanceof Error ? error.message : "Something went wrong"}`,
+        text1: `Failed to change restaurant status: ${getErrorMessage(error)}`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,

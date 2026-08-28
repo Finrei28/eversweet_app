@@ -8,6 +8,7 @@ import {
   getUserLoyaltyPoints,
   getUserOrders,
   orderStatus,
+  resendVerificationCode,
   showOffers,
   signIn,
   signUp,
@@ -20,11 +21,19 @@ import {
   userNameLongLimiter,
   ipLongLimiter,
   ipShortLimiter,
-} from "../middleware/loginLimiter"
+  otpEmailLongLimiter,
+  otpEmailMediumLimiter,
+  otpIpLongLimiter,
+  otpIpShortLimiter,
+  verificationEmailLimiter,
+} from "../middleware/rateLimiter"
 
 const router = Router()
 
-router.post("/signup", signUp)
+// No email limiter here: signup 400s on an address that already exists, so it
+// can only ever mail a given inbox once. Bulk account creation is the real
+// risk, and that's what the IP windows cover.
+router.post("/signup", ipShortLimiter, ipLongLimiter, signUp)
 router.post(
   "/signin",
   ipShortLimiter,
@@ -33,7 +42,21 @@ router.post(
   userNameLongLimiter,
   signIn,
 )
-router.post("/checkVerificationCode", checkVerificationCode)
+router.post(
+  "/resendVerificationCode",
+  otpIpShortLimiter,
+  otpIpLongLimiter,
+  verificationEmailLimiter,
+  resendVerificationCode,
+)
+router.post(
+  "/checkVerificationCode",
+  otpIpShortLimiter,
+  otpIpLongLimiter,
+  otpEmailMediumLimiter,
+  otpEmailLongLimiter,
+  checkVerificationCode,
+)
 router.get("/getUser", authenticateToken, getUser)
 router.patch("/updateUser", authenticateToken, updateUser)
 router.get("/getUserLoyaltyPoints", authenticateToken, getUserLoyaltyPoints)

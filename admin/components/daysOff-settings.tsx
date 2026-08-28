@@ -1,4 +1,5 @@
 import { updateDaysOff } from "@/services/api"
+import { getErrorMessage } from "@/utilities/getError"
 import { Ionicons } from "@expo/vector-icons"
 import { useCallback, useState } from "react"
 import { Text, TouchableOpacity, View } from "react-native"
@@ -12,12 +13,6 @@ type DaysOffSettingProps = {
   setAllDaysOff: React.Dispatch<React.SetStateAction<Date[]>>
   setSelectedDates: React.Dispatch<React.SetStateAction<Set<string>>>
   setShowDaysOffSetting: React.Dispatch<React.SetStateAction<boolean>>
-}
-
-type MultiDateSelectorProp = {
-  selectedDates: Set<Date>
-  allDaysOff: Date[]
-  handleDateSelect: (date: Date, isSelected: boolean) => void
 }
 
 type DayOffConfirmationProp = {
@@ -223,9 +218,7 @@ export default function DaysOffSetting({
       console.error("Error updating days off:", error)
       Toast.show({
         type: "error",
-        text1: `Failed to update day off: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        text1: `Failed to update day off: ${getErrorMessage(error, "Unknown error")}`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
@@ -238,6 +231,7 @@ export default function DaysOffSetting({
 
   return (
     <>
+      {/* Calendar for selecting days off */}
       <Calendar
         markedDates={getMarkedDates()}
         onDayPress={(day) => {

@@ -29,6 +29,7 @@ import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 import DancingStar from "@/_components/dancingStar"
 import Toast from "react-native-toast-message"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function MembershipPage() {
   return (
@@ -182,14 +183,16 @@ function MembershipContent() {
     } catch (error) {
       Alert.alert(
         "Payment Failed",
-        error instanceof Error
-          ? error.message
-          : "Could not process your membership at this time. Please try again later or contact support.",
+        getErrorMessage(
+          error,
+          "Could not process your membership at this time. Please try again later or contact support.",
+        ),
       )
       setPaymentError(
-        error instanceof Error
-          ? error.message
-          : "Could not process your membership at this time. Please try again later or contact support.",
+        getErrorMessage(
+          error,
+          "Could not process your membership at this time. Please try again later or contact support.",
+        ),
       )
     } finally {
       setIsProcessingPayment(false)
@@ -217,9 +220,10 @@ function MembershipContent() {
     } catch (error) {
       Alert.alert(
         "Failed to resume your membership",
-        error instanceof Error
-          ? error.message
-          : "Could not resume your membership at this time. Please try again later or contact support.",
+        getErrorMessage(
+          error,
+          "Could not resume your membership at this time. Please try again later or contact support.",
+        ),
       )
     } finally {
       setIsResuming(false)
@@ -238,9 +242,7 @@ function MembershipContent() {
     } catch (error) {
       Alert.alert(
         "Your payment retry has failed",
-        error instanceof Error
-          ? error.message
-          : "Please update your payment method and retry",
+        getErrorMessage(error, "Please update your payment method and retry"),
         [
           {
             text: "Cancel",

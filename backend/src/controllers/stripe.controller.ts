@@ -3,6 +3,7 @@ import { db } from "../lib/db"
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
 import { membershipBenefits } from "../lib/membership"
+import { getErrorMessage } from "../utils/getError"
 
 // Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
@@ -137,7 +138,7 @@ export const paymentMethods = async (req: Request, res: Response) => {
     console.error("Error fetching payment methods:", error)
     res.status(500).json({
       message: "Error fetching payment methods",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -174,7 +175,7 @@ export const createSetupIntent = async (req: Request, res: Response) => {
     console.error("Error saving card:", error)
     res.status(500).json({
       message: "Error saving card",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
   }
   return
@@ -190,7 +191,7 @@ export const setCardForMembershipPayments = async (
     return
   }
   try {
-    const { setupIntentId } = req.body
+    const { setupIntentId } = req.body ?? {}
 
     if (!setupIntentId) {
       res.status(400).json({ message: "Set up intent is required" })
@@ -226,7 +227,7 @@ export const setCardForMembershipPayments = async (
   } catch (error) {
     console.error("Error making card as default:", error)
     res.status(500).json({
-      message: (error as Error).message,
+      message: getErrorMessage(error),
     })
     return
   }
@@ -240,7 +241,7 @@ export const saveCard = async (req: Request, res: Response) => {
     return
   }
   try {
-    const { paymentMethodId } = req.body
+    const { paymentMethodId } = req.body ?? {}
 
     if (!paymentMethodId) {
       res.status(400).json({ message: "Payment method ID is required" })
@@ -285,7 +286,7 @@ export const saveCard = async (req: Request, res: Response) => {
     console.error("Error saving card:", error)
     res.status(500).json({
       message: "Error saving card",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -298,7 +299,7 @@ export const removeCard = async (req: Request, res: Response) => {
     return
   }
   try {
-    const { paymentMethodId } = req.body
+    const { paymentMethodId } = req.body ?? {}
 
     if (!paymentMethodId) {
       res.status(400).json({ message: "Payment method ID is required" })
@@ -314,7 +315,7 @@ export const removeCard = async (req: Request, res: Response) => {
     console.error("Error removing card:", error)
     res.status(500).json({
       message: "Error removing card",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -327,7 +328,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     return
   }
   try {
-    const { amount, currency, paymentMethodId } = req.body
+    const { amount, currency, paymentMethodId } = req.body ?? {}
 
     if (!amount || !currency) {
       res.status(400).json({ message: "Amount and currency are required" })
@@ -356,7 +357,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     console.error("Error creating payment intent:", error)
     res.status(500).json({
       message: "Error creating payment intent",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -409,7 +410,6 @@ export const checkPaymentStatus = async (req: Request, res: Response) => {
       pending:
         paymentIntent.status === "processing" ||
         paymentIntent.status === "requires_capture",
-      status: paymentIntent.status,
       orderId: orderId, // Include the order ID if found
     })
     return
@@ -418,7 +418,7 @@ export const checkPaymentStatus = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error checking payment status",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -458,7 +458,7 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error getting membership details",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -497,7 +497,7 @@ export const getUsersMembership = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error getting users membership",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -578,7 +578,7 @@ export const retryPayment = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error retrying payment:", error)
     res.status(500).json({
-      message: (error as Error).message,
+      message: getErrorMessage(error),
     })
   }
 }
@@ -590,7 +590,14 @@ export const createMembership = async (req: Request, res: Response) => {
     return
   }
   try {
-    const { paymentMethodId, stripePriceId } = req.body
+    const { paymentMethodId, stripePriceId } = req.body ?? {}
+
+    if (!paymentMethodId || !stripePriceId) {
+      res
+        .status(400)
+        .json({ message: "Payment method and price id are required" })
+      return
+    }
 
     // Get or create a Stripe customer for this user
     const { customerId } = await getOrCreateCustomerId(userId)
@@ -676,7 +683,7 @@ export const createMembership = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error creating membership:", error)
     res.status(500).json({
-      message: "Failed to create membership: " + (error as Error).message,
+      message: "Failed to create membership: " + getErrorMessage(error),
     })
     return
   }
@@ -718,7 +725,7 @@ export const cancelMembership = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error cancelling membershp:", error)
     res.status(500).json({
-      message: "Failed to cancel membership: " + (error as Error).message,
+      message: "Failed to cancel membership: " + getErrorMessage(error),
     })
     return
   }
@@ -754,7 +761,7 @@ export const resumeMembership = async (req: Request, res: Response) => {
     return
   } catch (error) {
     res.status(500).json({
-      message: (error as Error).message,
+      message: getErrorMessage(error),
     })
     return
   }
@@ -824,7 +831,7 @@ export const getCurrentSubscriptionPaymentMethodId = async (
     res.status(500).json({
       message:
         "Failed to fetch current subscription payment method ID: " +
-        (error as Error).message,
+        getErrorMessage(error),
     })
     return
   }

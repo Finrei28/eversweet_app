@@ -2,6 +2,7 @@ import { Request, Response } from "express"
 import { db } from "../lib/db"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
+import crypto from "crypto"
 import { storeHours, storeInfo } from "../lib/storeInfo"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { announcements } from "../lib/announcements"
@@ -11,6 +12,7 @@ import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
+import { getErrorMessage } from "../utils/getError"
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
@@ -89,10 +91,22 @@ export const getAvailableCustomisations = async (
   }
 }
 
+// How long the client has to actually set a new password once its OTP has
+// been verified.
+const RESET_TOKEN_TTL_MS = 10 * 60 * 1000
+
+// Only the hash is stored, so a leaked database row can't be replayed against
+// the reset endpoint. The token is 32 random bytes, so a plain digest is
+// enough — there's nothing to brute force.
+const hashResetToken = (token: string) =>
+  crypto.createHash("sha256").update(token).digest("hex")
+
 export const getResetPasswordCode = async (req: Request, res: Response) => {
-  // this function is used to resend OTP to the user
-  const { email } = req.body
-  if (!email) {
+  // Issues (or re-issues) the password reset code. This is deliberately kept
+  // separate from the signup verification code in `otp`, so a code mailed for
+  // one flow can never be spent on the other.
+  const { email } = req.body ?? {}
+  if (typeof email !== "string" || !email) {
     res.status(400).json({ message: "Email is required" })
     return
   }
@@ -101,116 +115,149 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
     where: { email: normalisedEmail },
   })
   if (!existUser) {
-    res.status(200) // to prevent email enumeration
+    res.status(200).json({ success: true }) // to prevent email enumeration
     return
   }
-  const isEmailVerified = !!existUser.emailVerified
+
   const otp = Math.floor(100000 + Math.random() * 900000).toString()
   const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
   try {
     await db.user.update({
       where: { id: existUser.id },
       data: {
-        otp,
-        otpExpiresAt,
+        passwordResetOtp: otp,
+        passwordResetOtpExpiresAt: otpExpiresAt,
       },
     })
-    const subject = isEmailVerified
-      ? "Reset your password"
-      : "Verify your email address"
-    const react = isEmailVerified
-      ? ResetPasswordEmail({ otp })
-      : VerifyEmail({ otp })
+    const subject = "Reset your password"
+
+    const react = ResetPasswordEmail({ otp })
+
     await emailSender(existUser.email, subject, react)
     res.status(200).json({ success: true })
     return
   } catch (error) {
-    res.status(500).json({ message: (error as Error).message })
+    res.status(500).json({ message: getErrorMessage(error) })
     return
   }
 }
 
 export const verifyResetPasswordCode = async (req: Request, res: Response) => {
-  const { verificationCode, email } = req.body
+  const { verificationCode, email } = req.body ?? {}
+  if (typeof verificationCode !== "string" || typeof email !== "string") {
+    res
+      .status(400)
+      .json({ message: "Verification code and email are required" })
+    return
+  }
+  const normalisedEmail = email.trim().toLowerCase()
   try {
     const user = await db.user.findUnique({
-      where: { email },
+      where: { email: normalisedEmail },
+      select: {
+        id: true,
+        passwordResetOtp: true,
+        passwordResetOtpExpiresAt: true,
+      },
     })
     if (!user) {
-      res.status(400).json({ message: "Invalid code" })
-      return
-    }
-
-    if (verificationCode !== user.otp?.toString()) {
       res.status(401).json({ message: "Invalid verification code." })
       return
     }
 
-    if (!user.otpExpiresAt) {
-      res.status(400).json({ message: "Invalid code or code has expired" })
+    if (verificationCode !== user.passwordResetOtp?.toString()) {
+      res.status(401).json({ message: "Invalid verification code." })
       return
     }
 
-    const currentTime = new Date()
-    const expirationTime = new Date(user.otpExpiresAt)
-
-    if (currentTime > expirationTime) {
-      res.status(400).json("Verification code has expired.")
+    if (
+      !user.passwordResetOtpExpiresAt ||
+      new Date() > new Date(user.passwordResetOtpExpiresAt)
+    ) {
+      res.status(400).json({ message: "Verification code has expired." })
       return
     }
-    await db.user.update({
-      where: { id: user.id },
-      data: { otp: null, otpExpiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+
+    // The OTP is spent here, so the client gets a single-use token to carry
+    // into resetPassword. The where clause repeats the OTP check so two
+    // concurrent requests can't both consume the same code.
+    const resetToken = crypto.randomBytes(32).toString("hex")
+    const consumed = await db.user.updateMany({
+      where: {
+        id: user.id,
+        passwordResetOtp: verificationCode,
+        passwordResetOtpExpiresAt: { gt: new Date() },
+      },
+      data: {
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+        resetToken: hashResetToken(resetToken),
+        resetTokenExpiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      },
     })
+    if (consumed.count === 0) {
+      res.status(401).json({ message: "Invalid verification code." })
+      return
+    }
 
     res.status(200).json({
       success: true,
       message: "Verification code is valid.",
+      resetToken,
     })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    res.status(500).json({ message: getErrorMessage(error) })
     return
   }
 }
 
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { email, newPassword } = req.body
-    if (!email || !newPassword) {
-      res.status(400).json({ message: "Email and new password are required" })
-      return
-    }
-    const user = await db.user.findUnique({
-      where: { email },
-    })
-    if (!user) {
-      res.status(404).json({ message: "User not found" })
-      return
-    }
-
-    if (!user.otpExpiresAt) {
+    const { resetToken, email, newPassword } = req.body ?? {}
+    if (typeof resetToken !== "string" || typeof email !== "string") {
       res.status(400).json({
+        message: "Reset token, email and new password are required",
+      })
+      return
+    }
+    if (typeof newPassword !== "string" || newPassword.length < 6) {
+      res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters long" })
+      return
+    }
+    const normalisedEmail = email.trim().toLowerCase()
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+
+    // One write claims the token and sets the password together. Splitting
+    // them lets a failure in between spend the token while leaving the old
+    // password in place, and new codes are capped, so the user would be stuck.
+    // A miss covers wrong, already used and expired tokens alike — all of
+    // which mean "start the flow again".
+    const claimed = await db.user.updateMany({
+      where: {
+        email: normalisedEmail,
+        resetToken: hashResetToken(resetToken),
+        resetTokenExpiresAt: { gt: new Date() },
+      },
+      data: {
+        password: hashedPassword,
+        resetToken: null,
+        resetTokenExpiresAt: null,
+        // passwordChangedAt cuts off every JWT issued before this moment — see
+        // authenticateToken. Without it a stolen 90 day token would outlive
+        // the reset that was meant to shut the attacker out.
+        passwordChangedAt: new Date(),
+      },
+    })
+    if (claimed.count === 0) {
+      res.status(401).json({
         message: "Reset password session expired, please get a new code",
       })
       return
     }
-
-    const currentTime = new Date()
-    const expirationTime = new Date(user.otpExpiresAt)
-
-    if (currentTime > expirationTime) {
-      res
-        .status(400)
-        .json("Reset password session expired, please get a new code")
-      return
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10)
-    await db.user.update({
-      where: { email },
-      data: { password: hashedPassword },
-    })
     res
       .status(200)
       .json({ success: true, message: "Password reset successfully" })
@@ -332,7 +379,11 @@ export const getLoyaltyWinner = async (req: Request, res: Response) => {
 }
 
 export function getEstimatedPickUpTime(req: Request, res: Response) {
-  const { numOfItems } = req.body
+  const { numOfItems } = req.body ?? {}
+  if (typeof numOfItems !== "number") {
+    res.status(400).json({ message: "numOfItems is required" })
+    return
+  }
   const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
   const tenMinutes = new Date(Date.now() + 11 * 60 * 1000)
   const fifteenMinutes = new Date(Date.now() + 16 * 60 * 1000)

@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/utilities/getError"
 import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
 
@@ -20,7 +21,7 @@ export const getUserIdFromToken = async (): Promise<string | null> => {
   } catch (error) {
     console.error(
       "Failed to decode token:",
-      error instanceof Error ? error.message : "Something went wrong",
+      getErrorMessage(error),
     )
     return null
   }
@@ -44,7 +45,7 @@ export const isUserAuthorised = async (): Promise<boolean> => {
   } catch (error) {
     console.error(
       "Failed to decode token:",
-      error instanceof Error ? error.message : "Something went wrong",
+      getErrorMessage(error),
     )
     return false
   }
@@ -57,7 +58,7 @@ export async function getToken(): Promise<string | null> {
   } catch (error) {
     console.error(
       "Error fetching token from SecureStore:",
-      error instanceof Error ? error.message : "Something went wrong",
+      getErrorMessage(error),
     )
     return null
   }
@@ -69,7 +70,7 @@ export async function removeToken() {
   } catch (error) {
     console.error(
       "Error removing token from SecureStore:",
-      error instanceof Error ? error.message : "Something went wrong",
+      getErrorMessage(error),
     )
     return null
   }

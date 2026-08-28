@@ -20,11 +20,12 @@ import {
   UserLeaderBoardRank,
   UserDetails,
   LeaderBoardDetails,
+  Menu,
+  Order,
 } from "@/utils/types"
-import * as SecureStore from "expo-secure-store"
-import { Menu, Order } from "@/utils/types"
 import { format } from "date-fns"
 import { getToken } from "./authToken"
+import { getErrorMessage } from "@/utils/getError"
 
 const url = process.env.EXPO_PUBLIC_URL!
 
@@ -45,11 +46,10 @@ export async function fetchCategoriesWithDesserts(): Promise<Menu> {
 }
 
 export async function createAccount(formData: createAccountData) {
-  // Only proceed if the sign-up was successful and user exists
   if (
-    !formData.email &&
-    !formData.password &&
-    !formData.firstName &&
+    !formData.email ||
+    !formData.password ||
+    !formData.firstName ||
     !formData.lastName
   ) {
     throw new Error("Email, password, and name are required.")
@@ -66,7 +66,7 @@ export async function createAccount(formData: createAccountData) {
     const data = await signUpRes.json()
 
     if (signUpRes.status === 400) {
-      throw new Error(data.message)
+      throw new Error(getErrorMessage(data))
     }
 
     if (!signUpRes.ok) {
@@ -74,8 +74,8 @@ export async function createAccount(formData: createAccountData) {
     }
 
     return data.firstName
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -102,15 +102,29 @@ export async function signIn(
       },
     })
 
-    const data = await res.json()
+    // Handle when the rate limit triggers (HTTP 429)
+    if (res.status === 429) {
+      const errorData = await res.json()
+      const resetTimeInSeconds = res.headers.get("RateLimit-Reset")
+      const minutesLeft = Math.ceil(Number(resetTimeInSeconds) / 60)
 
-    if (res.status === 401) {
-      throw new Error("Incorrect email or password.")
+      throw new Error(
+        `${errorData.error} Try again in ${minutesLeft} minutes or reset your password.`,
+      )
     }
 
     if (!res.ok) {
+      // Handle normal validation errors (e.g. status 401 wrong password)
+      const remaining = res.headers.get("RateLimit-Remaining")
+      if (remaining !== null) {
+        throw new Error(
+          `Incorrect email or password. You have ${remaining} attempts remaining.`,
+        )
+      }
       throw new Error("Failed to sign in, please try again later.")
     }
+
+    const data = await res.json()
 
     if (data.token) {
       await signInProvider(data.token) // Set token and user
@@ -120,8 +134,8 @@ export async function signIn(
       name: data.name,
       emailVerified: data.emailVerified,
     } // Optionally return name or user data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -145,19 +159,25 @@ export async function checkVerificationCode({
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data, "Network error occurred."))
+    }
+
+    if (!data.token) {
+      throw new Error(
+        "Verification succeeded but no session token was returned.",
+      )
     }
 
     await signInProvider(data.token)
     return data.name
-  } catch (error: any) {
+  } catch (error) {
     // 🌐 Network error or custom error
-    throw new Error(error.message || "Network error occurred.")
+    throw new Error(getErrorMessage(error, "Network error occurred."))
   }
 }
 
 export async function getUserLoyaltyPoints(): Promise<number> {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -174,11 +194,11 @@ export async function getUserLoyaltyPoints(): Promise<number> {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
-    return data.loyaltyPoints.points
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+    return data.points
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -203,13 +223,13 @@ export async function getAvailableCustomisations(
     }
     const data = await res.json()
     return data.customisations
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
 // export async function restoreLoyaltyPoints(points: number) {
-//   const token = await SecureStore.getItemAsync("token")
+//   const token = await getToken()
 //   if (!token) {
 //     throw new Error("Unauthenticated")
 //   }
@@ -238,7 +258,7 @@ export async function getAvailableCustomisations(
 // }
 
 // export async function orderWithLoyaltyPoints(points: number) {
-//   const token = await SecureStore.getItemAsync("token")
+//   const token = await getToken()
 //   if (!token) {
 //     throw new Error("Unauthenticated")
 //   }
@@ -274,7 +294,7 @@ export async function getAvailableCustomisations(
 // }
 
 export async function getUserProfile(): Promise<UserDetails> {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -293,16 +313,18 @@ export async function getUserProfile(): Promise<UserDetails> {
       throw new Error("Failed to find your details, please try again later")
     }
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Server error. Please try again later."),
+      )
     }
     return data.user
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export async function updateUserProfile(formData: AccountData) {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -323,16 +345,18 @@ export async function updateUserProfile(formData: AccountData) {
       throw new Error("Failed to find your details, please try again later")
     }
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Server error. Please try again later."),
+      )
     }
     return data.user
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export async function updateAnonymousStatus(value: boolean): Promise<boolean> {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -350,16 +374,18 @@ export async function updateAnonymousStatus(value: boolean): Promise<boolean> {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Server error. Please try again later."),
+      )
     }
     return data.value
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to view your orders")
   }
@@ -379,12 +405,14 @@ export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
       throw new Error("Failed to find your details, please try again later")
     }
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Server error. Please try again later."),
+      )
     }
 
     return data.orders
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -395,7 +423,7 @@ export async function createOrder(
   eatIn: boolean,
   paymentIntentId: string | null,
 ) {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -427,15 +455,8 @@ export async function createOrder(
     }
 
     if (!res.ok) {
-      try {
-        const errorData = data
-        if (errorData.orderId) {
-          throw new Error(
-            "Order may have been created, please check your orders",
-          )
-        }
-      } catch (parseError) {
-        // If we can't parse the response, just throw a generic error
+      if (data?.orderId) {
+        throw new Error("Order may have been created, please check your orders")
       }
       throw new Error(
         `${format(
@@ -445,8 +466,8 @@ export async function createOrder(
       )
     }
     return data.order
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -456,7 +477,7 @@ export const sendOrderStatusNotification = async (
   newStatus: string,
 ) => {
   try {
-    const token = await SecureStore.getItemAsync("token")
+    const token = await getToken()
     if (!token) {
       throw new Error("Unauthenticated")
     }
@@ -480,9 +501,7 @@ export const sendOrderStatusNotification = async (
     return await response.json()
   } catch (error) {
     console.error("Error sending order status notification:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -503,21 +522,21 @@ export const checkOrderStatus = async (orderId: string) => {
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.message || "Failed to check order status")
+      throw new Error(
+        getErrorMessage(errorData, "Failed to check order status"),
+      )
     }
 
     const data = await response.json()
     return data
   } catch (error) {
     console.error("Error checking order status:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const getCartItems = async (): Promise<CartItem[]> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to see your cart")
   }
@@ -535,18 +554,16 @@ export const getCartItems = async (): Promise<CartItem[]> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
     return data.cartItems
-  } catch (error: any) {
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to add item")
   }
@@ -585,20 +602,18 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {
     }
 
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to add item to cart")
+      throw new Error(getErrorMessage(data, "Failed to add item to cart"))
     }
 
     return data.cartItem
   } catch (error) {
     console.error("Error adding item to cart:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const removeItemFromCart = async (itemId: string): Promise<string> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to remove item from cart")
   }
@@ -614,22 +629,20 @@ export const removeItemFromCart = async (itemId: string): Promise<string> => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to remove item from cart")
+      throw new Error(getErrorMessage(data, "Failed to remove item from cart"))
     }
 
     return data.id
   } catch (error) {
     console.error("Error removing item from cart:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const updateCartItem = async (
   item: CartItem,
 ): Promise<{ cartItem: CartItem }> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to update your cart")
   }
@@ -666,20 +679,18 @@ export const updateCartItem = async (
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to update item in cart")
+      throw new Error(getErrorMessage(data, "Failed to update item in cart"))
     }
 
     return { cartItem: data.cartItem }
   } catch (error) {
     console.error("Error updating item in cart:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const clearCart = async () => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Unauthenticated")
   }
@@ -692,21 +703,19 @@ export const clearCart = async () => {
     })
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to clear cart")
+      throw new Error(getErrorMessage(data, "Failed to clear cart"))
     }
     return data
   } catch (error) {
     console.error("Error clearing cart:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 // export const incrementCartItem = async (
 //   itemId: string
 // ): Promise<CartItem[]> => {
-//   const token = await SecureStore.getItemAsync("token")
+//   const token = await getToken()
 //   if (!token) {
 //     throw new Error("Please sign in to add item to cart")
 //   }
@@ -736,7 +745,7 @@ export const clearCart = async () => {
 // export const decrementCartItem = async (
 //   itemId: string
 // ): Promise<CartItem[]> => {
-//   const token = await SecureStore.getItemAsync("token")
+//   const token = await getToken()
 //   if (!token) {
 //     throw new Error("Please sign in to take away an item from cart")
 //   }
@@ -766,7 +775,7 @@ export const updateCartItemQuantity = async (
   itemId: string,
   quantity: number,
 ): Promise<CartItem> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to update item quantity in cart")
   }
@@ -782,20 +791,18 @@ export const updateCartItemQuantity = async (
 
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to update cart item")
+      throw new Error(getErrorMessage(data, "Failed to update cart item"))
     }
 
     return data.cartItem
   } catch (error) {
     console.error("Error updating cart item:", error)
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
 export const showOffers = async (): Promise<Offers> => {
-  const token = await SecureStore.getItemAsync("token")
+  const token = await getToken()
   if (!token) {
     throw new Error("Please sign in to see membership offers")
   }
@@ -813,11 +820,11 @@ export const showOffers = async (): Promise<Offers> => {
       throw new Error("Unauthenticated")
     }
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
     return data.offers
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -832,16 +839,16 @@ export const showOfferForClient = async (): Promise<offerForClient[]> => {
 
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
 
     return data.offers
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
-export const getResetPasswordCode = async (email: string) => {
+export const getResetPasswordCode = async (email: string): Promise<boolean> => {
   if (!email) {
     throw new Error("Email is required")
   }
@@ -857,22 +864,45 @@ export const getResetPasswordCode = async (email: string) => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
-    return data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+    return data.success
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
-export const verifyResetPasswordCode = async (
+export const resendVerificationCode = async (
   email: string,
-  verificationCode: string,
-) => {
+): Promise<boolean> => {
   if (!email) {
     throw new Error("Email is required")
   }
-  if (!verificationCode) {
+  try {
+    const res = await fetch(`${url}/api/auth/resendVerificationCode`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(getErrorMessage(data))
+    }
+    return data.success
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
+  }
+}
+
+export const verifyResetPasswordCode = async (email: string, OTP: string) => {
+  if (!email) {
+    throw new Error("Email is required")
+  }
+  if (!OTP) {
     throw new Error("Verification code is required")
   }
   try {
@@ -881,25 +911,32 @@ export const verifyResetPasswordCode = async (
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ email, verificationCode }),
+      body: JSON.stringify({ email, verificationCode: OTP }),
     })
 
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
     return data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
-export const resetPassword = async (email: string, newPassword: string) => {
+export const resetPassword = async (
+  email: string,
+  newPassword: string,
+  resetToken: string,
+) => {
   if (!email) {
     throw new Error("Email is required")
   }
   if (!newPassword) {
     throw new Error("New password is required")
+  }
+  if (!resetToken) {
+    throw new Error("Reset token is required")
   }
   try {
     const res = await fetch(`${url}/api/resetPassword`, {
@@ -907,17 +944,17 @@ export const resetPassword = async (email: string, newPassword: string) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ email, newPassword }),
+      body: JSON.stringify({ email, newPassword, resetToken }),
     })
 
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data))
     }
     return data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -937,8 +974,8 @@ export const getStoreHours = async (): Promise<StoreHours> => {
     }
 
     return data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -958,8 +995,8 @@ export const getStoreInfo = async (): Promise<StoreInfo> => {
     }
 
     return data
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -974,16 +1011,12 @@ export const getRestaurantStatus = async (): Promise<RestaurantStatus> => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data, "Could not get restaurant status"))
     }
 
     return data.restaurantStatus
   } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not get restaurant status",
-    )
+    throw new Error(getErrorMessage(error, "Could not get restaurant status"))
   }
 }
 
@@ -1003,9 +1036,7 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get loyalty rates",
-    )
+    throw new Error(getErrorMessage(error, "Could not get loyalty rates"))
   }
 }
 
@@ -1026,11 +1057,7 @@ export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not get leaderboard details",
-    )
+    throw new Error(getErrorMessage(error, "Could not get leaderboard details"))
   }
 }
 
@@ -1051,9 +1078,7 @@ export const getAnnouncements = async (): Promise<Announcements> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get announcements",
-    )
+    throw new Error(getErrorMessage(error, "Could not get announcements"))
   }
 }
 
@@ -1074,11 +1099,7 @@ export const getHomepageCards = async (): Promise<HomePageContent[]> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not get home page contents",
-    )
+    throw new Error(getErrorMessage(error, "Could not get home page contents"))
   }
 }
 
@@ -1099,9 +1120,7 @@ export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get privacy policy",
-    )
+    throw new Error(getErrorMessage(error, "Could not get privacy policy"))
   }
 }
 
@@ -1123,9 +1142,7 @@ export const getTermAndConditions = async (): Promise<TermAndConditions> => {
     return data
   } catch (error) {
     throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not get terms and conditions",
+      getErrorMessage(error, "Could not get terms and conditions"),
     )
   }
 }
@@ -1153,9 +1170,7 @@ export const getEstimatedPickUpTime = async (
 
     return new Date(data.estimatedTime)
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get estimated time",
-    )
+    throw new Error(getErrorMessage(error, "Could not get estimated time"))
   }
 }
 
@@ -1165,6 +1180,9 @@ export const getLeaderBoard = async (): Promise<{
 }> => {
   try {
     const token = await getToken()
+    if (!token) {
+      throw new Error("Please sign in to view the leaderboard")
+    }
     const res = await fetch(`${url}/api/auth/getLeaderBoard`, {
       method: "GET",
       headers: {
@@ -1181,8 +1199,6 @@ export const getLeaderBoard = async (): Promise<{
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get leaderboard",
-    )
+    throw new Error(getErrorMessage(error, "Could not get leaderboard"))
   }
 }

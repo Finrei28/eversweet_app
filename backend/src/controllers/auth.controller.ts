@@ -11,6 +11,7 @@ import { Status } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
+import { getErrorMessage } from "../utils/getError"
 
 //Helper function
 const incrementLoyaltyPoints = async (userId: string, points: number) => {
@@ -48,7 +49,8 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
 }
 
 export const signUp = async (req: Request, res: Response) => {
-  const { email, password, firstName, lastName, phoneNumber } = req.body
+  const { email, password, firstName, lastName, phoneNumber } =
+    req.body ?? {}
   if (!email) {
     res.status(400).json({ message: "Email is required" })
     return
@@ -109,13 +111,13 @@ export const signUp = async (req: Request, res: Response) => {
       .json({ message: "User created", firstName: newUser.firstName ?? "" })
     return
   } catch (error) {
-    res.status(500).json({ message: (error as Error).message })
+    res.status(500).json({ message: getErrorMessage(error) })
     return
   }
 }
 
 export const signIn = async (req: Request, res: Response) => {
-  const { email, password } = req.body
+  const { email, password } = req.body ?? {}
   if (!email || !password) {
     res.status(400).json("Email and password is required")
     return
@@ -129,18 +131,27 @@ export const signIn = async (req: Request, res: Response) => {
     }
 
     if (!!user.emailVerified === false) {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString()
-      const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
-      await db.user.update({
-        where: { id: user.id },
-        data: {
-          otp,
-          otpExpiresAt,
-        },
-        select: { id: true },
-      })
-      const subject = "Verify your email address"
-      await EmailSender(user.email, subject, VerifyEmail({ otp }))
+      // Only mint a code when the last one is spent or expired. Sign-in is a
+      // valid-credentials path that answers 200, so the email limiters never
+      // count it — without this check it's a free way to flood an inbox.
+      const hasLiveOtp =
+        user.otp &&
+        user.otpExpiresAt &&
+        new Date() < new Date(user.otpExpiresAt)
+      if (!hasLiveOtp) {
+        const otp = Math.floor(100000 + Math.random() * 900000).toString()
+        const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
+        await db.user.update({
+          where: { id: user.id },
+          data: {
+            otp,
+            otpExpiresAt,
+          },
+          select: { id: true },
+        })
+        const subject = "Verify your email address"
+        await EmailSender(user.email, subject, VerifyEmail({ otp }))
+      }
       res.status(200).json({
         message: "User needs to verify email",
         name: user.firstName ?? "",
@@ -168,14 +179,14 @@ export const signIn = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    if ((error as Error).message.includes("limit")) {
+    if (getErrorMessage(error).includes("limit")) {
       res.status(429).json({
         message: "We've reached our email limit. Please try again tomorrow.",
       })
       return
     }
 
-    if ((error as Error).message.includes("domain")) {
+    if (getErrorMessage(error).includes("domain")) {
       res.status(400).json({
         message: "Email service is not configured correctly.",
       })
@@ -187,10 +198,59 @@ export const signIn = async (req: Request, res: Response) => {
   }
 }
 
+export const resendVerificationCode = async (req: Request, res: Response) => {
+  // The signup flow used to reuse getResetPasswordCode to resend, which meant
+  // one code served both flows. Email verification now has its own endpoint so
+  // the two codes stay in separate columns.
+  const { email } = req.body ?? {}
+  if (typeof email !== "string" || !email) {
+    res.status(400).json({ message: "Email is required" })
+    return
+  }
+  const normalisedEmail = email.trim().toLowerCase()
+  try {
+    const user = await db.user.findUnique({
+      where: { email: normalisedEmail },
+      select: { id: true, email: true, emailVerified: true },
+    })
+    // Say the same thing either way, so this can't be used to test which
+    // addresses are registered or already verified.
+    if (!user || user.emailVerified) {
+      res.status(200).json({ success: true })
+      return
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    await db.user.update({
+      where: { id: user.id },
+      data: { otp, otpExpiresAt: new Date(Date.now() + 15 * 60 * 1000) },
+      select: { id: true },
+    })
+    await EmailSender(
+      user.email,
+      "Verify your email address",
+      VerifyEmail({ otp }),
+    )
+    res.status(200).json({ success: true })
+    return
+  } catch (error) {
+    res.status(500).json({ message: getErrorMessage(error) })
+    return
+  }
+}
+
 export const checkVerificationCode = async (req: Request, res: Response) => {
-  const { verificationCode, email } = req.body
+  const { verificationCode, email } = req.body ?? {}
 
   try {
+    if (!verificationCode) {
+      res.status(400).json({ message: "Verification code is missing" })
+      return
+    }
+    if (!email) {
+      res.status(400).json({ message: "email is missing" })
+      return
+    }
     const normalisedEmail = email.trim().toLowerCase()
     const user = await db.user.findUnique({
       where: { email: normalisedEmail },
@@ -240,8 +300,12 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
 
     await db.user.update({
       where: { id: user.id },
+      // Spend the code on the way through, otherwise it stays live for the
+      // rest of its 15 minutes and can be replayed.
       data: {
         emailVerified: new Date(),
+        otp: null,
+        otpExpiresAt: null,
       },
       select: { id: true },
     })
@@ -298,7 +362,11 @@ export const updateAnonymousStatus = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { value } = req.body
+    const { value } = req.body ?? {}
+    if (typeof value !== "boolean") {
+      res.status(400).json({ message: "value is required" })
+      return
+    }
     const user = await db.user.update({
       where: { id: userId },
       data: { anonymousEnabled: value },
@@ -320,11 +388,28 @@ export const updateUser = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { email, firstName, lastName, phone } = req.body
+    const { email, firstName, lastName, phone } = req.body ?? {}
+    if (!email || !firstName || !lastName || !phone) {
+      res.status(400).json({
+        message: "Email, first name, last name and phone are required",
+      })
+      return
+    }
+    // Sign-in and password reset both look up by trim().toLowerCase(), so
+    // storing it any other way locks the account out of both.
+    const normalisedEmail = email.trim().toLowerCase()
+    const existing = await db.user.findUnique({
+      where: { email: normalisedEmail },
+      select: { id: true },
+    })
+    if (existing && existing.id !== userId) {
+      res.status(409).json({ message: "Email already registered" })
+      return
+    }
     const user = await db.user.update({
       where: { id: userId },
       data: {
-        email,
+        email: normalisedEmail,
         firstName:
           firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
         lastName:
@@ -355,7 +440,7 @@ export const updateUser = async (req: Request, res: Response) => {
 
 export const getOrder = async (req: Request, res: Response) => {
   try {
-    const { orderId } = req.body
+    const { orderId } = req.body ?? {}
     const userId = (req as any).userId
     if (!userId) {
       res.status(401).json({ message: "Unauthenticated" })
@@ -389,7 +474,10 @@ export const getOrder = async (req: Request, res: Response) => {
         },
       },
     })
-    if (!order) {
+    // Same 404 whether the order is missing or belongs to someone else — it
+    // carries the customer's name, email and phone, so confirming that an id
+    // exists is already more than a stranger should learn.
+    if (!order || order.appUserId !== userId) {
       res.status(404).json({ message: "No such order was found" })
       return
     }
@@ -406,7 +494,7 @@ export const getUserOrders = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
 
-    const { status } = req.body
+    const { status } = req.body ?? {}
     if (!Object.values(Status).includes(status)) {
       res.status(400).json({ message: "Invalid status" })
       return
@@ -481,7 +569,7 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
         points: true,
       },
     })
-    res.status(200).json({ loyaltyPoints })
+    res.status(200).json({ points: loyaltyPoints?.points ?? 0 })
     return
   } catch (error) {
     res.status(500).json({ message: error })
@@ -499,8 +587,8 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     const parsedBody = CreateOrderSchema.parse({
-      ...req.body,
-      pickUpTime: new Date(req.body.pickUpTime),
+      ...(req.body ?? {}),
+      pickUpTime: new Date(req.body?.pickUpTime),
     })
 
     const cart = await db.cart.findUnique({
@@ -817,14 +905,14 @@ export const createOrder = async (req: Request, res: Response) => {
       return
     }
 
-    if ((error as Error).message.includes("limit")) {
+    if (getErrorMessage(error).includes("limit")) {
       res.status(429).json({
         message: "We've reached our email limit. Please try again tomorrow.",
       })
       return
     }
 
-    if ((error as Error).message.includes("domain")) {
+    if (getErrorMessage(error).includes("domain")) {
       res.status(400).json({
         message: "Email service is not configured correctly.",
       })
@@ -886,7 +974,7 @@ export const orderStatus = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error checking order status",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -1060,7 +1148,7 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
     return
   } catch (error) {
     res.status(500).json({
-      message: "Error getting leaderboard: " + (error as Error).message,
+      message: "Error getting leaderboard: " + getErrorMessage(error),
     })
   }
 }

@@ -1,6 +1,7 @@
 import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { Expo } from "expo-server-sdk"
+import { getErrorMessage } from "../utils/getError"
 
 const expo = new Expo()
 
@@ -82,7 +83,7 @@ export const getPushToken = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error getting push token",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -90,7 +91,7 @@ export const getPushToken = async (req: Request, res: Response) => {
 
 export const pushToken = async (req: Request, res: Response) => {
   try {
-    const { pushToken } = req.body
+    const { pushToken } = req.body ?? {}
     const userId = (req as any).userId
     if (!userId) {
       res.status(401).json({ message: "Unauthorised" })
@@ -123,7 +124,7 @@ export const pushToken = async (req: Request, res: Response) => {
     console.error("Error saving push token:", error)
     res.status(500).json({
       message: "Error saving push token",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -168,7 +169,7 @@ export const removePushToken = async (req: Request, res: Response) => {
     console.error("Error removing push token:", error)
     res.status(500).json({
       message: "Error removing push token",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -181,7 +182,7 @@ export const sendNotification = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { title, body, data } = req.body
+    const { title, body, data } = req.body ?? {}
 
     if (!userId || !title || !body) {
       res.status(400).json({ message: "userId, title, and body are required" })
@@ -232,7 +233,7 @@ export const sendNotification = async (req: Request, res: Response) => {
     console.error("Error sending notification:", error)
     res.status(500).json({
       message: "Error sending notification",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -246,7 +247,7 @@ export const orderStatusChange = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { orderId, orderNumber, newStatus } = req.body
+    const { orderId, orderNumber, newStatus } = req.body ?? {}
 
     if (!orderId || !orderNumber || !newStatus) {
       res.status(400).json({
@@ -329,7 +330,7 @@ export const orderStatusChange = async (req: Request, res: Response) => {
     console.error("Error sending order status notification:", error)
     res.status(500).json({
       message: "Error sending order status notification",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }

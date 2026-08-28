@@ -20,7 +20,7 @@ import { useAuth } from "@/store/authProvider"
 
 export default function OrderHistory() {
   const router = useRouter()
-  const { token, loading: loadingToken } = useAuth()
+  const { token, authLoading: loadingToken } = useAuth()
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null)
 
   const {

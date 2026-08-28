@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons"
 
 import { Order, OrderStatus } from "@/lib/types"
 import { useOrderStore } from "@/store/order-store"
+import { getErrorMessage } from "@/utilities/getError"
 import { useRouter } from "expo-router"
 import { useState } from "react"
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native"
@@ -71,7 +72,7 @@ export function OrderCard({ order, onPress }: OrderCardProps) {
     } catch (error) {
       console.error(
         "Error: ",
-        (error as Error).message ?? "Problem updating order status",
+        getErrorMessage(error, "Problem updating order status"),
       )
     } finally {
       setUpdatingStatus(false)

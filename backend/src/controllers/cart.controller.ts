@@ -1062,9 +1062,16 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { id, quantity } = req.body
+    const { id, quantity } = req.body ?? {}
     if (!id) {
       res.status(400).json({ message: "cartItemId is required" })
+      return
+    }
+    // Number.isInteger rather than typeof: 2.5 and 1e12 are both numbers, and
+    // both reach Prisma as an Int it can't store, turning a bad request into a
+    // 500.
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      res.status(400).json({ message: "A valid quantity is required" })
       return
     }
     const cartItem = await db.cartItem.findUnique({

@@ -46,6 +46,7 @@ import {
 import Toast from "react-native-toast-message"
 import useFetch from "@/services/use_fetch"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
+import { getErrorMessage } from "@/utils/getError"
 import { TickAnimation } from "@/_components/tickAnimation"
 
 // Your Stripe publishable key - should be in environment variables
@@ -339,9 +340,7 @@ function CheckoutContent() {
         setSelectedCardId(defaultCard.id)
       }
     } catch (error) {
-      console.error(
-        error instanceof Error ? error.message : "Failed to fetch saved cards",
-      )
+      console.error(getErrorMessage(error, "Failed to fetch saved cards"))
       Alert.alert("Error", "Failed to load your saved payment methods.")
     } finally {
       setLoadingCards(false)
@@ -658,10 +657,10 @@ function CheckoutContent() {
           ],
         )
       } else {
-        console.error((error as Error).message)
+        console.error(getErrorMessage(error))
         Toast.show({
           type: "error",
-          text1: `${(error as Error).message}`,
+          text1: `${getErrorMessage(error)}`,
           position: "bottom",
           visibilityTime: undefined,
           autoHide: false,
