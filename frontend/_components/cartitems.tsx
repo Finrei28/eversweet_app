@@ -74,13 +74,9 @@ export function CartItems({
   }
 
   const isDecrementDisabled =
-    !!item.loyaltyPointsUsed ||
-    item.quantity <= 1 ||
-    !!item.offerId ||
-    item.isPromotionItem
+    !!item.loyaltyPointsUsed || item.quantity <= 1 || !!item.offerId
 
-  const isIncrementDisabled =
-    !!item.loyaltyPointsUsed || !!item.offerId || item.isPromotionItem
+  const isIncrementDisabled = !!item.loyaltyPointsUsed || !!item.offerId
 
   return (
     <View className="py-3 border-b border-gray-200">

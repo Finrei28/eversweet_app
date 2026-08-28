@@ -17,7 +17,7 @@ import {
   ipShortLimiter,
   userNameLongLimiter,
   userNameMediumLimiter,
-} from "../middleware/loginLimiter"
+} from "../middleware/rateLimiter"
 
 const router = Router()
 

@@ -19,6 +19,7 @@ import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
 import { parsePhoneNumberFromString } from "libphonenumber-js"
 import validator from "validator"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
@@ -76,7 +77,7 @@ export default function SignUp() {
       await createAccount(signupData)
       setVerifyEmail(true)
     } catch (error) {
-      const message = (error as Error).message
+      const message = getErrorMessage(error, "An unknown error occurred.")
 
       if (message.includes("already registered")) {
         Alert.alert("Email in use", "Please use a different email.")

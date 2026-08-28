@@ -3,3 +3,6 @@ node_modules
 .env
 dist
 sqlQuery.tsx
+.claudeignore
+audit.json
+todo

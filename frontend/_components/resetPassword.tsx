@@ -12,13 +12,16 @@ import React, { useState } from "react"
 import { useRouter } from "expo-router"
 import { resetPassword } from "@/services/api"
 import Toast from "react-native-toast-message"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function ResetPassword({
   email,
+  resetToken,
   setIsLoading,
   isLoading,
 }: {
   email: string
+  resetToken: string
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>
   isLoading: boolean
 }) {
@@ -29,7 +32,6 @@ export default function ResetPassword({
   const router = useRouter()
 
   const handleChangePassword = async () => {
-    setIsLoading(true)
     if (!changePasswordForm.newPassword) {
       Alert.alert("Error", "Enter a new password")
       return
@@ -44,11 +46,12 @@ export default function ResetPassword({
       Alert.alert("Error", "Password must be at least 6 characters long.")
       return
     }
+    setIsLoading(true)
     const signupData = {
       password: changePasswordForm.newPassword,
     }
     try {
-      const data = await resetPassword(email, signupData.password)
+      const data = await resetPassword(email, signupData.password, resetToken)
       if (data?.success) {
         Toast.show({
           type: "success",
@@ -82,7 +85,7 @@ export default function ResetPassword({
     } catch (error) {
       Alert.alert(
         "Could not reset your password",
-        error instanceof Error ? error.message : "An unknown error occurred.",
+        getErrorMessage(error, "An unknown error occurred."),
       )
 
       return

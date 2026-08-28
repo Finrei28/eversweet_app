@@ -18,10 +18,11 @@ import { OrderType, Status } from "../types/types"
 import { Prisma } from "@prisma/client"
 import { DateTime } from "luxon"
 import { es } from "date-fns/locale"
+import { getErrorMessage } from "../utils/getError"
 const expo = new Expo()
 
 export const adminSignIn = async (req: Request, res: Response) => {
-  const { username, password } = req.body
+  const { username, password } = req.body ?? {}
   if (!username || !password) {
     res.status(400).json("Username and password is required")
     return
@@ -121,7 +122,7 @@ export const getPendingOrders = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error fetching current orders",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -197,7 +198,7 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error fetching current orders",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -207,7 +208,7 @@ export const getPastOrders = async (req: Request, res: Response) => {
   const userId = (req as any).userId
   const role = (req as any).role
 
-  const { queryDate } = req.body
+  const { queryDate } = req.body ?? {}
   if (!userId && role !== "ADMIN") {
     res.status(403).json({ message: "You're unauthorised to access this!" })
     return
@@ -292,7 +293,7 @@ export const getPastOrders = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error fetching past orders",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -301,7 +302,7 @@ export const getPastOrders = async (req: Request, res: Response) => {
 export const updateOrderStatus = async (req: Request, res: Response) => {
   const userId = (req as any).userId
   const role = (req as any).role
-  const { orderId, newStatus, customerId } = req.body
+  const { orderId, newStatus, customerId } = req.body ?? {}
   if (!userId && role !== "ADMIN") {
     res.status(403).json({ message: "You're unauthorised to access this!" })
     return
@@ -408,7 +409,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     console.error("Error sending order status notification:", error)
     res.status(500).json({
       message: "Error sending order status notification",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
@@ -497,14 +498,21 @@ export const getOverview = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error fetching overview",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
 }
 
 export const updateRestaurantStatus = async (req: Request, res: Response) => {
-  const { dineInAvailability, date } = req.body
+  const { dineInAvailability, date } = req.body ?? {}
+
+  if (typeof dineInAvailability !== "boolean" && !date) {
+    res
+      .status(400)
+      .json({ message: "dineInAvailability or date is required" })
+    return
+  }
 
   try {
     const data: Prisma.RestaurantStatusUpdateManyMutationInput = {
@@ -526,14 +534,19 @@ export const updateRestaurantStatus = async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       message: "Error changing restaurant status",
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     })
     return
   }
 }
 
 export const updateDaysOff = async (req: Request, res: Response) => {
-  const { newDates }: { newDates: Date[] } = req.body
+  const { newDates }: { newDates?: Date[] } = req.body ?? {}
+
+  if (!Array.isArray(newDates)) {
+    res.status(400).json({ message: "newDates is required" })
+    return
+  }
 
   const dates = newDates.map((date) => new Date(date))
   try {
@@ -588,7 +601,7 @@ export const updateDaysOff = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error adding days off:", error)
     res.status(500).json({
-      message: `Failed to add days off: ${error instanceof Error ? error.message : "Unknown error"}`,
+      message: `Failed to add days off: ${getErrorMessage(error, "Unknown error")}`,
     })
   }
 }
@@ -704,9 +717,7 @@ export const renewMochiOffer = async () => {
       },
     })
   } catch (error) {
-    throw new Error(
-      `Failed to renew mochi offer: ${error instanceof Error ? error.message : String(error)}`,
-    )
+    throw new Error(`Failed to renew mochi offer: ${getErrorMessage(error)}`)
   }
 }
 
@@ -763,7 +774,7 @@ export const updateDailySpecial = async () => {
     })
   } catch (error) {
     throw new Error(
-      `Failed to update daily special: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to update daily special: ${getErrorMessage(error)}`,
     )
   }
 }

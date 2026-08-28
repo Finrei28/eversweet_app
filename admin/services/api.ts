@@ -6,6 +6,7 @@ import {
   WinnerDetails,
 } from "@/lib/types"
 import { getToken, isUserAuthorised } from "./auth"
+import { getErrorMessage } from "@/utilities/getError"
 
 const url = process.env.EXPO_PUBLIC_SERVER_URL!
 
@@ -64,8 +65,8 @@ export async function signInAPI({
 
     // const data = await res.json()
     return data.token
-  } catch (error: any) {
-    throw new Error(error?.message || "Something went wrong.")
+  } catch (error) {
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -90,13 +91,13 @@ export const getPendingOrders = async (): Promise<Order[]> => {
       throw new Error("You're unauthorised to access this!")
     }
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Server error. Please try again later."),
+      )
     }
     return data.orders
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -120,7 +121,9 @@ export const getCurrentOrders = async (): Promise<Order[]> => {
     throw new Error("You're unauthorised to access this!")
   }
   if (!res.ok) {
-    throw new Error(data?.message || "Server error. Please try again later.")
+    throw new Error(
+      getErrorMessage(data, "Server error. Please try again later."),
+    )
   }
   return data.orders
 }
@@ -144,7 +147,9 @@ export const getPastOrders = async (queryDate: Date): Promise<Order[]> => {
     throw new Error("You're unauthorised to access this!")
   }
   if (!res.ok) {
-    throw new Error(data?.message || "Server error. Please try again later.")
+    throw new Error(
+      getErrorMessage(data, "Server error. Please try again later."),
+    )
   }
   return data.orders
 }
@@ -179,7 +184,7 @@ export const updateOrderStatusAPI = async (
     }
 
     if (res.status === 400) {
-      throw new Error(data.message)
+      throw new Error(getErrorMessage(data))
     }
 
     if (!res.ok) {
@@ -188,9 +193,7 @@ export const updateOrderStatusAPI = async (
 
     return
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -215,7 +218,7 @@ export const getOverviewAPI = async (): Promise<Overview> => {
     }
 
     if (res.status === 400) {
-      throw new Error(data.message)
+      throw new Error(getErrorMessage(data))
     }
 
     if (!res.ok) {
@@ -224,9 +227,7 @@ export const getOverviewAPI = async (): Promise<Overview> => {
 
     return data
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Something went wrong.",
-    )
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -241,16 +242,12 @@ export const getRestaurantStatusAPI = async (): Promise<RestaurantStatus> => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(`Error: ${data.message}`)
+      throw new Error(getErrorMessage(data, "Could not get restaurant status"))
     }
 
     return data.restaurantStatus
   } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not get restaurant status",
-    )
+    throw new Error(getErrorMessage(error, "Could not get restaurant status"))
   }
 }
 
@@ -281,13 +278,13 @@ export const updateRestaurantStatus = async (
     }
 
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(
+        getErrorMessage(data, "Could not update the restaurant status"),
+      )
     }
   } catch (error) {
     throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Could not update the restaurant status",
+      getErrorMessage(error, "Could not update the restaurant status"),
     )
   }
 }
@@ -302,14 +299,12 @@ export const getDaysOff = async (): Promise<Date[]> => {
     })
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(getErrorMessage(data, "Could not get days off"))
     }
 
     return data.dates.map((date: string) => new Date(date))
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not get days off",
-    )
+    throw new Error(getErrorMessage(error, "Could not get days off"))
   }
 }
 
@@ -337,13 +332,11 @@ export const updateDaysOff = async (newDates: Date[]): Promise<Date[]> => {
     }
 
     if (!res.ok) {
-      throw new Error(data?.message || "Server error. Please try again later.")
+      throw new Error(getErrorMessage(data, "Could not update days off"))
     }
     return data.newDates.map((date: string) => new Date(date))
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not update days off",
-    )
+    throw new Error(getErrorMessage(error, "Could not update days off"))
   }
 }
 
@@ -365,13 +358,11 @@ export const getLoyaltyWinner = async (): Promise<WinnerDetails> => {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.message || "Failed to get loyalty winner")
+      throw new Error(getErrorMessage(data, "Failed to get loyalty winner"))
     }
 
     return data.winnerDetails
   } catch (error) {
-    throw new Error(
-      error instanceof Error ? error.message : "Could not fetch loyalty winner",
-    )
+    throw new Error(getErrorMessage(error, "Could not fetch loyalty winner"))
   }
 }

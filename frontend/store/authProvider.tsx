@@ -79,12 +79,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const initialize = async () => {
       try {
-        const [storeHours, storedToken] = await Promise.all([
-          getStoreHours(),
+        const [storeHoursResult, storedToken] = await Promise.all([
+          getStoreHours().catch((error) => {
+            console.error("Failed to fetch store hours:", error)
+            return fallbackHours
+          }),
           SecureStore.getItemAsync("token"),
         ])
 
-        setStoreHours(storeHours)
+        setStoreHours(storeHoursResult)
 
         if (!storedToken) {
           return

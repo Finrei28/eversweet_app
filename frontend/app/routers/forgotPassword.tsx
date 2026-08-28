@@ -16,11 +16,13 @@ import CustomHeader from "@/_components/custom-header"
 import Toast from "react-native-toast-message"
 import OTPInput from "@/_components/emailVerification"
 import ResetPassword from "@/_components/resetPassword"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function forgotPassword() {
   const [email, setEmail] = useState("")
-  const [isVerifyingCode, setIsVerifyingCode] = useState(false)
+  const [verifyCode, setVerifyCode] = useState(false)
   const [isResettingPassword, setIsResettingPassword] = useState(false)
+  const [resetToken, setResetToken] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
   const isValidEmail = (email: string) => {
@@ -52,10 +54,12 @@ export default function forgotPassword() {
     }
     setIsLoading(true)
     try {
-      setIsVerifyingCode(true)
-      await getResetPasswordCode(email)
+      const success = await getResetPasswordCode(email)
+      if (success) {
+        setVerifyCode(true)
+      }
     } catch (error) {
-      Alert.alert("Error", (error as Error).message)
+      Alert.alert("Error", getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
@@ -76,13 +80,15 @@ export default function forgotPassword() {
             {isResettingPassword ? (
               <ResetPassword
                 email={email}
+                resetToken={resetToken}
                 setIsLoading={setIsLoading}
                 isLoading={isLoading}
               />
-            ) : isVerifyingCode ? (
+            ) : verifyCode ? (
               <OTPInput
                 email={email}
                 setIsResettingPassword={setIsResettingPassword}
+                setResetToken={setResetToken}
                 setIsLoading={setIsLoading}
                 isLoading={isLoading}
               />

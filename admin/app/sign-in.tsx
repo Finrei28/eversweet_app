@@ -1,6 +1,7 @@
 import CustomHeader from "@/components/pageheader"
 import { useAuth } from "@/providers/auth-provider"
 import { signInAPI } from "@/services/api"
+import { getErrorMessage } from "@/utilities/getError"
 import { useRouter } from "expo-router"
 import React, { useState } from "react"
 import {
@@ -44,8 +45,7 @@ export default function signin() {
         bottomOffset: 60,
       })
     } catch (error) {
-      const message = (error as Error).message
-      Alert.alert("Error", message)
+      Alert.alert("Error", getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }

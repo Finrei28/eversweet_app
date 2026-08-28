@@ -5,6 +5,7 @@ import {
   updateOrderStatusAPI,
 } from "@/services/api"
 import printerService, { addJob } from "@/services/printer-service"
+import { getErrorMessage } from "@/utilities/getError"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { Alert } from "react-native"
 import Toast from "react-native-toast-message"
@@ -35,10 +36,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       const currentOrders = await getCurrentOrders()
       set({ currentOrders })
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "Failed to fetch orders",
-      )
+      Alert.alert("Error", getErrorMessage(error, "Failed to fetch orders"))
       console.error("Failed to fetch orders:", error)
     } finally {
       set({ isLoading: false })
@@ -54,9 +52,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     } catch (error) {
       Alert.alert(
         "Error",
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch completed orders",
+        getErrorMessage(error, "Failed to fetch completed orders"),
       )
       console.error("Failed to fetch completed orders:", error)
     } finally {
@@ -141,7 +137,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       console.error("Failed to update order status:", error)
       Toast.show({
         type: "error",
-        text1: error instanceof Error ? error.message : "Something went wrong",
+        text1: getErrorMessage(error),
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,

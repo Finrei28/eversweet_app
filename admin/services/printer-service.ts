@@ -103,7 +103,7 @@ class PrinterManager {
     }
   }
 
-  private async printOrderWithRetry(order: Order, retries = 3) {
+  private async printOrderWithRetry(order: Order, retries = MAX_JOB_FAILURES) {
     for (let i = 0; i < retries; i++) {
       try {
         await this.printOrder(order)

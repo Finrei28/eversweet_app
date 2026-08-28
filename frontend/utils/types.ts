@@ -267,6 +267,23 @@ export type SetUpIntent = {
   setupIntentId: string
 }
 
+export type SavedCard = {
+  id: string
+  isDefault?: boolean
+  card: {
+    brand: string
+    last4: string
+    exp_month: number
+    exp_year: number
+  }
+}
+
+export type PaymentStatusResult = {
+  success: boolean
+  pending: boolean
+  orderId: string | null
+}
+
 export type PrivacyPolicy = {
   type: string
   title: string

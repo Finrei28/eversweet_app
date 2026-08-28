@@ -16,6 +16,7 @@ import { cancelMembership } from "@/services/stripe-api"
 import Toast from "react-native-toast-message"
 import { formatShortDate } from "@/lib/formatters"
 import { MembershipDetails } from "@/utils/types"
+import { getErrorMessage } from "@/utils/getError"
 
 type CancelMembershipModalProps = {
   modalVisible: boolean
@@ -51,7 +52,7 @@ export default function CancelMembershipModal({
         },
       })
     } catch (error) {
-      Alert.alert(`Failed to cancel membership: ${(error as Error).message}`)
+      Alert.alert(`Failed to cancel membership: ${getErrorMessage(error)}`)
     } finally {
       setCanceling(false)
     }

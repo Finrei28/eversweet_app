@@ -18,14 +18,41 @@ import {
   getEstimatedPickUpTime,
   getDaysOff,
 } from "../controllers/client.controller"
+import {
+  otpEmailLongLimiter,
+  otpEmailMediumLimiter,
+  otpIpLongLimiter,
+  otpIpShortLimiter,
+  verificationEmailLimiter,
+} from "../middleware/rateLimiter"
 
 const router = Router()
 
 router.get("/getMenu", getMenu)
 router.get("/getAvailableCustomisations/:id", getAvailableCustomisations)
-router.post("/getResetPasswordCode", getResetPasswordCode)
-router.post("/verifyResetPasswordCode", verifyResetPasswordCode)
-router.post("/resetPassword", resetPassword)
+router.post(
+  "/getResetPasswordCode",
+  otpIpShortLimiter,
+  otpIpLongLimiter,
+  verificationEmailLimiter,
+  getResetPasswordCode,
+)
+router.post(
+  "/verifyResetPasswordCode",
+  otpIpShortLimiter,
+  otpIpLongLimiter,
+  otpEmailMediumLimiter,
+  otpEmailLongLimiter,
+  verifyResetPasswordCode,
+)
+router.post(
+  "/resetPassword",
+  otpIpShortLimiter,
+  otpIpLongLimiter,
+  otpEmailMediumLimiter,
+  otpEmailLongLimiter,
+  resetPassword,
+)
 router.get("/getStoreHours", getStoreHours)
 router.get("/getStoreInfo", getStoreInfo)
 router.get("/restaurantStatus", restaurantStatus)

@@ -23,6 +23,7 @@ import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
 } from "@/lib/priceHelper"
+import { getErrorMessage } from "@/utils/getError"
 
 interface CartState {
   items: CartItem[]
@@ -122,8 +123,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         i.loyaltyPointsUsed === item.loyaltyPointsUsed &&
         i.offerId === item.offerId &&
         Math.round(i.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
-        areListsEqual(i.customisations, item.customisations) &&
-        !i.isPromotionItem
+        areListsEqual(i.customisations, item.customisations)
       )
     })
 
@@ -206,7 +206,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to order with loyalty points",
-          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
+          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
           position: "bottom",
           visibilityTime: 4000,
           autoHide: true,
@@ -221,7 +221,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to add item to cart",
-          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
+          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
           position: "bottom",
           visibilityTime: 4000,
           autoHide: true,
@@ -253,7 +253,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       Toast.show({
         type: "error",
         text1: "Failed to edit item in cart",
-        text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
+        text2: `${getErrorMessage(error, "An unknown error occurred")}`,
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
@@ -330,7 +330,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         Toast.show({
           type: "error",
           text1: "Failed to remove item from cart",
-          text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
+          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,
@@ -382,7 +382,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       Toast.show({
         type: "error",
         text1: "Failed to clear cart",
-        text2: `${error instanceof Error ? error.message : "An unknown error occurred"}`,
+        text2: `${getErrorMessage(error, "An unknown error occurred")}`,
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,

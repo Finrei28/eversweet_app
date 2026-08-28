@@ -20,6 +20,7 @@ import { useAuth } from "@/store/authProvider"
 import { Ionicons } from "@expo/vector-icons"
 import PageHeader from "@/_components/pageheader"
 import OTPInput from "@/_components/emailVerification"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function signin() {
   const [email, setEmail] = useState("")
@@ -74,7 +75,7 @@ export default function signin() {
         router.replace("/") // fallback
       }
     } catch (error) {
-      Alert.alert("Error", (error as Error).message)
+      Alert.alert("Error", getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }

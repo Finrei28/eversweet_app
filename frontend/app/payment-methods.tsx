@@ -23,8 +23,6 @@ import BouncingLoader from "@/_components/loader"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import Toast from "react-native-toast-message"
 
-// Your Stripe publishable key - should be in environment variables
-
 export default function PaymentMethodsStripe() {
   return (
     <StripeProvider

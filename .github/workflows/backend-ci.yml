@@ -1,0 +1,47 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  quality-checks:
+    name: Type-check and security audit
+    runs-on: ubuntu-latest
+
+    # The repo holds backend/, frontend/ and admin/, but GitHub only reads
+    # workflows from the root .github/, so the job has to step into backend.
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript validation
+        run: npx tsc --noEmit
+
+      # Gated at critical rather than high because of one unavoidable advisory:
+      # @prisma/client pulls prisma -> @prisma/config -> deepmerge-ts <8, a
+      # stack-exhaustion DoS. Prisma 7 still pins the vulnerable version and
+      # only the Prisma 8 RC changes it, and the affected code is the CLI's
+      # config loader, not a path the running server can be driven down.
+      # Revisit when Prisma 8 ships stable, then put this back to high.
+      - name: Security audit
+        run: npm audit --omit=dev --audit-level=critical
