@@ -13,7 +13,7 @@ import {
   startOfMonth,
   endOfMonth,
 } from "date-fns"
-import { emitNewOrder } from "../index"
+import { emitNewOrder } from "../lib/socket"
 import { OrderType, Status } from "../types/types"
 import { Prisma } from "@prisma/client"
 import { DateTime } from "luxon"

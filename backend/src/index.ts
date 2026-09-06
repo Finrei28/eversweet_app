@@ -1,26 +1,19 @@
-import express from "express"
-import cors from "cors"
 import dotenv from "dotenv"
-import authRoutes from "./routes/auth.routes"
-import clientRoutes from "./routes/client.routes"
-import stripeRoutes from "./routes/stripe.routes"
-import cartRoutes from "./routes/cart.routes"
-import notificationRoutes from "./routes/notification.routes"
-import adminRoutes from "./routes/admin.routes"
-import { Server, Socket } from "socket.io"
+dotenv.config()
+
 import http from "http"
+import { Server, Socket } from "socket.io"
 import cron from "node-cron"
+import jwt from "jsonwebtoken"
+import app from "./app"
+import { setIo, emitNewOrder } from "./lib/socket"
 import {
   checkRestaurantStatus,
   getFutureOrders,
   renewMochiOffer,
   updateDailySpecial,
 } from "./controllers/admin.controller"
-import jwt from "jsonwebtoken"
-import bodyParser from "body-parser"
-import { stripeWebhook } from "./controllers/stripe.controller"
 import { calculateMonthlyWinner } from "./controllers/client.controller"
-import { FullOrderType } from "./types/types"
 
 // Extend Socket type to include userId
 declare module "socket.io" {
@@ -29,10 +22,6 @@ declare module "socket.io" {
   }
 }
 
-dotenv.config()
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
-
-const app = express()
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
 
@@ -45,6 +34,10 @@ export const io = new Server(server, {
     credentials: true,
   },
 })
+
+// Hand it to the holder controllers read from, so nothing has to import this
+// module — and start a server — just to emit an event.
+setIo(io)
 
 // Authentication middleware for socket connections
 io.use((socket, next) => {
@@ -65,7 +58,7 @@ io.use((socket, next) => {
 })
 
 // Handle socket connections
-io.on("connection", (socket) => {
+io.on("connection", (socket: Socket) => {
   console.log(`User connected: ${socket.userId}`)
 
   // Join admin room if user is admin
@@ -78,59 +71,8 @@ io.on("connection", (socket) => {
   })
 })
 
-// Function to emit new order event
-
-export const emitNewOrder = (order: FullOrderType) => {
-  io.to("admin-room").emit("new-order", order)
-}
-
-interface CorsOptions {
-  origin: (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void,
-  ) => void
-  methods: string
-  credentials: boolean
-  allowedHeaders: string[]
-}
-
-const corsOptions: CorsOptions = {
-  origin: function (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void,
-  ): void {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true) // Allow
-    } else {
-      callback(new Error(`Not allowed by CORS ${origin}`)) // Block
-    }
-  }, // maintains a whitelist of approved clients, which is vital for security and reliability
-  methods: "GET,POST,PATCH,PUT",
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false, // do not allow cookies
-}
-
-app.post(
-  "/api/stripe/webhook",
-  bodyParser.raw({ type: "application/json" }),
-  stripeWebhook,
-)
-
-app.use(cors(corsOptions))
-app.use(express.json())
-app.set("trust proxy", 1) // Crucial for accurate IP tracking behind proxies
-
-app.use((req, res, next) => {
-  req.io = io
-  next()
-})
-
-app.use("/api/auth", authRoutes)
-app.use("/api", clientRoutes)
-app.use("/api/stripe", stripeRoutes)
-app.use("/api/notification", notificationRoutes)
-app.use("/api/admin", adminRoutes)
-app.use("/api/cart", cartRoutes)
+// Re-exported so existing importers keep working.
+export { emitNewOrder }
 
 try {
   cron.schedule("* * * * *", getFutureOrders, {
@@ -151,10 +93,6 @@ try {
 } catch (err) {
   console.error("Failed to schedule task:", err)
 }
-
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id)
-})
 
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)

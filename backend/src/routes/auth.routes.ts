@@ -16,6 +16,7 @@ import {
   updateUser,
 } from "../controllers/auth.controller"
 import { authenticateToken } from "../middleware/authentication"
+import { idempotency } from "../middleware/idempotency"
 import {
   userNameMediumLimiter,
   userNameLongLimiter,
@@ -62,7 +63,10 @@ router.patch("/updateUser", authenticateToken, updateUser)
 router.get("/getUserLoyaltyPoints", authenticateToken, getUserLoyaltyPoints)
 router.get("/getOrder", authenticateToken, getOrder)
 router.post("/getUserOrders", authenticateToken, getUserOrders)
-router.post("/createOrder", authenticateToken, createOrder)
+// Idempotent because the charge happens before this endpoint is reached: a
+// retry after a dropped connection must return the order that already exists,
+// not create a second one or report an empty cart.
+router.post("/createOrder", authenticateToken, idempotency("createOrder"), createOrder)
 router.get("/orderStatus/:id", authenticateToken, orderStatus)
 router.get("/showOffers", authenticateToken, showOffers)
 router.get("/getLeaderBoard", authenticateToken, getLeaderBoard)

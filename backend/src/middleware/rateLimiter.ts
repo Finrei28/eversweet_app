@@ -1,13 +1,7 @@
 import { Request } from "express"
 import { ipKeyGenerator, rateLimit } from "express-rate-limit"
 import { RedisReply, RedisStore } from "rate-limit-redis"
-import Redis from "ioredis"
-
-// Connect to your Redis instance
-const redisUrl = process.env.REDIS_URL!
-const redisClient = new Redis(redisUrl)
-
-redisClient.on("error", (err) => console.log("Redis Error:", err))
+import { redis as redisClient } from "../lib/redis"
 
 const makeStore = (prefix: string) =>
   new RedisStore({
