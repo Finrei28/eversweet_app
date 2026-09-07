@@ -14,6 +14,13 @@ export type Order = {
   dineIn: Boolean
   appUserId: string
   status: OrderStatus // Assuming $Enums.Status refers to an enum for order status
+  /**
+   * When the kitchen should start on it, as an ISO string. Sent by the server
+   * on pending orders and order receipts, so the rule for when preparation
+   * begins is not duplicated here. Absent on accepted and past orders, which
+   * have no use for it.
+   */
+  dueAt?: string | null
   desserts: {
     id: string
     orderId: string
@@ -57,6 +64,22 @@ export type Overview = {
   week: number
   month: number
   todaySales: number
+}
+
+/**
+ * How long each size of order takes to make, in minutes.
+ *
+ * One row on the server, shared with the website. The kitchen is alerted
+ * `prep + kitchenSlack` before pick-up; the customer is quoted at least
+ * `quoteFloor`.
+ */
+export type PrepTimes = {
+  singleItem: number
+  upToThree: number
+  upToSix: number
+  moreThanSix: number
+  kitchenSlack: number
+  quoteFloor: number
 }
 
 export type RestaurantStatus = {

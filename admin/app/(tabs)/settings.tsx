@@ -4,6 +4,7 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import DaysOffSetting, {
   formatCalendarDate,
 } from "@/components/daysOff-settings"
+import PrepTimesSetting from "@/components/prepTimes-settings"
 import { formatTime } from "@/lib/formatters"
 import { RestaurantStatus } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
@@ -51,6 +52,7 @@ export default function Settings() {
     useState(false)
 
   const [showDaysOffSetting, setShowDaysOffSetting] = useState(false)
+  const [showPrepTimes, setShowPrepTimes] = useState(false)
   const [allDaysOff, setAllDaysOff] = useState<Date[]>([])
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set())
   const [loadingDaysOff, setLoadingDaysOff] = useState(true)
@@ -370,6 +372,25 @@ export default function Settings() {
               setShowDaysOffSetting={setShowDaysOffSetting}
             />
           )}
+        </View>
+
+        {/* Preparation Times */}
+        <View className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
+          <View className="px-4 py-4">
+            <Text className="text-lg font-semibold pb-2">
+              Preparation Times
+            </Text>
+            {!showPrepTimes ? (
+              <TouchableOpacity
+                className="bg-indigo-600 py-3 rounded-lg items-center mb-2"
+                onPress={() => setShowPrepTimes(true)}
+              >
+                <Text className="text-white font-medium">Edit Times</Text>
+              </TouchableOpacity>
+            ) : (
+              <PrepTimesSetting onClose={() => setShowPrepTimes(false)} />
+            )}
+          </View>
         </View>
 
         {/* Notification Settings */}

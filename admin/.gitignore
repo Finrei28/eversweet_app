@@ -87,4 +87,5 @@ yarn-error.*
 scripts/
 
 # Claude
+.claude
 .claudeignore

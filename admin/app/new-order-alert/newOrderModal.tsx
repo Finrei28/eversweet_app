@@ -1,6 +1,11 @@
 "use client"
 
-import { formatCurrency, getCollectionTime } from "@/lib/formatters"
+import {
+  formatCurrency,
+  formatCustomisation,
+  getCollectionTime,
+  isRemoval,
+} from "@/lib/formatters"
 import { Order } from "@/lib/types"
 import newOrderServices from "@/services/newOrders-service"
 import { useOrderStore } from "@/store/order-store"
@@ -41,6 +46,7 @@ export default function NewOrderModal({
 
   useEffect(() => {
     hasAccepted.current = false
+    setAccepting(false)
   }, [order.id])
 
   // Play notification sound and animation when component mounts
@@ -50,16 +56,21 @@ export default function NewOrderModal({
     hasAccepted.current = true
     setAccepting(true)
 
-    try {
-      await updateOrderStatus(order.id, "ACCEPTED")
+    // Reports whether the server actually recorded it; it handles its own
+    // errors, so a failure arrives as `false` rather than as a throw.
+    const accepted = await updateOrderStatus(order.id, "ACCEPTED")
 
-      newOrderServices.resolveCurrentAlert()
-    } catch (error) {
+    if (!accepted) {
+      // Let the alert go anyway. Holding the modal open would stall every
+      // other order behind one that cannot be dismissed, and the store has
+      // already released this order so the sweep re-alerts it within a couple
+      // of minutes.
       hasAccepted.current = false
       setAccepting(false)
-      console.error(error)
     }
-  }, [order.id, updateOrderStatus, fadeAnim])
+
+    newOrderServices.resolveCurrentAlert()
+  }, [order.id, updateOrderStatus])
 
   useEffect(() => {
     fadeAnim.setValue(0)
@@ -190,14 +201,18 @@ export default function NewOrderModal({
                       <Text className="text-gray-700 text-lg">
                         {item.quantity}x {item.dessert.name}
                       </Text>
+                      {/* The alarm is read in a hurry, so a removal says so
+                          in words and in red rather than with a leading "-". */}
                       {item.customisations.map((customisation) => (
                         <Text
-                          className="text-gray-700 ml-2"
+                          className={`ml-2 ${
+                            isRemoval(customisation)
+                              ? "font-bold text-rose-600"
+                              : "text-gray-700"
+                          }`}
                           key={customisation.id}
                         >
-                          {customisation.quantity === 0 ? "-" : "+"}
-                          {customisation.quantity}x{" "}
-                          {customisation.customisation.name}
+                          {formatCustomisation(customisation)}
                         </Text>
                       ))}
                     </View>

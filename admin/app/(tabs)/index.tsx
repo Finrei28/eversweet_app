@@ -208,9 +208,11 @@ export default function Dashboard() {
                 />
               </View>
               <View className="flex-1">
-                <Text className="font-medium">New Order Requests</Text>
+                <Text className="font-medium">Upcoming Orders</Text>
                 <Text className="text-gray-600">
-                  {pendingOrders?.length} orders waiting for approval
+                  {/* Not "waiting for approval": these cannot be accepted, they
+                      start on their own when the kitchen should begin them. */}
+                  {pendingOrders?.length} waiting to start
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />

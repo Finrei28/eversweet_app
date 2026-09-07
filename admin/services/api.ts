@@ -2,6 +2,7 @@ import {
   Order,
   OrderStatus,
   Overview,
+  PrepTimes,
   RestaurantStatus,
   WinnerDetails,
 } from "@/lib/types"
@@ -152,6 +153,63 @@ export const getPastOrders = async (queryDate: Date): Promise<Order[]> => {
     )
   }
   return data.orders
+}
+
+export const getPrepTimes = async (): Promise<PrepTimes> => {
+  const token = await getToken()
+  if (!(await isUserAuthorised())) {
+    throw new Error("You're unauthorised to access this!")
+  }
+
+  const res = await fetch(`${url}/api/admin/getPrepTimes`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  const data = await res.json()
+
+  if (res.status === 403) {
+    throw new Error("You're unauthorised to access this!")
+  }
+  if (!res.ok) {
+    throw new Error(
+      getErrorMessage(data, "Server error. Please try again later."),
+    )
+  }
+  return data.prepTimes
+}
+
+export const updatePrepTimes = async (
+  changes: Partial<PrepTimes>,
+): Promise<PrepTimes> => {
+  const token = await getToken()
+  if (!(await isUserAuthorised())) {
+    throw new Error("You're unauthorised to access this!")
+  }
+
+  const res = await fetch(`${url}/api/admin/updatePrepTimes`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(changes),
+  })
+  const data = await res.json()
+
+  if (res.status === 403) {
+    throw new Error("You're unauthorised to access this!")
+  }
+  if (!res.ok) {
+    // The server explains which field was out of range; surfacing its message
+    // is more use than a generic failure.
+    throw new Error(
+      getErrorMessage(data, "Server error. Please try again later."),
+    )
+  }
+  return data.prepTimes
 }
 
 export const updateOrderStatusAPI = async (

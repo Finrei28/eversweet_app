@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from "@/providers/auth-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 import newOrderServices from "@/services/newOrders-service"
 import printerService from "@/services/printer-service"
-import socketService from "@/services/socket-service"
+import socketService, { syncPendingOrders } from "@/services/socket-service"
 import thermalPrinter from "@/services/thermal-printer"
 import { useOrderStore } from "@/store/order-store"
 import { Ionicons } from "@expo/vector-icons"
@@ -70,6 +70,11 @@ function AppLayout() {
     }
 
     useOrderStore.getState().fetchOrders()
+    // The Upcoming list, rebuilt from the server rather than waited for on the
+    // socket. `connect` asks for the same sync, so this only matters when the
+    // socket cannot be reached — but that is exactly when staff most need to
+    // see what is already booked.
+    void syncPendingOrders()
     socketService.connect()
 
     return () => {
