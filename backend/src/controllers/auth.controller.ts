@@ -1,33 +1,44 @@
 import { Request, Response } from "express"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
+import { Prisma } from "@prisma/client"
 import { db } from "../lib/db"
 import { CreateOrderSchema } from "../utils/schema"
 import { z } from "zod"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
-import { emitNewOrder } from "../index"
+import { emitNewOrder } from "../lib/socket"
 import { Status } from "../types/types"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
 import { getErrorMessage } from "../utils/getError"
+import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
+import { calculateCartPrice } from "../lib/cartPricing"
 
 //Helper function
-const incrementLoyaltyPoints = async (userId: string, points: number) => {
+/**
+ * `client` lets a caller run this inside an open transaction. Order creation
+ * does: points earned by an order have to commit or roll back with it.
+ */
+const incrementLoyaltyPoints = async (
+  userId: string,
+  points: number,
+  client: Prisma.TransactionClient = db,
+) => {
   if (!userId) throw new Error("User not authenticated")
   if (!points) throw new Error("No points to add")
 
   const numericPoints = Number(points)
   if (!numericPoints || isNaN(numericPoints)) throw new Error("Invalid points")
 
-  const existing = await db.loyalty.findUnique({
+  const existing = await client.loyalty.findUnique({
     where: { userId },
     select: { points: true },
   })
 
   if (!existing) {
-    const newLoyalty = await db.loyalty.create({
+    const newLoyalty = await client.loyalty.create({
       data: {
         userId: userId,
         points: numericPoints,
@@ -37,7 +48,7 @@ const incrementLoyaltyPoints = async (userId: string, points: number) => {
     return newLoyalty.points
   }
 
-  const updated = await db.loyalty.update({
+  const updated = await client.loyalty.update({
     where: { userId },
     data: {
       points: existing.points + numericPoints,
@@ -577,8 +588,67 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * The shape every response carrying an order uses, so a replayed order and a
+ * freshly created one are indistinguishable to the client.
+ */
+const orderSelect = {
+  id: true,
+  tempOrderId: true,
+  status: true,
+  createdAt: true,
+  customerFirstName: true,
+  customerLastName: true,
+  customerEmail: true,
+  customerPhoneNumber: true,
+  priceInCents: true,
+  discountedAmountInCents: true,
+  pickUpTime: true,
+  dineIn: true,
+  pickedUpAt: true,
+  GST: true,
+  notified: true,
+  appUserId: true,
+  desserts: {
+    select: {
+      orderId: true,
+      id: true,
+      quantity: true,
+      priceInCents: true,
+      discountedAmountInCents: true,
+      offerId: true,
+      dessert: {
+        select: {
+          id: true,
+          name: true,
+          chineseName: true,
+          imagePath: true,
+          categoryId: true,
+        },
+      },
+      customisations: {
+        select: {
+          id: true,
+          quantity: true,
+          discountedAmountInCents: true,
+          customisation: {
+            select: {
+              id: true,
+              name: true,
+              chineseName: true,
+              priceInCents: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.OrderSelect
+
 export const createOrder = async (req: Request, res: Response) => {
   let newOrder
+  // Hoisted so the catch below can tell a lost race from a real failure.
+  let paymentIntentId: string | null = null
   try {
     const userId = (req as any).userId
     if (!userId) {
@@ -590,6 +660,50 @@ export const createOrder = async (req: Request, res: Response) => {
       ...(req.body ?? {}),
       pickUpTime: new Date(req.body?.pickUpTime),
     })
+
+    paymentIntentId = parsedBody.paymentIntentId ?? null
+
+    // A retry of a request that already succeeded has to return the original
+    // order. The cart is deleted at the end of the first run, so without this
+    // the retry falls through to the empty-cart branch and tells a customer
+    // whose card was charged that their order failed — at which point they
+    // pay again. Checked before the trading-hours gate: an order that exists
+    // is an order, whatever the clock says now.
+    if (paymentIntentId) {
+      const existing = await db.order.findUnique({
+        where: { paymentIntentId },
+        select: orderSelect,
+      })
+
+      if (existing) {
+        res.status(200).json({ order: existing })
+        return
+      }
+    }
+
+    const pickUpCheck = checkPickUpTime(parsedBody.pickUpTime, {
+      eatIn: parsedBody.eatIn,
+      daysOffKeys: await getDaysOffKeys(),
+    })
+
+    if (!pickUpCheck.ok) {
+      // Refusing a paid order would strand the customer's money: the card is
+      // charged before this endpoint is reached and nothing here can refund it.
+      // `createPaymentIntent` is the gate that stops a bad time before the
+      // charge, so reaching this branch with a payment attached means the store
+      // closed in the seconds since. Take the order and make the problem
+      // visible instead of taking the money and dropping it.
+      if (parsedBody.paymentIntentId) {
+        console.error(
+          `Order accepted with an invalid pick up time (${pickUpCheck.message}) ` +
+            `because payment ${parsedBody.paymentIntentId} was already taken. ` +
+            `User ${userId}, requested ${parsedBody.pickUpTime.toISOString()}.`,
+        )
+      } else {
+        res.status(400).json({ message: pickUpCheck.message })
+        return
+      }
+    }
 
     const cart = await db.cart.findUnique({
       where: { userId },
@@ -604,6 +718,22 @@ export const createOrder = async (req: Request, res: Response) => {
     })
 
     if (!cart || cart.cartItems.length === 0) {
+      // The narrow window the pre-flight check above cannot cover: a
+      // concurrent attempt committed — emptying the cart — between that lookup
+      // and this read. The order exists and is paid for, so report it rather
+      // than an empty cart.
+      if (paymentIntentId) {
+        const justCreated = await db.order.findUnique({
+          where: { paymentIntentId },
+          select: orderSelect,
+        })
+
+        if (justCreated) {
+          res.status(200).json({ order: justCreated })
+          return
+        }
+      }
+
       res.status(400).json({ message: "Cart is empty" })
       return
     }
@@ -623,259 +753,211 @@ export const createOrder = async (req: Request, res: Response) => {
       "yyyy-MM-dd",
     )
 
-    let counter = await db.tempOrderCounter.findUnique({
+    // One statement, so two orders placed at the same moment cannot both find
+    // the row missing and both try to create it. Read-then-create failed the
+    // loser with a unique-constraint error on the first order of a new day.
+    const counter = await db.tempOrderCounter.upsert({
       where: { date: pickUpNZDate },
+      create: { date: pickUpNZDate, counter: 6000 },
+      update: { counter: { increment: 1 } },
     })
 
-    if (!counter) {
-      counter = await db.tempOrderCounter.create({
-        data: {
-          date: pickUpNZDate,
-          counter: 6000,
-        },
-      })
-    } else {
-      counter = await db.tempOrderCounter.update({
-        where: { date: pickUpNZDate },
-        data: {
-          counter: {
-            increment: 1,
-          },
-        },
-      })
-    }
+    // Same helper `createPaymentIntent` prices the charge with, so the order
+    // recorded here and the amount taken can never disagree.
+    const {
+      beforeDiscountInCents: totalPriceInCentsBeforeDiscount,
+      discountInCents: discountedAmountInCents,
+      payableInCents,
+      gstInCents,
+    } = calculateCartPrice(cart.cartItems)
 
-    const discountedAmountInCents = cart.cartItems.reduce((total, item) => {
-      const customisationDiscountedAmount = item.customisations.reduce(
-        (acc, c) =>
-          acc + (c.quantity > 0 ? c.discountedAmountInCents * c.quantity : 0),
-        0,
-      )
-      return (
-        total +
-        (item.discountedAmountInCents + customisationDiscountedAmount) *
-          item.quantity
-      )
-    }, 0)
-
-    const totalPriceInCentsBeforeDiscount = cart.cartItems.reduce(
-      (acc, item) => {
-        // find the total price by adding all the cart item price + customisation
-        const totalCustomisationPriceInCents = item.customisations.reduce(
-          (acc, c) =>
-            acc +
-            (c.quantity > 0 ? c.customisation.priceInCents * c.quantity : 0),
-          0,
-        )
-        return (
-          acc +
-          (item.itemPriceInCents + totalCustomisationPriceInCents) *
-            item.quantity
-        )
-      },
-      0,
-    )
-
-    newOrder = await db.order.create({
-      data: {
-        tempOrderId: counter.counter.toString(),
-        customerFirstName: user.firstName ?? "",
-        customerLastName: user.lastName ?? "",
-        customerEmail: user.email,
-        customerPhoneNumber: user.phone,
-        appUser: {
-          connect: {
-            id: userId,
-          },
-        },
-        source: "APP",
-        priceInCents: totalPriceInCentsBeforeDiscount,
-        discountedAmountInCents: discountedAmountInCents,
-        GST: cart.totalPriceInCents * 0.15, // GST in cents
-        pickUpTime: parsedBody.pickUpTime,
-        dineIn: parsedBody.eatIn,
-        status: "PENDING",
-        paymentIntentId: parsedBody.paymentIntentId,
-        paymentMethodId: parsedBody.paymentMethodId,
-        desserts: {
-          create: cart.cartItems.map((dessertItem) => ({
-            dessert: {
+    // One transaction for every write this order makes: the order row, the
+    // points it earns, the offers it unlocks, and the cart it empties. The
+    // cart delete used to be a separate statement, so a failure between the
+    // two committed an order and left the cart full — leaving the customer
+    // able to pay for the same items a second time.
+    //
+    // The confirmation email and the socket emit stay outside it. Both are
+    // external and slow, and neither should be able to roll back an order
+    // the customer has already paid for.
+    newOrder = await db.$transaction(
+      async (tx) => {
+        const order = await tx.order.create({
+          data: {
+            tempOrderId: counter.counter.toString(),
+            customerFirstName: user.firstName ?? "",
+            customerLastName: user.lastName ?? "",
+            customerEmail: user.email,
+            customerPhoneNumber: user.phone,
+            appUser: {
               connect: {
-                id: dessertItem.dessert.id, // Ensure dessert exists before connecting
+                id: userId,
               },
             },
-            offerId: dessertItem.offerId, // connects offer order item to offer by using foreign key
-            quantity: dessertItem.quantity,
-            priceInCents: dessertItem.itemPriceInCents, // get price from order item
-            discountedAmountInCents: dessertItem.discountedAmountInCents,
-            loyaltyPointsUsed: dessertItem.loyaltyPointsUsed ?? null,
-            customisations: {
-              create: dessertItem.customisations.map((customisationsItem) => ({
-                customisation: {
+            source: "APP",
+            priceInCents: totalPriceInCentsBeforeDiscount,
+            discountedAmountInCents: discountedAmountInCents,
+            // From the priced items, not Cart.totalPriceInCents: that column is
+            // kept up to date by scattered increment/decrement writes and can
+            // drift from the rows it summarises. Extracted from the inclusive
+            // total rather than added on top of it, and rounded, since this is an
+            // Int column that a raw percentage would not always land on.
+            GST: gstInCents,
+            pickUpTime: parsedBody.pickUpTime,
+            dineIn: parsedBody.eatIn,
+            status: "PENDING",
+            paymentIntentId: parsedBody.paymentIntentId,
+            paymentMethodId: parsedBody.paymentMethodId,
+            desserts: {
+              create: cart.cartItems.map((dessertItem) => ({
+                dessert: {
                   connect: {
-                    id: customisationsItem.customisation.id, // Ensure customisation exists before connecting
+                    id: dessertItem.dessert.id, // Ensure dessert exists before connecting
                   },
                 },
-                discountedAmountInCents:
-                  customisationsItem.discountedAmountInCents,
-                quantity: customisationsItem.quantity,
+                // Connected through the relation rather than written as a
+                // foreign key. Prisma will not accept `offerId` in the same
+                // create as `dessert: { connect }`: one belongs to its checked
+                // create input and the other to its unchecked one, and mixing
+                // the two fails the whole order with "Unknown argument
+                // `offerId`".
+                ...(dessertItem.offerId
+                  ? { offer: { connect: { id: dessertItem.offerId } } }
+                  : {}),
+                quantity: dessertItem.quantity,
+                priceInCents: dessertItem.itemPriceInCents, // get price from order item
+                discountedAmountInCents: dessertItem.discountedAmountInCents,
+                loyaltyPointsUsed: dessertItem.loyaltyPointsUsed ?? null,
+                customisations: {
+                  create: dessertItem.customisations.map((customisationsItem) => ({
+                    customisation: {
+                      connect: {
+                        id: customisationsItem.customisation.id, // Ensure customisation exists before connecting
+                      },
+                    },
+                    discountedAmountInCents:
+                      customisationsItem.discountedAmountInCents,
+                    quantity: customisationsItem.quantity,
+                  })),
+                },
               })),
             },
-          })),
-        },
-      },
-      select: {
-        id: true,
-        tempOrderId: true,
-        status: true,
-        createdAt: true,
-        customerFirstName: true,
-        customerLastName: true,
-        customerEmail: true,
-        customerPhoneNumber: true,
-        priceInCents: true,
-        discountedAmountInCents: true,
-        pickUpTime: true,
-        dineIn: true,
-        pickedUpAt: true,
-        GST: true,
-        notified: true,
-        appUserId: true,
-        desserts: {
-          select: {
-            orderId: true,
-            id: true,
-            quantity: true,
-            priceInCents: true,
-            discountedAmountInCents: true,
-            offerId: true,
-            dessert: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                imagePath: true,
-                categoryId: true,
-              },
-            },
-            customisations: {
-              select: {
-                id: true,
-                quantity: true,
-                discountedAmountInCents: true,
-                customisation: {
-                  select: {
-                    id: true,
-                    name: true,
-                    chineseName: true,
-                    priceInCents: true,
-                  },
-                },
-              },
-            },
           },
-        },
-      },
-    })
-
-    // add points members and non members
-    if (cart.totalPriceInCents > 0) {
-      const membership = await db.membership.findUnique({ where: { userId } })
-      let earnablePoints = 0
-
-      earnablePoints = cart.cartItems.reduce(
-        (acc, item) =>
-          acc +
-          Math.floor(
-            ((item.itemPriceInCents -
-              item.discountedAmountInCents +
-              item.customisations.reduce(
-                (acc, c) =>
-                  acc +
-                  (c.quantity > 0
-                    ? (c.customisation.priceInCents -
-                        c.discountedAmountInCents) *
-                      c.quantity
-                    : 0),
-                0,
-              )) /
-              100) * // points is calculated per dollar
-              (loyaltyRates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
-              item.quantity *
-              (membership?.isActive
-                ? (loyaltyRates.modifier ?? 1) * loyaltyRates.memberRate // if !rates.modifier ? fallback to 1
-                : (loyaltyRates.modifier ?? 1)),
-          ),
-        0,
-      )
-
-      await incrementLoyaltyPoints(userId, earnablePoints)
-
-      // unlock membership offer if there is any
-      if (membership && membership.isActive) {
-        const lockedOffers = await db.offer.findMany({
-          where: {
-            AND: [
-              {
-                redemptions: {
-                  none: {
-                    membershipId: membership?.id,
-                  },
-                },
-              },
-              {
-                requirements: {
-                  some: {}, // ensures at least 1 requirement exists
-                },
-              },
-            ],
-          },
-          include: {
-            requirements: true,
-          },
+          select: orderSelect,
         })
-        // count desserts and categories in the order for offer eligibility check
-        const dessertCounts: Record<string, number> = {}
-        const categoryCounts: Record<string, number> = {}
-        for (const item of newOrder.desserts) {
-          const id = item.dessert.id
-          dessertCounts[id] = (dessertCounts[id] ?? 0) + item.quantity
-          const categoryId = item.dessert.categoryId
-          categoryCounts[categoryId] =
-            (categoryCounts[categoryId] ?? 0) + item.quantity
-        }
 
-        // offer requirements check
-        const eligibleOffers = lockedOffers.filter((offer) => {
-          return offer.requirements.every((req) => {
-            if (req.dessertId) {
-              return (dessertCounts[req.dessertId] ?? 0) >= req.quantity
+        // add points members and non members
+        if (cart.totalPriceInCents > 0) {
+          const membership = await tx.membership.findUnique({ where: { userId } })
+          let earnablePoints = 0
+
+          earnablePoints = cart.cartItems.reduce(
+            (acc, item) =>
+              acc +
+              Math.floor(
+                ((item.itemPriceInCents -
+                  item.discountedAmountInCents +
+                  item.customisations.reduce(
+                    (acc, c) =>
+                      acc +
+                      (c.quantity > 0
+                        ? (c.customisation.priceInCents -
+                            c.discountedAmountInCents) *
+                          c.quantity
+                        : 0),
+                    0,
+                  )) /
+                  100) * // points is calculated per dollar
+                  (loyaltyRates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
+                  item.quantity *
+                  (membership?.isActive
+                    ? (loyaltyRates.modifier ?? 1) * loyaltyRates.memberRate // if !rates.modifier ? fallback to 1
+                    : (loyaltyRates.modifier ?? 1)),
+              ),
+            0,
+          )
+
+          // Zero is reachable on a very small order once the per-dollar rate
+          // is floored, and the helper treats zero as a programming error. It
+          // would now roll the whole order back rather than skip a no-op.
+          if (earnablePoints > 0) {
+            await incrementLoyaltyPoints(userId, earnablePoints, tx)
+          }
+
+          // unlock membership offer if there is any
+          if (membership && membership.isActive) {
+            const lockedOffers = await tx.offer.findMany({
+              where: {
+                AND: [
+                  {
+                    redemptions: {
+                      none: {
+                        membershipId: membership?.id,
+                      },
+                    },
+                  },
+                  {
+                    requirements: {
+                      some: {}, // ensures at least 1 requirement exists
+                    },
+                  },
+                ],
+              },
+              include: {
+                requirements: true,
+              },
+            })
+            // count desserts and categories in the order for offer eligibility check
+            const dessertCounts: Record<string, number> = {}
+            const categoryCounts: Record<string, number> = {}
+            for (const item of order.desserts) {
+              const id = item.dessert.id
+              dessertCounts[id] = (dessertCounts[id] ?? 0) + item.quantity
+              const categoryId = item.dessert.categoryId
+              categoryCounts[categoryId] =
+                (categoryCounts[categoryId] ?? 0) + item.quantity
             }
 
-            if (req.categoryId) {
-              return (categoryCounts[req.categoryId] ?? 0) >= req.quantity
+            // offer requirements check
+            const eligibleOffers = lockedOffers.filter((offer) => {
+              return offer.requirements.every((req) => {
+                if (req.dessertId) {
+                  return (dessertCounts[req.dessertId] ?? 0) >= req.quantity
+                }
+
+                if (req.categoryId) {
+                  return (categoryCounts[req.categoryId] ?? 0) >= req.quantity
+                }
+
+                return false
+              })
+            })
+            // unlock eligible offers for members
+            for (const offer of eligibleOffers) {
+              await tx.offerRedemption.create({
+                data: {
+                  offerId: offer.id,
+                  membershipId: membership?.id,
+                  unlockedAt: new Date(),
+                  status: "AVAILABLE",
+                },
+              })
             }
-
-            return false
-          })
-        })
-        // unlock eligible offers for members
-        for (const offer of eligibleOffers) {
-          await db.offerRedemption.create({
-            data: {
-              offerId: offer.id,
-              membershipId: membership?.id,
-              unlockedAt: new Date(),
-              status: "AVAILABLE",
-            },
-          })
+          }
         }
-      }
-    }
 
-    // delete cart and send email and emit order
+        // The cart goes with the order, in the same commit.
+        await tx.cart.delete({ where: { userId } })
+        return order
+      },
+      // The nested order create plus the loyalty and offer writes run past
+      // Prisma's 5s default when the connection is cold.
+      { timeout: 20_000, maxWait: 10_000 },
+    )
 
-    await db.cart.delete({ where: { userId } })
+    // Past this point the order is committed and paid for. Anything that
+    // fails below is reported as a follow-up failure carrying the order id,
+    // never as a failed order.
     const subject = "Order Confirmation"
     await EmailSender(
       user.email,
@@ -890,6 +972,25 @@ export const createOrder = async (req: Request, res: Response) => {
     res.status(201).json({ order: newOrder })
     return
   } catch (error) {
+    // Two attempts ran at once and this one lost the unique constraint on
+    // paymentIntentId. The other created the order; return that rather than
+    // reporting a failure for an order that exists and is paid for.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002" &&
+      paymentIntentId
+    ) {
+      const winner = await db.order.findUnique({
+        where: { paymentIntentId },
+        select: orderSelect,
+      })
+
+      if (winner) {
+        res.status(200).json({ order: winner })
+        return
+      }
+    }
+
     if (newOrder?.id) {
       res.status(500).json({
         message: "Order was created, but a follow-up action failed.",

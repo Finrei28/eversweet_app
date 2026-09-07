@@ -34,9 +34,6 @@ export async function getToken(): Promise<string | null> {
 
 export async function removeToken() {
   try {
-    const token = await SecureStore.getItemAsync("token")
-    if (!token) {
-    }
     await SecureStore.deleteItemAsync("token")
   } catch (error) {
     console.error("Error removing token from SecureStore:", error)

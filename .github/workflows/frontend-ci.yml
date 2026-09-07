@@ -1,0 +1,70 @@
+name: Frontend CI
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  quality-checks:
+    name: Type-check, lint and security audit
+    runs-on: ubuntu-latest
+
+    # The repo holds backend/, frontend/ and admin/, but GitHub only reads
+    # workflows from the root .github/, so the job has to step into frontend.
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript validation
+        run: npx tsc --noEmit
+
+      # Catches the class of mistake tsc cannot: hooks called conditionally or
+      # from a non-component, missing effect dependencies, unreachable render
+      # branches. Warnings (mostly unused imports) do not fail the run; errors
+      # do. react/no-unescaped-entities is switched off in eslint.config.js
+      # because it guards HTML markup this app never emits.
+      - name: Lint
+        run: npx expo lint
+
+      # Report-only, and deliberately so. Expo and React Native ship their
+      # build tooling in `dependencies` rather than `devDependencies`, so
+      # --omit=dev still walks the CLI, doctor and devtools packages:
+      #
+      #   fast-xml-parser        <- react-native -> cli-doctor
+      #   react-server-dom-webpack <- expo-router (RSC, unused here)
+      #   shell-quote            <- react-native -> cli-tools, react-devtools
+      #   tar                    <- expo -> @expo/cli
+      #
+      # None of those reach the shipped bundle; Metro bundles app source plus
+      # runtime libraries, while these run on a developer or CI machine. There
+      # is no audit level above `critical`, so gating the job on this would
+      # leave it permanently red for advisories that carry no risk to users.
+      # Clearing them needs a breaking @react-native-community/cli bump, which
+      # belongs with an Expo SDK upgrade rather than here. The step still runs
+      # so the report stays visible in the log.
+      - name: Security audit (report only)
+        run: npm audit --omit=dev --audit-level=critical
+        continue-on-error: true
+
+      # No test step: the suite is empty and `npm test` is `jest --watchAll`,
+      # which never exits. Add one here when there are tests to run, with
+      # --watchAll=false or --ci.

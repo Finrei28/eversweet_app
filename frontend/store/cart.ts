@@ -37,7 +37,10 @@ interface CartState {
   getTotalMembershipDiscount: (
     usersMembership: UsersMembership | null,
   ) => number
-  addItem: (item: AddCartItem) => Promise<void>
+  addItem: (
+    item: AddCartItem,
+    usersMembership?: UsersMembership | null,
+  ) => Promise<void>
   editItem: (item: CartItem) => Promise<void>
   removeItem: (id: string) => Promise<void>
   clearCart: () => Promise<void>
@@ -52,6 +55,21 @@ interface CartState {
     usersMembership: UsersMembership | null,
   ) => Promise<number>
 }
+
+// Net price of one unit of a cart item, discounts applied, in cents. Only
+// customisations with a positive quantity are charged — quantity 0 means the
+// customer removed an ingredient the dessert normally includes.
+const netUnitPriceInCents = (item: CartItem) =>
+  item.itemPriceInCents -
+  item.discountedAmountInCents +
+  item.customisations.reduce(
+    (acc, c) =>
+      acc +
+      (c.quantity > 0
+        ? (c.priceInCents - c.discountedAmountInCents) * c.quantity
+        : 0),
+    0,
+  )
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
@@ -105,7 +123,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       )
     }, 0)
   },
-  addItem: async (item, usersMembership?: UsersMembership) => {
+  addItem: async (item, usersMembership) => {
     const areListsEqual = (list1: Customisations, list2: Customisations) => {
       if (list1.length !== list2.length) return false
 
@@ -200,7 +218,6 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       }
     } catch (error) {
-      set({ cartOperations: get().cartOperations - 1 })
       if (item?.loyaltyPointsUsed) {
         console.error("Failed to order with loyalty points", error)
         Toast.show({
@@ -344,6 +361,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   clearCart: async () => {
+    const previousItems = get().items
     const totalLoyaltyPointsUsed = get().items.reduce((total, item) => {
       return item.loyaltyPointsUsed ? total + item.loyaltyPointsUsed : total
     }, 0)
@@ -379,6 +397,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     } catch (error) {
       console.error("Failed to clear cart", error)
+      // The list was emptied optimistically; the server still holds these
+      // items, so put them back instead of showing an empty cart.
+      set({ items: previousItems, error: "Failed to clear cart" })
       Toast.show({
         type: "error",
         text1: "Failed to clear cart",
@@ -426,7 +447,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   updateCartItemQuantity: async (id, quantity) => {
-    const requestId = Date.now() // or incrementing counter
+    // A counter rather than Date.now(): two taps inside the same millisecond
+    // produced identical ids, so neither response counted as stale.
+    const requestId = (get().lastRequestId ?? 0) + 1
     set({ lastRequestId: requestId })
     try {
       const updatedCartItem = await updateCartItemQuantity(id, quantity)
@@ -441,6 +464,28 @@ export const useCartStore = create<CartState>((set, get) => ({
       })
     } catch (error) {
       console.error("Failed to update cart item:", error)
+
+      if (get().lastRequestId !== requestId) return
+
+      // incrementItem/decrementItem already applied the new quantity locally,
+      // so the cart is now ahead of the server. Pull the server's copy back
+      // rather than letting the customer check out against a quantity that was
+      // never saved.
+      await get().fetchCart()
+
+      Toast.show({
+        type: "error",
+        text1: "Couldn't update the quantity",
+        text2: getErrorMessage(error, "Your cart has been refreshed."),
+        position: "bottom",
+        visibilityTime: 4000,
+        autoHide: true,
+        bottomOffset: 90,
+        props: {
+          text1NumberOfLines: 0,
+          text2NumberOfLines: 0, // allow wrapping
+        },
+      })
     }
   },
   setError: (error) => set({ error }), // Action to set error
@@ -448,19 +493,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     get().items.reduce((acc, item) => acc + item.quantity, 0),
   getTotalCost: () =>
     get().items.reduce(
-      (acc, item) =>
-        acc +
-        item.quantity *
-          (item.itemPriceInCents -
-            item.discountedAmountInCents +
-            item.customisations.reduce(
-              (acc, c) =>
-                acc +
-                (c.quantity > 0
-                  ? (c.priceInCents - c.discountedAmountInCents) * c.quantity
-                  : 0),
-              0,
-            )),
+      (acc, item) => acc + item.quantity * netUnitPriceInCents(item),
       0,
     ),
   getEarnablePoints: async (usersMembership: UsersMembership | null) => {
@@ -469,17 +502,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       (acc, item) =>
         acc +
         Math.floor(
-          ((item.itemPriceInCents -
-            item.discountedAmountInCents +
-            item.customisations.reduce(
-              (acc, c) =>
-                acc +
-                (c.quantity > 0
-                  ? (c.priceInCents - c.discountedAmountInCents) * c.quantity
-                  : 0),
-              0,
-            )) /
-            100) * // points is calculated per dollar
+          (netUnitPriceInCents(item) / 100) * // points is calculated per dollar
             (rates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
             item.quantity *
             (usersMembership?.isActive

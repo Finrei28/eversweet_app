@@ -8,7 +8,7 @@ type StoreHours = {
 const isStoreOpenNow = (storeHours: StoreHours): boolean => {
   const now = DateTime.now().setZone("Pacific/Auckland")
 
-  const dayName = now.toFormat("cccc").toLowerCase() // Monday, Tuesday...
+  const dayName = now.toFormat("cccc") // Monday, Tuesday...
 
   const hours = storeHours[dayName]
   if (!hours) return false
@@ -33,13 +33,13 @@ const isStoreOpenNow = (storeHours: StoreHours): boolean => {
 }
 
 export const storeHours: StoreHours = {
-  monday: ["12:30 PM", "9:30 PM"],
-  tuesday: ["12:30 PM", "9:30 PM"],
-  wednesday: ["12:30 PM", "9:30 PM"],
-  thursday: ["12:30 PM", "9:30 PM"],
-  friday: ["12:00 PM", "10:00 PM"],
-  saturday: ["12:00 PM", "10:00 PM"],
-  sunday: ["12:00 PM", "10:00 PM"],
+  Monday: ["12:30 PM", "9:30 PM"],
+  Tuesday: ["12:30 PM", "9:30 PM"],
+  Wednesday: ["12:30 PM", "9:30 PM"],
+  Thursday: ["12:30 PM", "9:30 PM"],
+  Friday: ["12:00 PM", "10:00 PM"],
+  Saturday: ["12:00 PM", "10:00 PM"],
+  Sunday: ["12:00 PM", "10:00 PM"],
 }
 
 export const storeInfo = {

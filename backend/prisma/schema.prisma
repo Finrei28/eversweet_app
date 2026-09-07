@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -275,13 +276,18 @@ model Order {
   GST                     Int
   appUserId               String?
   source                  OrderSource    @default(WEBSITE)
-  paymentIntentId         String?
+  // Unique so a retried createOrder can never produce a second order for a
+  // charge that was only made once. Postgres treats NULLs as distinct, so
+  // orders paid entirely in loyalty points are unaffected.
+  paymentIntentId         String?        @unique
   paymentMethodId         String?
   notified                Boolean        @default(false)
   appUser                 User?          @relation("UserOrders", fields: [appUserId], references: [id])
   desserts                OrderDessert[]
 
   @@index([status])
+  // Serves the repeat-order check createPaymentIntent runs before charging.
+  @@index([appUserId, createdAt])
 }
 
 model OrderDessertCustomisation {
@@ -310,6 +316,9 @@ model OrderDessert {
   customisations          OrderDessertCustomisation[]
 
   @@unique([orderId, dessertId, id])
+  // Serves the GROUP BY dessertId aggregate behind getMostPopularProducts.
+  // The composite unique above leads with orderId, so it cannot serve it.
+  @@index([dessertId])
 }
 
 model Feedback {
@@ -395,6 +404,28 @@ model CustomisationInCartItem {
   customisation           Ingredient @relation(fields: [customisationId], references: [id], onDelete: Cascade)
 
   @@unique([cartItemId, customisationId])
+}
+
+/// How long each size of order takes to make, in minutes.
+///
+/// One row. Everything about order timing derives from these numbers: the
+/// kitchen is alerted `prep + kitchenSlack` before pick-up, and the customer is
+/// quoted `max(prep, quoteFloor)`. Kept in the database so the shop can tune
+/// them as it learns real timings, rather than needing a deploy.
+///
+/// The defaults reproduce the behaviour that was previously hardcoded.
+model PrepTimeSetting {
+  id           String   @id @default(cuid())
+  /// Minutes to make an order of this size.
+  singleItem   Int      @default(5)
+  upToThree    Int      @default(10)
+  upToSix      Int      @default(15)
+  moreThanSix  Int      @default(20)
+  /// Added to the prep time to decide when the kitchen is told to start.
+  kitchenSlack Int      @default(1)
+  /// The customer is never quoted less than this, however quick the order is.
+  quoteFloor   Int      @default(10)
+  updatedAt    DateTime @updatedAt
 }
 
 model RestaurantStatus {

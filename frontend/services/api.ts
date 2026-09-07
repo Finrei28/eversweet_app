@@ -23,26 +23,24 @@ import {
   Menu,
   Order,
 } from "@/utils/types"
-import { format } from "date-fns"
-import { getToken } from "./authToken"
+import { formatDayStamp } from "@/lib/formatters"
 import { getErrorMessage } from "@/utils/getError"
+import { apiFetch, apiRequest } from "./apiClient"
 
-const url = process.env.EXPO_PUBLIC_URL!
+// Messages used by more than one endpoint.
+const UNAUTHENTICATED = "Unauthenticated"
+const DETAILS_NOT_FOUND = "Failed to find your details, please try again later"
+const SERVER_ERROR = "Server error. Please try again later."
 
 export async function fetchCategoriesWithDesserts(): Promise<Menu> {
-  const res = await fetch(`${url}/api/getMenu`)
-
-  if (!res.ok) {
-    throw new Error("Failed to fetch menu")
-  }
-
-  const data = await res.json()
+  const data = await apiRequest<{ menu: Menu }>("/api/getMenu", {
+    errorMessage: "Failed to fetch menu",
+  })
 
   // Optionally filter if needed
-  const filteredCategories = data.menu.filter(
+  return data.menu.filter(
     (category: DessertCategory) => category.desserts.length > 0,
   )
-  return filteredCategories
 }
 
 export async function createAccount(formData: createAccountData) {
@@ -55,28 +53,22 @@ export async function createAccount(formData: createAccountData) {
     throw new Error("Email, password, and name are required.")
   }
 
-  try {
-    const signUpRes = await fetch(`${url}/api/auth/signup`, {
-      method: "POST",
-      body: JSON.stringify(formData),
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-    const data = await signUpRes.json()
+  // A 400 carries a specific validation message worth showing; anything else
+  // is generic, so this can't go through apiRequest's single-message model.
+  const { res, data } = await apiFetch("/api/auth/signup", {
+    method: "POST",
+    body: formData,
+  })
 
-    if (signUpRes.status === 400) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    if (!signUpRes.ok) {
-      throw new Error("Failed to sign up, please try again later")
-    }
-
-    return data.firstName
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
+  if (res.status === 400) {
+    throw new Error(getErrorMessage(data))
   }
+
+  if (!res.ok) {
+    throw new Error("Failed to sign up, please try again later")
+  }
+
+  return data.firstName
 }
 
 export async function signIn(
@@ -93,50 +85,46 @@ export async function signIn(
     throw new Error("Email and password are required.")
   }
 
-  try {
-    const res = await fetch(`${url}/api/auth/signin`, {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
+  const { res, data } = await apiFetch("/api/auth/signin", {
+    method: "POST",
+    body: { email, password },
+  })
 
-    // Handle when the rate limit triggers (HTTP 429)
-    if (res.status === 429) {
-      const errorData = await res.json()
-      const resetTimeInSeconds = res.headers.get("RateLimit-Reset")
-      const minutesLeft = Math.ceil(Number(resetTimeInSeconds) / 60)
+  // Handle when the rate limit triggers (HTTP 429)
+  if (res.status === 429) {
+    const resetTimeInSeconds = res.headers.get("RateLimit-Reset")
+    const minutesLeft = Math.ceil(Number(resetTimeInSeconds) / 60)
 
-      throw new Error(
-        `${errorData.error} Try again in ${minutesLeft} minutes or reset your password.`,
-      )
-    }
-
-    if (!res.ok) {
-      // Handle normal validation errors (e.g. status 401 wrong password)
-      const remaining = res.headers.get("RateLimit-Remaining")
-      if (remaining !== null) {
-        throw new Error(
-          `Incorrect email or password. You have ${remaining} attempts remaining.`,
-        )
-      }
-      throw new Error("Failed to sign in, please try again later.")
-    }
-
-    const data = await res.json()
-
-    if (data.token) {
-      await signInProvider(data.token) // Set token and user
-    }
-
-    return {
-      name: data.name,
-      emailVerified: data.emailVerified,
-    } // Optionally return name or user data
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
+    throw new Error(
+      `${data?.error} Try again in ${minutesLeft} minutes or reset your password.`,
+    )
   }
+
+  // Only a rejected credential means attempts have been used up. Reading the
+  // header on every failed status reported a 500 as "Incorrect email or
+  // password. You have N attempts remaining."
+  if (res.status === 401) {
+    const remaining = res.headers.get("RateLimit-Remaining")
+
+    throw new Error(
+      remaining !== null
+        ? `Incorrect email or password. You have ${remaining} attempts remaining.`
+        : "Incorrect email or password.",
+    )
+  }
+
+  if (!res.ok) {
+    throw new Error("Failed to sign in, please try again later.")
+  }
+
+  if (data.token) {
+    await signInProvider(data.token) // Set token and user
+  }
+
+  return {
+    name: data.name,
+    emailVerified: data.emailVerified,
+  } // Optionally return name or user data
 }
 
 export async function checkVerificationCode({
@@ -148,272 +136,91 @@ export async function checkVerificationCode({
   verificationCode: string
   signInProvider: (token: string) => Promise<void>
 }) {
-  try {
-    const res = await fetch(`${url}/api/auth/checkVerificationCode`, {
+  const data = await apiRequest<{ token?: string; name: string }>(
+    "/api/auth/checkVerificationCode",
+    {
       method: "POST",
-      body: JSON.stringify({ verificationCode, email }),
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-    const data = await res.json()
+      body: { verificationCode, email },
+      fallback: "Network error occurred.",
+    },
+  )
 
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Network error occurred."))
-    }
-
-    if (!data.token) {
-      throw new Error(
-        "Verification succeeded but no session token was returned.",
-      )
-    }
-
-    await signInProvider(data.token)
-    return data.name
-  } catch (error) {
-    // 🌐 Network error or custom error
-    throw new Error(getErrorMessage(error, "Network error occurred."))
+  if (!data.token) {
+    throw new Error("Verification succeeded but no session token was returned.")
   }
+
+  await signInProvider(data.token)
+  return data.name
 }
 
 export async function getUserLoyaltyPoints(): Promise<number> {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/auth/getUserLoyaltyPoints`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data.points
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ points: number }>(
+    "/api/auth/getUserLoyaltyPoints",
+    {
+      authMessage: UNAUTHENTICATED,
+      statusMessages: { 401: UNAUTHENTICATED },
+    },
+  )
+  return data.points
 }
 
 export async function getAvailableCustomisations(
   dessertId: string,
 ): Promise<Customisation[]> {
-  try {
-    const res = await fetch(
-      `${url}/api/getAvailableCustomisations/${dessertId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    )
-
-    if (!res.ok) {
-      throw new Error(
-        "Failed to retrieve customisations, please try again later",
-      )
-    }
-    const data = await res.json()
-    return data.customisations
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ customisations: Customisation[] }>(
+    `/api/getAvailableCustomisations/${dessertId}`,
+    {
+      errorMessage: "Failed to retrieve customisations, please try again later",
+    },
+  )
+  return data.customisations
 }
 
-// export async function restoreLoyaltyPoints(points: number) {
-//   const token = await getToken()
-//   if (!token) {
-//     throw new Error("Unauthenticated")
-//   }
-//   try {
-//     const res = await fetch(`${url}/api/auth/addLoyaltyPoints`, {
-//       method: "PATCH",
-//       headers: {
-//         "Content-Type": "application/json",
-//         Authorization: `Bearer ${token}`,
-//       },
-//       body: JSON.stringify({ points }),
-//     })
-//     if (res.status === 401) {
-//       throw new Error("Unauthenticated")
-//     }
-//     if (res.status === 404) {
-//       throw new Error("Failed to find your details, please try again later")
-//     }
-//     if (res.status === 400) {
-//       throw new Error("Could not add points")
-//     }
-//     return true
-//   } catch (error: any) {
-//     throw new Error(error?.message || "Something went wrong.")
-//   }
-// }
-
-// export async function orderWithLoyaltyPoints(points: number) {
-//   const token = await getToken()
-//   if (!token) {
-//     throw new Error("Unauthenticated")
-//   }
-
-//   try {
-//     const res = await fetch(`${url}/api/auth/orderWithLoyaltyPoints`, {
-//       method: "PATCH",
-//       headers: {
-//         "Content-Type": "application/json",
-//         Authorization: `Bearer ${token}`,
-//       },
-//       body: JSON.stringify({ points }),
-//     })
-
-//     const data = await res.json()
-
-//     if (res.status === 401) {
-//       throw new Error("Unauthenticated")
-//     }
-//     if (res.status === 404) {
-//       throw new Error("Failed to find your details, please try again later")
-//     }
-//     if (res.status === 400) {
-//       throw new Error("Insufficient points")
-//     }
-//     if (!res.ok) {
-//       throw new Error(data?.message || "Server error. Please try again later.")
-//     }
-//     return data.loyaltyPoints
-//   } catch (error: any) {
-//     throw new Error(error?.message || "Something went wrong.")
-//   }
-// }
-
 export async function getUserProfile(): Promise<UserDetails> {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/auth/getUser`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-
-    if (res.status === 404) {
-      throw new Error("Failed to find your details, please try again later")
-    }
-    if (!res.ok) {
-      throw new Error(
-        getErrorMessage(data, "Server error. Please try again later."),
-      )
-    }
-    return data.user
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ user: UserDetails }>("/api/auth/getUser", {
+    authMessage: UNAUTHENTICATED,
+    statusMessages: { 404: DETAILS_NOT_FOUND },
+    fallback: SERVER_ERROR,
+  })
+  return data.user
 }
 
 export async function updateUserProfile(formData: AccountData) {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-
-  try {
-    const res = await fetch(`${url}/api/auth/updateUser`, {
+  const data = await apiRequest<{ user: UserDetails }>(
+    "/api/auth/updateUser",
+    {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(formData),
-    })
-
-    const data = await res.json()
-
-    if (res.status === 404) {
-      throw new Error("Failed to find your details, please try again later")
-    }
-    if (!res.ok) {
-      throw new Error(
-        getErrorMessage(data, "Server error. Please try again later."),
-      )
-    }
-    return data.user
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+      body: formData,
+      authMessage: UNAUTHENTICATED,
+      statusMessages: { 404: DETAILS_NOT_FOUND },
+      fallback: SERVER_ERROR,
+    },
+  )
+  return data.user
 }
 
 export async function updateAnonymousStatus(value: boolean): Promise<boolean> {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-
-  try {
-    const res = await fetch(`${url}/api/auth/updateAnonymousStatus`, {
+  const data = await apiRequest<{ value: boolean }>(
+    "/api/auth/updateAnonymousStatus",
+    {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ value }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(
-        getErrorMessage(data, "Server error. Please try again later."),
-      )
-    }
-    return data.value
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+      body: { value },
+      authMessage: UNAUTHENTICATED,
+      fallback: SERVER_ERROR,
+    },
+  )
+  return data.value
 }
 
 export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to view your orders")
-  }
-
-  try {
-    const res = await fetch(`${url}/api/auth/getUserOrders`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status }),
-    })
-
-    const data = await res.json()
-    if (res.status === 404) {
-      throw new Error("Failed to find your details, please try again later")
-    }
-    if (!res.ok) {
-      throw new Error(
-        getErrorMessage(data, "Server error. Please try again later."),
-      )
-    }
-
-    return data.orders
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ orders: Order[] }>("/api/auth/getUserOrders", {
+    method: "POST",
+    body: { status },
+    authMessage: "Please sign in to view your orders",
+    statusMessages: { 404: DETAILS_NOT_FOUND },
+    fallback: SERVER_ERROR,
+  })
+  return data.orders
 }
 
 export async function createOrder(
@@ -423,151 +230,73 @@ export async function createOrder(
   eatIn: boolean,
   paymentIntentId: string | null,
 ) {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
+  // Kept on apiFetch: a failure here has to distinguish "the order may already
+  // exist" from "it definitely does not", which no single message can carry.
+  const { res, data } = await apiFetch("/api/auth/createOrder", {
+    method: "POST",
+    body: {
+      paymentMethodId,
+      pickupNow,
+      pickUpTime,
+      eatIn,
+      paymentIntentId,
+    },
+    authMessage: UNAUTHENTICATED,
+  })
+
+  if (res.status === 401) {
+    throw new Error("Please sign in to place an order")
   }
 
-  try {
-    const res = await fetch(`${url}/api/auth/createOrder`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        paymentMethodId,
-        pickupNow,
-        pickUpTime,
-        eatIn,
-        paymentIntentId,
-      }),
-    })
-
-    const data = await res.json()
-
-    if (res.status === 401) {
-      throw new Error("Please sign in to place an order")
-    }
-
-    if (res.status === 400) {
-      throw new Error("Failed to create order, please try again later")
-    }
-
-    if (!res.ok) {
-      if (data?.orderId) {
-        throw new Error("Order may have been created, please check your orders")
-      }
-      throw new Error(
-        `${format(
-          new Date(),
-          "dd/MM/yyyy",
-        )} Failed to send order to kitchen, please take a screenshot and contact support`,
-      )
-    }
-    return data.order
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
+  if (res.status === 400) {
+    throw new Error("Failed to create order, please try again later")
   }
+
+  if (!res.ok) {
+    if (data?.orderId) {
+      throw new Error("Order may have been created, please check your orders")
+    }
+    // Stamped in store time: the customer screenshots this for staff in NZ.
+    throw new Error(
+      `${formatDayStamp(
+        new Date(),
+      )} Failed to send order to kitchen, please take a screenshot and contact support`,
+    )
+  }
+
+  return data.order
 }
 
 export const sendOrderStatusNotification = async (
   orderId: string,
   orderNumber: string,
   newStatus: string,
-) => {
-  try {
-    const token = await getToken()
-    if (!token) {
-      throw new Error("Unauthenticated")
-    }
-    const response = await fetch(`${url}/api/notification/orderStatusChange`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        orderId,
-        orderNumber,
-        newStatus,
-      }),
-    })
+) =>
+  apiRequest("/api/notification/orderStatusChange", {
+    method: "POST",
+    body: { orderId, orderNumber, newStatus },
+    authMessage: UNAUTHENTICATED,
+    errorMessage: "Failed to send notification",
+  })
 
-    if (!response.ok) {
-      throw new Error("Failed to send notification")
-    }
-
-    return await response.json()
-  } catch (error) {
-    console.error("Error sending order status notification:", error)
-    throw new Error(getErrorMessage(error))
-  }
-}
-
-export const checkOrderStatus = async (orderId: string) => {
-  try {
-    const token = await getToken()
-    if (!token) {
-      throw new Error("Please sign in to check order status")
-    }
-
-    const response = await fetch(`${url}/api/auth/orderStatus/${orderId}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(
-        getErrorMessage(errorData, "Failed to check order status"),
-      )
-    }
-
-    const data = await response.json()
-    return data
-  } catch (error) {
-    console.error("Error checking order status:", error)
-    throw new Error(getErrorMessage(error))
-  }
-}
+export const checkOrderStatus = async (orderId: string) =>
+  apiRequest<any>(`/api/auth/orderStatus/${orderId}`, {
+    authMessage: "Please sign in to check order status",
+    fallback: "Failed to check order status",
+  })
 
 export const getCartItems = async (): Promise<CartItem[]> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to see your cart")
-  }
-  try {
-    const res = await fetch(`${url}/api/cart/getCartItems`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data.cartItems
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ cartItems: CartItem[] }>(
+    "/api/cart/getCartItems",
+    {
+      authMessage: "Please sign in to see your cart",
+      statusMessages: { 401: UNAUTHENTICATED },
+    },
+  )
+  return data.cartItems
 }
 
 export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to add item")
-  }
-
   const {
     dessert,
     quantity,
@@ -576,77 +305,42 @@ export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {
     loyaltyPointsUsed,
     offerId,
   } = item
-  const cartItem = {
-    dessertId: dessert.id,
-    quantity,
-    itemPriceInCents,
-    customisations,
-    loyaltyPointsUsed,
-    offerId,
-  }
 
-  try {
-    const res = await fetch(`${url}/api/cart/addItemToCart`, {
+  const data = await apiRequest<{ cartItem: CartItem }>(
+    "/api/cart/addItemToCart",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+      body: {
+        dessertId: dessert.id,
+        quantity,
+        itemPriceInCents,
+        customisations,
+        loyaltyPointsUsed,
+        offerId,
       },
-      body: JSON.stringify(cartItem),
-    })
-
-    const data = await res.json()
-
-    if (res.status === 401) {
-      throw new Error("Please sign in to add items to cart")
-    }
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Failed to add item to cart"))
-    }
-
-    return data.cartItem
-  } catch (error) {
-    console.error("Error adding item to cart:", error)
-    throw new Error(getErrorMessage(error))
-  }
+      authMessage: "Please sign in to add item",
+      statusMessages: { 401: "Please sign in to add items to cart" },
+      fallback: "Failed to add item to cart",
+    },
+  )
+  return data.cartItem
 }
 
 export const removeItemFromCart = async (itemId: string): Promise<string> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to remove item from cart")
-  }
-
-  try {
-    const res = await fetch(`${url}/api/cart/removeItemFromCart/${itemId}`, {
+  const data = await apiRequest<{ id: string }>(
+    `/api/cart/removeItemFromCart/${itemId}`,
+    {
       method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Failed to remove item from cart"))
-    }
-
-    return data.id
-  } catch (error) {
-    console.error("Error removing item from cart:", error)
-    throw new Error(getErrorMessage(error))
-  }
+      authMessage: "Please sign in to remove item from cart",
+      fallback: "Failed to remove item from cart",
+    },
+  )
+  return data.id
 }
 
 export const updateCartItem = async (
   item: CartItem,
 ): Promise<{ cartItem: CartItem }> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to update your cart")
-  }
-
   const {
     id,
     dessert,
@@ -656,220 +350,74 @@ export const updateCartItem = async (
     loyaltyPointsUsed,
     offerId,
   } = item
-  const updatedItem = {
-    id,
-    dessertId: dessert.id,
-    quantity,
-    customisations,
-    itemPriceInCents,
-    loyaltyPointsUsed,
-    offerId,
-  }
 
-  try {
-    const res = await fetch(`${url}/api/cart/updateCartItem`, {
+  const data = await apiRequest<{ cartItem: CartItem }>(
+    "/api/cart/updateCartItem",
+    {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+      body: {
+        id,
+        dessertId: dessert.id,
+        quantity,
+        customisations,
+        itemPriceInCents,
+        loyaltyPointsUsed,
+        offerId,
       },
-      body: JSON.stringify(updatedItem),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Failed to update item in cart"))
-    }
-
-    return { cartItem: data.cartItem }
-  } catch (error) {
-    console.error("Error updating item in cart:", error)
-    throw new Error(getErrorMessage(error))
-  }
+      authMessage: "Please sign in to update your cart",
+      fallback: "Failed to update item in cart",
+    },
+  )
+  return { cartItem: data.cartItem }
 }
 
-export const clearCart = async () => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/cart/clearCart`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Failed to clear cart"))
-    }
-    return data
-  } catch (error) {
-    console.error("Error clearing cart:", error)
-    throw new Error(getErrorMessage(error))
-  }
-}
-
-// export const incrementCartItem = async (
-//   itemId: string
-// ): Promise<CartItem[]> => {
-//   const token = await getToken()
-//   if (!token) {
-//     throw new Error("Please sign in to add item to cart")
-//   }
-
-//   try {
-//     const res = await fetch(`${url}/api/cart/incrementCartItem`, {
-//       method: "PATCH",
-//       headers: {
-//         "Content-Type": "application/json",
-//         Authorization: `Bearer ${token}`,
-//       },
-//       body: JSON.stringify({ id: itemId }),
-//     })
-
-//     const data = await res.json()
-//     if (!res.ok) {
-//       throw new Error(data?.message || "Failed to increment cart item")
-//     }
-
-//     return data.cartItems
-//   } catch (error) {
-//     console.error("Error incrementing cart item:", error)
-//     throw new Error(error?.message || "Something went wrong.")
-//   }
-// }
-
-// export const decrementCartItem = async (
-//   itemId: string
-// ): Promise<CartItem[]> => {
-//   const token = await getToken()
-//   if (!token) {
-//     throw new Error("Please sign in to take away an item from cart")
-//   }
-//   try {
-//     const res = await fetch(`${url}/api/cart/decrementCartItem`, {
-//       method: "PATCH",
-//       headers: {
-//         "Content-Type": "application/json",
-//         Authorization: `Bearer ${token}`,
-//       },
-//       body: JSON.stringify({ id: itemId }),
-//     })
-
-//     const data = await res.json()
-//     if (!res.ok) {
-//       throw new Error(data?.message || "Failed to decrement cart item")
-//     }
-
-//     return data.cartItems
-//   } catch (error) {
-//     console.error("Error decrementing cart item:", error)
-//     throw new Error(error?.message || "Something went wrong.")
-//   }
-// }
+export const clearCart = async () =>
+  apiRequest<any>("/api/cart/clearCart", {
+    method: "DELETE",
+    authMessage: UNAUTHENTICATED,
+    fallback: "Failed to clear cart",
+  })
 
 export const updateCartItemQuantity = async (
   itemId: string,
   quantity: number,
 ): Promise<CartItem> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to update item quantity in cart")
-  }
-  try {
-    const res = await fetch(`${url}/api/cart/updateCartItemQuantity`, {
+  const data = await apiRequest<{ cartItem: CartItem }>(
+    "/api/cart/updateCartItemQuantity",
+    {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ id: itemId, quantity }),
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Failed to update cart item"))
-    }
-
-    return data.cartItem
-  } catch (error) {
-    console.error("Error updating cart item:", error)
-    throw new Error(getErrorMessage(error))
-  }
+      body: { id: itemId, quantity },
+      authMessage: "Please sign in to update item quantity in cart",
+      fallback: "Failed to update cart item",
+    },
+  )
+  return data.cartItem
 }
 
 export const showOffers = async (): Promise<Offers> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to see membership offers")
-  }
-  try {
-    const res = await fetch(`${url}/api/auth/showOffers`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data.offers
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ offers: Offers }>("/api/auth/showOffers", {
+    authMessage: "Please sign in to see membership offers",
+    statusMessages: { 401: UNAUTHENTICATED },
+  })
+  return data.offers
 }
 
 export const showOfferForClient = async (): Promise<offerForClient[]> => {
-  try {
-    const res = await fetch(`${url}/api/showOfferForClient`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data.offers
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ offers: offerForClient[] }>(
+    "/api/showOfferForClient",
+  )
+  return data.offers
 }
 
 export const getResetPasswordCode = async (email: string): Promise<boolean> => {
   if (!email) {
     throw new Error("Email is required")
   }
-  try {
-    const res = await fetch(`${url}/api/getResetPasswordCode`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data.success
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ success: boolean }>(
+    "/api/getResetPasswordCode",
+    { method: "POST", body: { email } },
+  )
+  return data.success
 }
 
 export const resendVerificationCode = async (
@@ -878,24 +426,11 @@ export const resendVerificationCode = async (
   if (!email) {
     throw new Error("Email is required")
   }
-  try {
-    const res = await fetch(`${url}/api/auth/resendVerificationCode`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data.success
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  const data = await apiRequest<{ success: boolean }>(
+    "/api/auth/resendVerificationCode",
+    { method: "POST", body: { email } },
+  )
+  return data.success
 }
 
 export const verifyResetPasswordCode = async (email: string, OTP: string) => {
@@ -905,23 +440,10 @@ export const verifyResetPasswordCode = async (email: string, OTP: string) => {
   if (!OTP) {
     throw new Error("Verification code is required")
   }
-  try {
-    const res = await fetch(`${url}/api/verifyResetPasswordCode`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, verificationCode: OTP }),
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  return apiRequest<any>("/api/verifyResetPasswordCode", {
+    method: "POST",
+    body: { email, verificationCode: OTP },
+  })
 }
 
 export const resetPassword = async (
@@ -938,267 +460,68 @@ export const resetPassword = async (
   if (!resetToken) {
     throw new Error("Reset token is required")
   }
-  try {
-    const res = await fetch(`${url}/api/resetPassword`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, newPassword, resetToken }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
+  return apiRequest<any>("/api/resetPassword", {
+    method: "POST",
+    body: { email, newPassword, resetToken },
+  })
 }
 
-export const getStoreHours = async (): Promise<StoreHours> => {
-  try {
-    const res = await fetch(`${url}/api/getStoreHours`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
+export const getStoreHours = async (): Promise<StoreHours> =>
+  apiRequest<StoreHours>("/api/getStoreHours", {
+    errorMessage: "Error: Could not get store hours",
+  })
 
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(`Error: Could not get store hours`)
-    }
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
-}
-
-export const getStoreInfo = async (): Promise<StoreInfo> => {
-  try {
-    const res = await fetch(`${url}/api/getStoreInfo`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(`Error: Could not get store information`)
-    }
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error))
-  }
-}
+export const getStoreInfo = async (): Promise<StoreInfo> =>
+  apiRequest<StoreInfo>("/api/getStoreInfo", {
+    errorMessage: "Error: Could not get store information",
+  })
 
 export const getRestaurantStatus = async (): Promise<RestaurantStatus> => {
-  try {
-    const res = await fetch(`${url}/api/restaurantStatus`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-    const data = await res.json()
-
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data, "Could not get restaurant status"))
-    }
-
-    return data.restaurantStatus
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get restaurant status"))
-  }
+  const data = await apiRequest<{ restaurantStatus: RestaurantStatus }>(
+    "/api/restaurantStatus",
+    { fallback: "Could not get restaurant status" },
+  )
+  return data.restaurantStatus
 }
 
-export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
-  try {
-    const res = await fetch(`${url}/api/getLoyaltyRates`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-    const data = await res.json()
+export const getLoyaltyRates = async (): Promise<LoyaltyRates> =>
+  apiRequest<LoyaltyRates>("/api/getLoyaltyRates", {
+    errorMessage: "Error: Could not get loyalty rates",
+  })
 
-    if (!res.ok) {
-      throw new Error(`Error: Could not get loyalty rates`)
-    }
+export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> =>
+  apiRequest<LeaderBoardDetails>("/api/getLeaderboardDetails")
 
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get loyalty rates"))
-  }
-}
+export const getAnnouncements = async (): Promise<Announcements> =>
+  apiRequest<Announcements>("/api/getAnnouncements")
 
-export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> => {
-  try {
-    const res = await fetch(`${url}/api/getLeaderboardDetails`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
+export const getHomepageCards = async (): Promise<HomePageContent[]> =>
+  apiRequest<HomePageContent[]>("/api/getHomepageCards")
 
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
+export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> =>
+  apiRequest<PrivacyPolicy>("/api/getPrivacyPolicy")
 
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get leaderboard details"))
-  }
-}
-
-export const getAnnouncements = async (): Promise<Announcements> => {
-  try {
-    const res = await fetch(`${url}/api/getAnnouncements`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get announcements"))
-  }
-}
-
-export const getHomepageCards = async (): Promise<HomePageContent[]> => {
-  try {
-    const res = await fetch(`${url}/api/getHomepageCards`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get home page contents"))
-  }
-}
-
-export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> => {
-  try {
-    const res = await fetch(`${url}/api/getPrivacyPolicy`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get privacy policy"))
-  }
-}
-
-export const getTermAndConditions = async (): Promise<TermAndConditions> => {
-  try {
-    const res = await fetch(`${url}/api/getTermAndConditions`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(
-      getErrorMessage(error, "Could not get terms and conditions"),
-    )
-  }
-}
+export const getTermAndConditions = async (): Promise<TermAndConditions> =>
+  apiRequest<TermAndConditions>("/api/getTermAndConditions")
 
 export const getEstimatedPickUpTime = async (
   numOfItems: number,
 ): Promise<Date> => {
-  try {
-    if (numOfItems === 0) {
-      return new Date()
-    }
-    const res = await fetch(`${url}/api/getEstimatedPickUpTime`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ numOfItems }),
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return new Date(data.estimatedTime)
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get estimated time"))
+  if (numOfItems === 0) {
+    return new Date()
   }
+
+  const data = await apiRequest<{ estimatedTime: string }>(
+    "/api/getEstimatedPickUpTime",
+    { method: "POST", body: { numOfItems } },
+  )
+  return new Date(data.estimatedTime)
 }
 
 export const getLeaderBoard = async (): Promise<{
   leaderboard: LeaderBoard
   userRank: UserLeaderBoardRank
-}> => {
-  try {
-    const token = await getToken()
-    if (!token) {
-      throw new Error("Please sign in to view the leaderboard")
-    }
-    const res = await fetch(`${url}/api/auth/getLeaderBoard`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`)
-    }
-
-    const data = await res.json()
-
-    return data
-  } catch (error) {
-    throw new Error(getErrorMessage(error, "Could not get leaderboard"))
-  }
-}
+}> =>
+  apiRequest("/api/auth/getLeaderBoard", {
+    authMessage: "Please sign in to view the leaderboard",
+  })

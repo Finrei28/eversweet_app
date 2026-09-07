@@ -15,6 +15,39 @@ import { useAuth } from "@/store/authProvider"
 import { getErrorMessage } from "@/utils/getError"
 import { Trophy } from "lucide-react-native"
 
+// Module scope: defining this inside Profile gives it a new component identity
+// on every render, which unmounts and remounts the whole menu each time.
+const ProfileMenuItem = ({
+  icon,
+  title,
+  onPress,
+  isLast = false,
+}: {
+  icon: React.ReactNode
+  title: string
+  onPress: () => void
+  isLast?: boolean
+}) => (
+  <TouchableOpacity
+    onPress={onPress}
+    className={`flex-row items-center justify-between p-4 ${
+      !isLast ? "border-b border-gray-200" : ""
+    }`}
+  >
+    <View className="flex-row items-center">
+      <View
+        className={`w-8 h-8  justify-center mr-3 ${
+          title === "Membership" ? "items-start" : "items-center"
+        }`}
+      >
+        {icon}
+      </View>
+      <Text className="text-lg">{title}</Text>
+    </View>
+    <MaterialIcons name="chevron-right" size={24} color="#9CA3AF" />
+  </TouchableOpacity>
+)
+
 export default function Profile() {
   const router = useRouter()
   const {
@@ -55,37 +88,6 @@ export default function Profile() {
     //@ts-ignore
     router.push(screen)
   }
-
-  const ProfileMenuItem = ({
-    icon,
-    title,
-    onPress,
-    isLast = false,
-  }: {
-    icon: React.ReactNode
-    title: string
-    onPress: () => void
-    isLast?: boolean
-  }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      className={`flex-row items-center justify-between p-4 ${
-        !isLast ? "border-b border-gray-200" : ""
-      }`}
-    >
-      <View className="flex-row items-center">
-        <View
-          className={`w-8 h-8  justify-center mr-3 ${
-            title === "Membership" ? "items-start" : "items-center"
-          }`}
-        >
-          {icon}
-        </View>
-        <Text className="text-lg">{title}</Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={24} color="#9CA3AF" />
-    </TouchableOpacity>
-  )
 
   if (authLoading || dataLoading)
     return (

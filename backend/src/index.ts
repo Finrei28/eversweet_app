@@ -1,38 +1,21 @@
-import express from "express"
-import cors from "cors"
 import dotenv from "dotenv"
-import authRoutes from "./routes/auth.routes"
-import clientRoutes from "./routes/client.routes"
-import stripeRoutes from "./routes/stripe.routes"
-import cartRoutes from "./routes/cart.routes"
-import notificationRoutes from "./routes/notification.routes"
-import adminRoutes from "./routes/admin.routes"
-import { Server, Socket } from "socket.io"
+dotenv.config()
+
 import http from "http"
+import { Server } from "socket.io"
 import cron from "node-cron"
+import app from "./app"
+import { setIo, emitNewOrder } from "./lib/socket"
+import { registerSocketHandlers } from "./lib/socketAuth"
+import { clearScheduledOrders } from "./lib/orderRelay"
 import {
   checkRestaurantStatus,
   getFutureOrders,
   renewMochiOffer,
   updateDailySpecial,
 } from "./controllers/admin.controller"
-import jwt from "jsonwebtoken"
-import bodyParser from "body-parser"
-import { stripeWebhook } from "./controllers/stripe.controller"
 import { calculateMonthlyWinner } from "./controllers/client.controller"
-import { FullOrderType } from "./types/types"
 
-// Extend Socket type to include userId
-declare module "socket.io" {
-  interface Socket {
-    userId?: string
-  }
-}
-
-dotenv.config()
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
-
-const app = express()
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
 
@@ -46,94 +29,23 @@ export const io = new Server(server, {
   },
 })
 
-// Authentication middleware for socket connections
-io.use((socket, next) => {
-  const token = socket.handshake.auth.token
-  if (!token) {
-    return next(new Error("Authentication error"))
-  }
+// Hand it to the holder controllers read from, so nothing has to import this
+// module — and start a server — just to emit an event.
+setIo(io)
 
-  jwt.verify(token, process.env.JWT_SECRET!, (err: jwt.VerifyErrors | null) => {
-    if (err) {
-      return next(new Error("Authentication error"))
-    }
-  })
+// Authentication and room membership live in `lib/socketAuth`, so the rule
+// that keeps non-admins out of the kitchen room can be tested without this
+// module, which opens a port and schedules cron jobs on import.
+registerSocketHandlers(io)
 
-  // Attach user info to the socket
-  socket.userId = "admin" // This would come from the token verification
-  next()
-})
-
-// Handle socket connections
-io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.userId}`)
-
-  // Join admin room if user is admin
-  if (socket.userId === "admin") {
-    socket.join("admin-room")
-  }
-
-  socket.on("disconnect", () => {
-    console.log(`User disconnected: ${socket.userId}`)
-  })
-})
-
-// Function to emit new order event
-
-export const emitNewOrder = (order: FullOrderType) => {
-  io.to("admin-room").emit("new-order", order)
-}
-
-interface CorsOptions {
-  origin: (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void,
-  ) => void
-  methods: string
-  credentials: boolean
-  allowedHeaders: string[]
-}
-
-const corsOptions: CorsOptions = {
-  origin: function (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void,
-  ): void {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true) // Allow
-    } else {
-      callback(new Error(`Not allowed by CORS ${origin}`)) // Block
-    }
-  }, // maintains a whitelist of approved clients, which is vital for security and reliability
-  methods: "GET,POST,PATCH,PUT",
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false, // do not allow cookies
-}
-
-app.post(
-  "/api/stripe/webhook",
-  bodyParser.raw({ type: "application/json" }),
-  stripeWebhook,
-)
-
-app.use(cors(corsOptions))
-app.use(express.json())
-app.set("trust proxy", 1) // Crucial for accurate IP tracking behind proxies
-
-app.use((req, res, next) => {
-  req.io = io
-  next()
-})
-
-app.use("/api/auth", authRoutes)
-app.use("/api", clientRoutes)
-app.use("/api/stripe", stripeRoutes)
-app.use("/api/notification", notificationRoutes)
-app.use("/api/admin", adminRoutes)
-app.use("/api/cart", cartRoutes)
+// Re-exported so existing importers keep working.
+export { emitNewOrder }
 
 try {
-  cron.schedule("* * * * *", getFutureOrders, {
+  // A backstop now rather than the only path: website orders are announced as
+  // they are paid for. Every two minutes is enough to catch what a restart
+  // dropped, and the 6-21 minute preparation leads absorb the extra minute.
+  cron.schedule("*/2 * * * *", getFutureOrders, {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("* * * * *", checkRestaurantStatus, {
@@ -152,9 +64,16 @@ try {
   console.error("Failed to schedule task:", err)
 }
 
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id)
-})
+// Orders waiting on an in-memory timer are lost on shutdown either way; the
+// cron re-announces them when the process comes back. Clearing them stops a
+// draining worker from holding handles that can never usefully fire.
+const shutdown = () => {
+  clearScheduledOrders()
+  server.close(() => process.exit(0))
+}
+
+process.on("SIGTERM", shutdown)
+process.on("SIGINT", shutdown)
 
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)

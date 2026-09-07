@@ -106,11 +106,10 @@ export default function OfferModal({
 
                       <Text className="text-lg font-medium ml-2">
                         {formatCurrency(
-                          itemPriceInCents !== null
+                          (itemPriceInCents !== null
                             ? itemPriceInCents
-                            : (dessert.priceInCents *
-                                (1 - (discountAmount ?? 0))) /
-                                100,
+                            : dessert.priceInCents *
+                              (1 - (discountAmount ?? 0))) / 100,
                         )}
                       </Text>
                     </TouchableOpacity>

@@ -26,6 +26,19 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 
 SplashScreen.preventAutoHideAsync()
 
+// Module scope: a new object each render remounts every toast that is on screen.
+const toastConfig = {
+  error: (props: any) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: "red" }}
+      contentContainerStyle={{ paddingHorizontal: 10 }}
+      text1NumberOfLines={0} // allow wrapping
+      text2NumberOfLines={0}
+    />
+  ),
+}
+
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const notificationResponseListener =
@@ -47,7 +60,10 @@ export default function RootLayout() {
       try {
         const [token, announcementList] = await Promise.all([
           getToken(),
-          getAnnouncements(),
+          getAnnouncements().catch((error): Announcements => {
+            console.error("Failed to fetch announcements:", error)
+            return []
+          }),
         ])
         setIsAuthenticated(!!token)
         setAnnouncements(announcementList)
@@ -66,7 +82,7 @@ export default function RootLayout() {
           if (hasNewAnnouncements) {
             // show new announcements
             setShowAnnounceModal(true)
-            const latestAnnouncementDate = announcementList.reduce(
+            const latestAnnouncementDate = announcementList.reduce<string>(
               (latest, announcement) =>
                 new Date(announcement.updatedAt) > new Date(latest)
                   ? announcement.updatedAt
@@ -151,18 +167,6 @@ export default function RootLayout() {
       }
     }
   }, [isAuthenticated, mounted])
-
-  const toastConfig = {
-    error: (props: any) => (
-      <BaseToast
-        {...props}
-        style={{ borderLeftColor: "red" }}
-        contentContainerStyle={{ paddingHorizontal: 10 }}
-        text1NumberOfLines={0} // allow wrapping
-        text2NumberOfLines={0}
-      />
-    ),
-  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

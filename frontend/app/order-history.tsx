@@ -33,9 +33,11 @@ export default function OrderHistory() {
 
   const onRefresh = async () => {
     setRefreshing(true)
-    // Simulate network request or data refresh
-    refetchOrders()
-    setRefreshing(false)
+    try {
+      await refetchOrders()
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   const getStatusColor = (status: string) => {

@@ -22,11 +22,13 @@ type CancelMembershipModalProps = {
   modalVisible: boolean
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
   membershipDetails: MembershipDetails | null
+  onCancelled?: () => Promise<void> | void
 }
 export default function CancelMembershipModal({
   modalVisible,
   setModalVisible,
   membershipDetails,
+  onCancelled,
 }: CancelMembershipModalProps) {
   const [canceling, setCanceling] = useState(false)
   const handleClose = async () => {
@@ -38,6 +40,9 @@ export default function CancelMembershipModal({
       setCanceling(true)
       const expiresAt = await cancelMembership()
       setModalVisible(false)
+      // Pull the membership back down so the page swaps to "Re-subscribe"
+      // instead of still offering to cancel.
+      await onCancelled?.()
       Toast.show({
         type: "success",
         text1: `Membership canceled`,

@@ -24,6 +24,7 @@ import {
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
 import { removePushToken, syncPushToken } from "@/services/notifications"
+import Toast from "react-native-toast-message"
 
 interface DecodedToken {
   userId: string
@@ -123,19 +124,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const loadUserData = async () => {
       try {
         setDataLoading(true)
-        const [membership, membershipDetails, user, leaderboardDetails] =
-          await Promise.all([
-            getUsersMembership(),
-            getMembershipDetails(),
-            getUserProfile(),
-            getLeaderboardDetails(),
-          ])
+        const [
+          membershipResult,
+          membershipDetailsResult,
+          userResult,
+          leaderboardResult,
+        ] = await Promise.allSettled([
+          getUsersMembership(),
+          getMembershipDetails(),
+          getUserProfile(),
+          getLeaderboardDetails(),
+        ])
+
+        if (membershipResult.status === "fulfilled") {
+          setUsersMembership(membershipResult.value)
+        } else {
+          console.error("Failed to fetch membership:", membershipResult.reason)
+        }
+
+        if (membershipDetailsResult.status === "fulfilled") {
+          setMembershipDetails(membershipDetailsResult.value)
+        } else {
+          console.error(
+            "Failed to fetch membership details:",
+            membershipDetailsResult.reason,
+          )
+        }
+
+        if (userResult.status === "fulfilled") {
+          setUserDetails(userResult.value)
+        } else {
+          console.error("Failed to fetch user profile:", userResult.reason)
+        }
+
         setLeaderboardDetails(
-          leaderboardDetails ?? { show: true, description: "" },
+          leaderboardResult.status === "fulfilled"
+            ? leaderboardResult.value
+            : { show: true, description: "", lastMonthsWinner: null },
         )
-        setUserDetails(user)
-        setMembershipDetails(membershipDetails)
-        setUsersMembership(membership)
       } catch (error) {
         console.error(error)
       } finally {
@@ -154,6 +180,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUsersMembership(membership)
     } catch (error) {
       console.error(error)
+      Toast.show({
+        type: "error",
+        text1: `There was a problem getting your membership details.`,
+        position: "bottom",
+        visibilityTime: 5000,
+        autoHide: true,
+        bottomOffset: 90,
+      })
     } finally {
       setDataLoading(false)
     }
@@ -167,19 +201,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserDetails(user)
     } catch (error) {
       console.error(error)
+      Toast.show({
+        type: "error",
+        text1: `There was a problem getting your details.`,
+        position: "bottom",
+        visibilityTime: 5000,
+        autoHide: true,
+        bottomOffset: 90,
+      })
     } finally {
       setDataLoading(false)
     }
   }
 
-  const signInProvider = async (token: string) => {
+  const signInProvider = async (newToken: string) => {
     try {
-      await SecureStore.setItemAsync("token", token)
-      setToken(token)
-      await refetchUsersMembership()
-      await refetchUserDetails()
-      useLoyaltyStore.getState().fetchPoints() // load fresh points on login
-      useCartStore.getState().fetchCart() // load cart items on login
+      await SecureStore.setItemAsync("token", newToken)
+      // Setting the token drives the loadUserData effect above, which fetches
+      // the membership and profile. Calling the refetch helpers here instead
+      // did nothing: they read `token` from this render's closure, which is
+      // still null at sign-in time, and returned early.
+      setToken(newToken)
+      await Promise.all([
+        useLoyaltyStore.getState().fetchPoints(), // load fresh points on login
+        useCartStore.getState().fetchCart(), // load cart items on login
+      ])
     } catch (error) {
       console.error("Sign in error", error)
       return
@@ -198,6 +244,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await removeToken()
       setToken(null)
       setUsersMembership(null)
+      // These stores live outside React and the points are persisted to
+      // AsyncStorage, so without clearing them the next account to sign in on
+      // this device starts with the previous user's cart and balance.
+      useLoyaltyStore.getState().reset()
+      useCartStore.setState({ items: [], cartOperations: 0, error: null })
     } catch (error) {
       console.error("Sign out error: ", error)
     }

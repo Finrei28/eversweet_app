@@ -4,6 +4,8 @@ import { Request, Response } from "express"
 import { Stripe } from "stripe"
 import { membershipBenefits } from "../lib/membership"
 import { getErrorMessage } from "../utils/getError"
+import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
+import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 
 // Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
@@ -321,6 +323,13 @@ export const removeCard = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * How far back an identical order counts as a possible repeat. Long enough to
+ * cover a lost response and the customer restarting the app, short enough that
+ * a genuine second order later in the evening is never questioned.
+ */
+const DUPLICATE_WINDOW_MS = 10 * 60 * 1000
+
 export const createPaymentIntent = async (req: Request, res: Response) => {
   const userId = (req as any).userId
   if (!userId) {
@@ -328,19 +337,104 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     return
   }
   try {
-    const { amount, currency, paymentMethodId } = req.body ?? {}
+    const {
+      amount,
+      currency,
+      paymentMethodId,
+      pickUpTime,
+      eatIn,
+      confirmDuplicate,
+    } = req.body ?? {}
 
     if (!amount || !currency) {
       res.status(400).json({ message: "Amount and currency are required" })
       return
     }
 
+    // Checked here rather than only at order creation because this runs before
+    // the card is charged. `createOrder` runs after, and there is no refund
+    // path, so refusing there would take the customer's money and give them no
+    // order. Optional for now so a build that predates this still checks out;
+    // make it required once those are gone.
+    if (pickUpTime !== undefined) {
+      const check = checkPickUpTime(new Date(pickUpTime), {
+        eatIn: Boolean(eatIn),
+        daysOffKeys: await getDaysOffKeys(),
+      })
+
+      if (!check.ok) {
+        res.status(400).json({ message: check.message })
+        return
+      }
+    }
+
     // Get or create a Stripe customer for this user
     const { customerId } = await getOrCreateCustomerId(userId)
 
+    // The amount is worked out here, from the cart rows, and never taken from
+    // the request: a modified client could otherwise name its own price and pay
+    // a cent for a full order. The client's figure is compared only so a cart
+    // that changed underneath the customer is reported rather than silently
+    // charged at a different price than the one on their screen.
+    const cart = await db.cart.findUnique({
+      where: { userId },
+      include: { cartItems: { include: cartPricingInclude } },
+    })
+
+    if (!cart || cart.cartItems.length === 0) {
+      res.status(400).json({ message: "Your cart is empty" })
+      return
+    }
+
+    const { payableInCents, beforeDiscountInCents, discountInCents } =
+      calculateCartPrice(cart.cartItems)
+
+    if (Math.round(Number(amount)) !== payableInCents) {
+      console.error(
+        `Payment intent amount mismatch for user ${userId}: client sent ${amount}, cart is worth ${payableInCents}.`,
+      )
+      res.status(409).json({
+        message:
+          "Your cart has changed since this total was worked out. Please review it and try again.",
+      })
+      return
+    }
+
+    // The one duplicate the idempotency key cannot catch. If the response to
+    // `createOrder` is lost, the order exists but the app never cleared its
+    // local cart; re-opening it and tapping Place order starts a genuinely
+    // new payment intent, which is by definition a new order. This is the
+    // last point before the card is charged where it can still be questioned,
+    // so ask rather than refuse: ordering the same thing twice is something
+    // people really do.
+    if (!confirmDuplicate) {
+      const duplicate = await db.order.findFirst({
+        where: {
+          appUserId: userId,
+          createdAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+          // Same list price and same discount means the same items at the
+          // same prices, which no coincidence produces within the window.
+          priceInCents: beforeDiscountInCents,
+          discountedAmountInCents: discountInCents,
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, tempOrderId: true, createdAt: true },
+      })
+
+      if (duplicate) {
+        res.status(409).json({
+          code: "POSSIBLE_DUPLICATE",
+          message:
+            "You placed an order for these same items a few minutes ago.",
+          existingOrder: duplicate,
+        })
+        return
+      }
+    }
+
     // Create a payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount,
+      amount: payableInCents,
       currency,
       customer: customerId,
       payment_method: paymentMethodId,

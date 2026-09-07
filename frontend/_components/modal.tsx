@@ -166,6 +166,25 @@ export default function CustomModal({
 
   // --------------------------------------------------------------------
 
+  const buildCustomisation = (
+    customisation: { id: string; name: string; chineseName: string; priceInCents: number },
+    quantity: number,
+  ) => ({
+    id: customisation.id,
+    name: customisation.name,
+    chineseName: customisation.chineseName,
+    priceInCents: customisation.priceInCents,
+    discountedAmountInCents: calculateMembershipDiscount(
+      customisation.priceInCents,
+      usersMembership,
+    ),
+    quantity,
+  })
+
+  // Both handlers work out the price change up front and then apply a single
+  // state update each. Calling setCustomisationPrice from inside the
+  // setCustomisations updater made the updater impure, so StrictMode's double
+  // invoke applied the price twice.
   const handleIncrease = (ingredientId: string) => {
     const customisation = availableCustomisations?.find(
       (c) => c.id === ingredientId,
@@ -173,52 +192,32 @@ export default function CustomModal({
 
     if (!customisation) return
 
-    setCustomisations((prev) => {
-      const existingItem = prev.find((item) => item.id === ingredientId)
+    const existingItem = customisations.find((item) => item.id === ingredientId)
 
-      if (existingItem) {
-        // If the customization already exists, increase the quantity
-        const newQuantity = existingItem.quantity + 1
-        if (newQuantity === 1) {
-          return prev.filter((item) => item.id !== ingredientId)
-        }
+    if (!existingItem) {
+      // First time this topping is added on top of the dessert's defaults.
+      setCustomisationPrice((prev) => prev + customisation.priceInCents)
+      setCustomisations((prev) => [...prev, buildCustomisation(customisation, 1)])
+      return
+    }
 
-        return prev.map((item) => {
-          if (item.id === ingredientId) {
-            const included = selectedDessert.ingredients.some(
-              (ingredient) => ingredient.id === ingredientId,
-            )
+    if (existingItem.quantity === 0) {
+      // The ingredient was explicitly removed; putting it back restores the
+      // dessert's default, which costs nothing.
+      setCustomisations((prev) =>
+        prev.filter((item) => item.id !== ingredientId),
+      )
+      return
+    }
 
-            if (!included || item.quantity >= 1) {
-              // not inclided or Increase price only if crossing 1 → 2 //
-
-              setCustomisationPrice((prev) => prev + customisation.priceInCents)
-            }
-
-            return { ...item, quantity: newQuantity }
-          }
-          return item
-        })
-      } else {
-        // If the customization doesn't exist, add a new item to the state
-        const newCustomization = {
-          id: customisation.id,
-          name: customisation.name,
-          chineseName: customisation.chineseName,
-          priceInCents: customisation.priceInCents,
-          discountedAmountInCents: calculateMembershipDiscount(
-            customisation.priceInCents,
-            usersMembership,
-          ),
-          quantity: 1, // Set initial quantity to 1
-        }
-
-        // Increase price if this is the first customization
-        setCustomisationPrice((prev) => prev + customisation.priceInCents)
-
-        return [...prev, newCustomization] // Add new customization to the state
-      }
-    })
+    setCustomisationPrice((prev) => prev + customisation.priceInCents)
+    setCustomisations((prev) =>
+      prev.map((item) =>
+        item.id === ingredientId
+          ? { ...item, quantity: item.quantity + 1 }
+          : item,
+      ),
+    )
   }
 
   const handleDecrease = (ingredientId: string) => {
@@ -227,62 +226,29 @@ export default function CustomModal({
     )
     if (!customisation) return
 
-    setCustomisations((prev) => {
-      const existingItem = prev.find((item) => item.id === ingredientId)
+    const existingItem = customisations.find((item) => item.id === ingredientId)
 
-      const included = selectedDessert.ingredients.some(
-        (ingredient) => ingredient.id === ingredientId,
-      )
+    if (!existingItem) {
+      // Removing an ingredient the dessert includes by default: tracked as an
+      // explicit 0 so the order knows to leave it out. Nothing to refund.
+      setCustomisations((prev) => [...prev, buildCustomisation(customisation, 0)])
+      return
+    }
 
-      if (existingItem) {
-        // If the customization exists and quantity is more than 0, decrease the quantity
-        if (existingItem.quantity > 0) {
-          const newQuantity = existingItem.quantity - 1
-          if (existingItem.quantity === 1) {
-            setCustomisationPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents),
-            )
-            return prev.filter((item) => item.id !== ingredientId)
-          }
-          if (!included) {
-            setCustomisationPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents),
-            )
-            if (newQuantity === 0)
-              return prev.filter((item) => item.id !== ingredientId)
-          }
+    if (existingItem.quantity <= 0) return
 
-          // Decrease price only if crossing 2 → 1
-          else if (existingItem.quantity > 1) {
-            setCustomisationPrice((prev) =>
-              Math.max(0, prev - customisation.priceInCents),
-            )
-          }
-
-          // Return the updated array with the decreased quantity
-          return prev.map((item) =>
-            item.id === ingredientId
-              ? { ...item, quantity: newQuantity }
-              : item,
-          )
-        }
-      } else {
-        const newCustomization = {
-          id: customisation.id,
-          name: customisation.name,
-          chineseName: customisation.chineseName,
-          priceInCents: customisation.priceInCents,
-          discountedAmountInCents: calculateMembershipDiscount(
-            customisation.priceInCents,
-            usersMembership,
-          ),
-          quantity: 0, // Set initial quantity to 0
-        }
-
-        return [...prev, newCustomization]
-      }
-      return prev // Return the unchanged state if the customization doesn't exist or quantity is 0
-    })
+    // Every step down from a charged quantity refunds exactly one unit.
+    setCustomisationPrice((prev) =>
+      Math.max(0, prev - customisation.priceInCents),
+    )
+    setCustomisations((prev) =>
+      prev.flatMap((item) => {
+        if (item.id !== ingredientId) return [item]
+        const newQuantity = item.quantity - 1
+        // Back to zero extras means back to the dessert's default state.
+        return newQuantity === 0 ? [] : [{ ...item, quantity: newQuantity }]
+      }),
+    )
   }
 
   const insets = useSafeAreaInsets()
@@ -564,15 +530,18 @@ export default function CustomModal({
                             discountedAmountInCents: 0,
                           })
                         } else {
-                          await addItem({
-                            dessert: selectedDessert,
-                            quantity: 1,
-                            loyaltyPointsUsed:
-                              type === "points" ? points : null,
-                            customisations: customisations,
-                            itemPriceInCents: type === "points" ? 0 : price,
-                            offerId: offerId ? offerId : null,
-                          })
+                          await addItem(
+                            {
+                              dessert: selectedDessert,
+                              quantity: 1,
+                              loyaltyPointsUsed:
+                                type === "points" ? points : null,
+                              customisations: customisations,
+                              itemPriceInCents: type === "points" ? 0 : price,
+                              offerId: offerId ? offerId : null,
+                            },
+                            usersMembership,
+                          )
                         }
                       } finally {
                         const modalExists = useCartStore
