@@ -815,7 +815,15 @@ export const createOrder = async (req: Request, res: Response) => {
                     id: dessertItem.dessert.id, // Ensure dessert exists before connecting
                   },
                 },
-                offerId: dessertItem.offerId, // connects offer order item to offer by using foreign key
+                // Connected through the relation rather than written as a
+                // foreign key. Prisma will not accept `offerId` in the same
+                // create as `dessert: { connect }`: one belongs to its checked
+                // create input and the other to its unchecked one, and mixing
+                // the two fails the whole order with "Unknown argument
+                // `offerId`".
+                ...(dessertItem.offerId
+                  ? { offer: { connect: { id: dessertItem.offerId } } }
+                  : {}),
                 quantity: dessertItem.quantity,
                 priceInCents: dessertItem.itemPriceInCents, // get price from order item
                 discountedAmountInCents: dessertItem.discountedAmountInCents,

@@ -166,7 +166,6 @@ describe("website order announcement, end to end", () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ status: "delivered" })
 
-    expect(received).resolves.not.toBeNull()
     const order = (await received) as Record<string, unknown>
     expect(order.id).toBe("order-1")
     expect(order.tempOrderId).toBe("6001")
