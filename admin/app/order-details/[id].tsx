@@ -3,7 +3,12 @@
 import { CustomerDetails } from "@/components/customer-details"
 import { StatusBadge } from "@/components/status-badge"
 import { StatusUpdateModal } from "@/components/status-update-modal"
-import { formatCurrency, formatDate } from "@/lib/formatters"
+import {
+  formatCurrency,
+  formatCustomisation,
+  formatDate,
+  isRemoval,
+} from "@/lib/formatters"
 import { OrderStatus } from "@/lib/types"
 import printerService from "@/services/printer-service"
 import { useOrderStore } from "@/store/order-store"
@@ -239,16 +244,38 @@ export default function OrderDetails() {
 
                     {item.customisations && item.customisations.length > 0 && (
                       <View className="mt-1 bg-gray-50 p-2 rounded-md">
-                        {item.customisations.map((custom) => (
-                          <View
-                            key={custom.id}
-                            className="flex-row justify-between items-center mb-1"
-                          >
-                            <Text className="text-gray-600 text-sm">
-                              • {custom.customisation.name}: {custom.quantity}x
-                            </Text>
-                          </View>
-                        ))}
+                        {item.customisations.map((custom) => {
+                          // A quantity of 0 is a removal, not "none of it" —
+                          // said in words and in colour rather than left to
+                          // whoever is reading to work out from the number.
+                          const removed = isRemoval(custom)
+
+                          return (
+                            <View
+                              key={custom.id}
+                              className="flex-row items-center mb-1"
+                            >
+                              <Ionicons
+                                name={
+                                  removed
+                                    ? "close-circle"
+                                    : "add-circle-outline"
+                                }
+                                size={15}
+                                color={removed ? "#E11D48" : "#4B5563"}
+                              />
+                              <Text
+                                className={`ml-1 text-sm ${
+                                  removed
+                                    ? "font-bold text-rose-600"
+                                    : "text-gray-600"
+                                }`}
+                              >
+                                {formatCustomisation(custom)}
+                              </Text>
+                            </View>
+                          )
+                        })}
                       </View>
                     )}
                   </View>

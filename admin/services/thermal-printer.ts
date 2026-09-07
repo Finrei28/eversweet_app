@@ -1,5 +1,20 @@
-import { formatTime, getCollectionTime } from "@/lib/formatters"
 import { Order } from "@/lib/types"
+import {
+  ALIGN_CENTER,
+  ALIGN_LEFT,
+  ALIGN_RIGHT,
+  BOLD_OFF,
+  BOLD_ON,
+  buildReceipt,
+  CUT_PAPER,
+  ESC,
+  GS,
+  INIT,
+  LINE_FEED,
+  SIZE_BODY,
+  SIZE_HEADING,
+  SIZE_SMALL,
+} from "./receipt"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { Buffer } from "buffer"
 import EventEmitter from "eventemitter3"
@@ -16,19 +31,8 @@ import { check, PERMISSIONS, request, RESULTS } from "react-native-permissions"
 const PRINTERS_STORAGE_KEY = "thermal_printers"
 const DEFAULT_PRINTER_KEY = "default_thermal_printer"
 
-// ESC/POS Commands
-export const ESC = "\x1B"
-export const GS = "\x1D"
-export const INIT = ESC + "@"
-export const ALIGN_CENTER = ESC + "a" + "\x01"
-export const ALIGN_LEFT = ESC + "a" + "\x00"
-export const ALIGN_RIGHT = ESC + "a" + "\x02"
-export const BOLD_ON = ESC + "E" + "\x01"
-export const BOLD_OFF = ESC + "E" + "\x00"
-export const TEXT_SIZE_NORMAL = GS + "!" + "\x10"
-export const TEXT_SIZE_LARGE = GS + "!" + "\x11"
-export const LINE_FEED = "\x0A"
-export const CUT_PAPER = GS + "V" + "\x41" + "\x03"
+// ESC/POS commands and the receipt layout itself live in ./receipt, which is
+// pure text and so can be tested without a printer.
 
 // Printer types and interfaces
 export type PrinterType = "bluetooth"
@@ -585,13 +589,14 @@ class ThermalPrinterService {
       testText += INIT
       testText += ALIGN_CENTER
       testText += BOLD_ON
-      testText += TEXT_SIZE_LARGE
+      testText += SIZE_HEADING
       testText += "TEST PAGE"
       testText += LINE_FEED
-      testText += TEXT_SIZE_LARGE
+      testText += SIZE_BODY
       testText += "Printer Test"
       testText += LINE_FEED + LINE_FEED
       testText += BOLD_OFF
+      testText += SIZE_SMALL
 
       // Text formatting tests
       testText += ALIGN_LEFT
@@ -622,9 +627,9 @@ class ThermalPrinterService {
       testText += "Bold text"
       testText += BOLD_OFF
       testText += LINE_FEED
-      testText += TEXT_SIZE_LARGE
+      testText += SIZE_HEADING
       testText += "Large text"
-      testText += TEXT_SIZE_LARGE
+      testText += SIZE_SMALL
       testText += LINE_FEED + LINE_FEED
 
       // Character test
@@ -657,7 +662,9 @@ class ThermalPrinterService {
   }
 
   /**
-   * Print a receipt
+   * Print a receipt.
+   *
+   * The docket itself is `buildReceipt` — this only puts it on the wire.
    */
   async printReceipt(orderData: Order): Promise<PrintResult> {
     if (!this.isConnected()) {
@@ -665,117 +672,7 @@ class ThermalPrinterService {
     }
 
     try {
-      let receiptText = ""
-
-      // Initialize printer
-      receiptText += INIT
-
-      // Add header
-      receiptText += ALIGN_CENTER
-      receiptText += BOLD_ON
-      receiptText += TEXT_SIZE_LARGE
-      receiptText += "EVERSWEET"
-      receiptText += LINE_FEED
-      receiptText += TEXT_SIZE_NORMAL
-      receiptText += "5D/119 Meadowland Drive"
-      receiptText += LINE_FEED
-      receiptText += "Somerville, Auckland 2014"
-      receiptText += LINE_FEED + LINE_FEED
-      receiptText += BOLD_OFF
-
-      // Order info
-      receiptText += ALIGN_LEFT
-      receiptText += "Order #: " + orderData.tempOrderId
-      receiptText += LINE_FEED
-      receiptText += "Date: " + getCollectionTime(new Date())
-      receiptText += LINE_FEED
-      receiptText += BOLD_ON
-      receiptText += orderData.dineIn ? "EAT IN" : "TAKE AWAY"
-      receiptText += BOLD_OFF
-      receiptText += LINE_FEED
-      receiptText +=
-        "Customer: " +
-        orderData.customerFirstName +
-        " " +
-        orderData.customerLastName
-      receiptText += LINE_FEED
-      receiptText += LINE_FEED
-
-      // Items
-      receiptText += BOLD_ON
-      receiptText += "ITEMS"
-      receiptText += BOLD_OFF
-      receiptText += LINE_FEED
-      receiptText += "--------------------------------"
-      receiptText += LINE_FEED
-
-      orderData.desserts.forEach((item) => {
-        receiptText += item.quantity + "x " + item.dessert.name
-        receiptText += LINE_FEED
-
-        // Add customizations if any
-        if (item.customisations && item.customisations.length > 0) {
-          item.customisations.forEach((mod) => {
-            receiptText +=
-              mod.quantity === 0
-                ? "   - " + mod.customisation.name
-                : "   + " + mod.customisation.name + ": " + mod.quantity + "x"
-            receiptText += LINE_FEED
-          })
-        }
-
-        const customisationPrice = item.customisations.reduce(
-          (acc, customisation) =>
-            acc +
-            (customisation.quantity > 0
-              ? (customisation.customisation.priceInCents -
-                  customisation.discountedAmountInCents) *
-                customisation.quantity
-              : 0),
-          0,
-        )
-
-        const pricePerItem =
-          (item.priceInCents -
-            item.discountedAmountInCents +
-            customisationPrice) /
-          100
-
-        // Add item price
-        receiptText += ALIGN_RIGHT
-        receiptText += "$" + (pricePerItem * item.quantity).toFixed(2)
-        receiptText += ALIGN_LEFT
-        receiptText += LINE_FEED
-      })
-
-      receiptText += "--------------------------------"
-      receiptText += LINE_FEED
-
-      // Totals
-      const total =
-        (orderData.priceInCents - orderData.discountedAmountInCents) / 100
-      receiptText += ALIGN_RIGHT
-      receiptText += "Subtotal: $" + total.toFixed(2)
-      receiptText += LINE_FEED
-      receiptText += "GST: $" + (orderData.GST / 100).toFixed(2)
-      receiptText += LINE_FEED
-
-      receiptText += BOLD_ON
-      receiptText += "TOTAL: $" + total.toFixed(2)
-      receiptText += BOLD_OFF
-      receiptText += LINE_FEED + LINE_FEED
-
-      // Footer
-      receiptText += ALIGN_CENTER
-      receiptText += `Desired ${orderData.dineIn ? "eat in" : "pick up"} time`
-      receiptText += LINE_FEED
-      receiptText += formatTime(new Date(orderData.pickUpTime))
-      receiptText += LINE_FEED + LINE_FEED + LINE_FEED + LINE_FEED
-
-      // Cut paper
-      receiptText += CUT_PAPER
-
-      return await this.printRawText(receiptText)
+      return await this.printRawText(buildReceipt(orderData))
     } catch (error) {
       console.error("Error printing receipt:", error)
       return { success: false, message: `Error printing receipt: ${error}` }
