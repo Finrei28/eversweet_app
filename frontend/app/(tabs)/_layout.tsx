@@ -1,11 +1,9 @@
 import { Image } from "react-native"
-import React, { useEffect } from "react"
+import React from "react"
 import { Tabs } from "expo-router"
 import Entypo from "@expo/vector-icons/Entypo"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
-import { useAuth } from "@/store/authProvider"
 
 export default function _layout() {
   return (

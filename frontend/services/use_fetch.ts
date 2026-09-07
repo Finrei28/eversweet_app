@@ -5,7 +5,9 @@ export default function useFetch<T>(
   autoFetch = true
 ) {
   const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Follows autoFetch: starting true with autoFetch off left callers showing a
+  // loader for a request that was never going to be made.
+  const [loading, setLoading] = useState(autoFetch)
   const [error, setError] = useState<Error | null>(null)
 
   // Call sites pass an inline arrow, so fetchFunction is a new identity every
@@ -47,11 +49,14 @@ export default function useFetch<T>(
     setError(null)
   }, [])
 
+  // refetch is stable and autoFetch is a call-site constant, so this runs once
+  // on mount — which is the intent. Listing them changes nothing but keeps the
+  // exhaustive-deps rule from having to be silenced.
   useEffect(() => {
     if (autoFetch) {
       void refetch()
     }
-  }, [])
+  }, [autoFetch, refetch])
 
   return { data, loading, error, refetch, reset }
 }

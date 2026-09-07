@@ -4,18 +4,12 @@ import React, { useEffect, useRef, useState } from "react"
 import {
   View,
   TextInput,
-  Platform,
-  ScrollView,
   Text,
-  TouchableWithoutFeedback,
-  KeyboardAvoidingView,
-  Keyboard,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
 } from "react-native"
 import * as Clipboard from "expo-clipboard"
-import PageHeader from "./pageheader"
 import {
   checkVerificationCode,
   getResetPasswordCode,
@@ -43,7 +37,7 @@ const OTPInput = ({
   isLoading: boolean
 }) => {
   const [code, setCode] = useState<string[]>(Array(6).fill(""))
-  const inputsRef = useRef<Array<TextInput | null>>([])
+  const inputsRef = useRef<(TextInput | null)[]>([])
   const router = useRouter()
   const { signInProvider } = useAuth()
   const [counter, setCounter] = useState(0)

@@ -18,7 +18,6 @@ import {
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
 import { isEqual } from "lodash"
-import * as Crypto from "expo-crypto"
 import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
@@ -442,7 +441,10 @@ export const useCartStore = create<CartState>((set, get) => ({
   decrementItem: async (id) => {
     set({
       items: get().items.map((i) =>
-        i.id === id ? { ...i, quantity: i.quantity - 1 } : i,
+        // Floored at one: removing the last one is `removeItem`, and only the
+        // button's disabled state stopped a zero or negative quantity being
+        // sent to the server.
+        i.id === id ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i,
       ),
     })
   },

@@ -1,24 +1,43 @@
 import { getEstimatedPickUpTime } from "@/services/api"
-import { StoreHours } from "@/utils/types"
+import { isDayOff, TradingCalendar } from "./businessHours"
 import { addNZDays, getNZDayName, nzTimeOnSameDay } from "./nzTime"
 
-export function getOpenCloseTime(date: Date | null, storeHours: StoreHours) {
+/**
+ * How far ahead `getNextOpenDay` will look for a trading day. A run of days off
+ * can close the store for longer than a week, so this reaches past the seven
+ * days the weekly hours alone would need.
+ */
+const MAX_DAYS_AHEAD = 60
+
+export function getOpenCloseTime(
+  date: Date | null,
+  { storeHours, daysOff }: TradingCalendar,
+) {
   if (!date) {
     return { openTime: null, closeTime: null, dayName: null }
   }
   const dayName = getNZDayName(date)
 
-  const [openStr, closeStr] = storeHours[dayName] ?? [null, null]
+  // A day off overrides the weekly hours, so the day reads as shut and every
+  // caller that asks for its opening or closing time gets nothing back.
+  const [openStr, closeStr] = isDayOff(date, daysOff)
+    ? [null, null]
+    : (storeHours[dayName] ?? [null, null])
   const openTime = nzTimeOnSameDay(date, openStr)
   const closeTime = nzTimeOnSameDay(date, closeStr)
   return { openTime, closeTime, dayName }
 }
 
-export function getNextOpenDay(date: Date, storeHours: StoreHours) {
-  for (let i = 0; i < 7; i++) {
+export function getNextOpenDay(date: Date, calendar: TradingCalendar) {
+  const { storeHours, daysOff } = calendar
+
+  for (let i = 0; i < MAX_DAYS_AHEAD; i++) {
     // Step through New Zealand calendar days rather than the device's, so a
     // phone set to another timezone doesn't skip or repeat a trading day.
     const candidate = addNZDays(date, i)
+
+    if (isDayOff(candidate, daysOff)) continue
+
     const hours = storeHours[getNZDayName(candidate)]
 
     if (hours && hours[0] && hours[1]) {
@@ -62,7 +81,7 @@ export function getLastOrderTime(
 export async function getNextValidPickupTime(
   selected: Date,
   totalItems: number,
-  storeHours: StoreHours,
+  calendar: TradingCalendar,
   {
     earliestReadyTime,
     lastOrderOffsetMinutes = LAST_ORDER_OFFSET_MINUTES.pickup,
@@ -73,14 +92,16 @@ export async function getNextValidPickupTime(
   const date = new Date(selected)
 
   const nextOpeningFrom = (from: Date) => {
-    const nextOpenDay = getNextOpenDay(from, storeHours)
-    return getOpenCloseTime(nextOpenDay, storeHours).openTime
+    const nextOpenDay = getNextOpenDay(from, calendar)
+    return getOpenCloseTime(nextOpenDay, calendar).openTime
   }
 
-  const { openTime, closeTime } = getOpenCloseTime(date, storeHours)
+  const { openTime, closeTime } = getOpenCloseTime(date, calendar)
 
+  // Covers a day off too: `getOpenCloseTime` reports one as having no hours,
+  // so the search moves on to the next day the store is actually trading.
   if (!openTime || !closeTime) {
-    return getNextOpenDay(date, storeHours)
+    return getNextOpenDay(date, calendar)
   }
 
   // The counter stops taking orders before the doors close. This rule was

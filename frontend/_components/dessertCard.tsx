@@ -3,7 +3,7 @@ import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
 import React, { useMemo } from "react"
-import { View, Image, Text, TouchableOpacity, Dimensions } from "react-native"
+import { View, Image, Text, TouchableOpacity } from "react-native"
 
 type DessertCardProps = {
   dessert: Dessert
@@ -103,3 +103,5 @@ export const DessertCard = React.memo(
     )
   },
 )
+
+DessertCard.displayName = "DessertCard"

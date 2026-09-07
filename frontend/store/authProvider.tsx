@@ -1,9 +1,12 @@
 import { removeToken } from "@/services/authToken"
+import { setUnauthorizedHandler } from "@/services/apiClient"
 import React, {
   createContext,
   useContext,
   useState,
   useEffect,
+  useMemo,
+  useRef,
   ReactNode,
 } from "react"
 import * as SecureStore from "expo-secure-store"
@@ -17,10 +20,12 @@ import {
 } from "@/utils/types"
 import { getMembershipDetails, getUsersMembership } from "@/services/stripe-api"
 import {
+  getDaysOff,
   getLeaderboardDetails,
   getStoreHours,
   getUserProfile,
 } from "@/services/api"
+import { DaysOff, toDaysOff, TradingCalendar } from "@/lib/businessHours"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
 import { removePushToken, syncPushToken } from "@/services/notifications"
@@ -48,7 +53,10 @@ interface AuthContextType {
   signOutProvider: () => Promise<void>
   authLoading: boolean
   dataLoading: boolean
+  /** Weekly hours on their own — for display. Use `tradingCalendar` to decide
+   * whether the store is actually open, since that also honours days off. */
   storeHours: StoreHours
+  tradingCalendar: TradingCalendar
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -75,20 +83,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [membershipDetails, setMembershipDetails] =
     useState<MembershipDetails | null>(null)
   const [storeHours, setStoreHours] = useState<StoreHours>(fallbackHours)
+  const [daysOff, setDaysOff] = useState<DaysOff>(() => new Set<string>())
+  const signingOut = useRef(false)
+
+  // Memoised because checkout keys effects off this value; a fresh object each
+  // render would restart the pickup-time lookup in a loop.
+  const tradingCalendar = useMemo<TradingCalendar>(
+    () => ({ storeHours, daysOff }),
+    [storeHours, daysOff],
+  )
+
+  useEffect(() => {
+    // Everything signOutProvider touches is either a state setter or a module
+    // level store, so the first closure stays correct for the app's lifetime.
+    setUnauthorizedHandler(() => {
+      void signOutProvider()
+    })
+
+    return () => setUnauthorizedHandler(null)
+  }, [])
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
     const initialize = async () => {
       try {
-        const [storeHoursResult, storedToken] = await Promise.all([
-          getStoreHours().catch((error) => {
-            console.error("Failed to fetch store hours:", error)
-            return fallbackHours
-          }),
-          SecureStore.getItemAsync("token"),
-        ])
+        const [storeHoursResult, daysOffResult, storedToken] =
+          await Promise.all([
+            getStoreHours().catch((error) => {
+              console.error("Failed to fetch store hours:", error)
+              return fallbackHours
+            }),
+            // An empty list on failure keeps the store on its weekly hours
+            // rather than shutting ordering down over a dropped request. The
+            // order endpoint is the backstop for a day off missed this way.
+            getDaysOff().catch((error) => {
+              console.error("Failed to fetch days off:", error)
+              return [] as Date[]
+            }),
+            SecureStore.getItemAsync("token"),
+          ])
 
         setStoreHours(storeHoursResult)
+        setDaysOff(toDaysOff(daysOffResult))
 
         if (!storedToken) {
           return
@@ -239,6 +275,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   const signOutProvider = async () => {
+    // Re-entrancy guard. signOutProvider calls removePushToken, which is an
+    // authenticated request; if that returns 401 it fires the unauthorized
+    // handler, which calls signOutProvider again. Without this the two call
+    // each other until the stack gives out.
+    if (signingOut.current) return
+    signingOut.current = true
+
     try {
       await removePushToken()
       await removeToken()
@@ -251,6 +294,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       useCartStore.setState({ items: [], cartOperations: 0, error: null })
     } catch (error) {
       console.error("Sign out error: ", error)
+    } finally {
+      signingOut.current = false
     }
   }
 
@@ -270,6 +315,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         authLoading,
         dataLoading,
         storeHours,
+        tradingCalendar,
       }}
     >
       {children}

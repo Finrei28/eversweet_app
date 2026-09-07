@@ -1,13 +1,11 @@
 "use client"
 import { View, Text, ScrollView } from "react-native"
-import { useRouter } from "expo-router"
 import CustomHeader from "@/_components/custom-header"
 import useFetch from "@/services/use_fetch"
 import { getPrivacyPolicy } from "@/services/api"
 import BouncingLoader from "@/_components/loader"
 
 export default function PrivacyPolicy() {
-  const router = useRouter()
   const { data: privacyPolicy, loading } = useFetch(getPrivacyPolicy)
 
   if (loading) {

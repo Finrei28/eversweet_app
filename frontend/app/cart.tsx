@@ -12,7 +12,6 @@ import CustomHeader from "@/_components/custom-header"
 import { router } from "expo-router"
 import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
-import BouncingLoader from "@/_components/loader"
 import { CartItems } from "@/_components/cartitems"
 
 export default function CartPage() {
@@ -20,7 +19,6 @@ export default function CartPage() {
   const route = useRoute()
   const { usersMembership } = useAuth()
   const cartItems = useCartStore((state) => state.items)
-  const cartOperations = useCartStore((state) => state.cartOperations)
   const clearCart = useCartStore((state) => state.clearCart)
 
   const getTotalCost = useCartStore((state) => state.getTotalCost)

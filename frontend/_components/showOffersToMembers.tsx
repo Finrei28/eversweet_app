@@ -82,8 +82,6 @@ export default function ShowOffers({ usersMembership }: ShowOffersProps) {
             redemption?.status === "AVAILABLE") &&
           usersMembership.paymentStatus === "SUCCESS"
         const alreadyRedeemed = usedCount >= offer.limit
-        const itemPriceInCents = offer.itemPriceInCents ?? null
-        const discountAmount = offer.discountAmount ?? null
 
         return (
           <View

@@ -9,11 +9,8 @@ import * as Notifications from "expo-notifications"
 import { useLoyaltyStore } from "@/store/points"
 import { getToken } from "@/services/authToken"
 import {
-  registerForPushNotificationsAsync,
-  savePushToken,
   handleNotification,
   hasMembershipPopupExpired,
-  getPushToken,
   syncPushToken,
 } from "@/services/notifications"
 import { AuthProvider } from "@/store/authProvider"

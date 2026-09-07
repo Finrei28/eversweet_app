@@ -1,5 +1,5 @@
-import { Alert, Platform } from "react-native"
-import { useStripe } from "@stripe/stripe-react-native"
+import { Alert } from "react-native"
+import { PaymentSheet, useStripe } from "@stripe/stripe-react-native"
 import {
   createSetupIntent,
   setCardForMembershipPayments,
@@ -11,30 +11,47 @@ import {
  * @param refetchCards - Callback to refresh the list of saved cards after success/cancellation.
  */
 
-const customAppearance = {
-  font: {
-    family:
-      Platform.OS === "android" ? "avenirnextregular" : "AvenirNext-Regular",
+/**
+ * Eversweet's palette applied to the Stripe sheet, so saving a card does not
+ * drop the customer onto a stock white form. Values are the tokens from
+ * tailwind.config.ts rather than fresh colours, so the sheet moves with the
+ * theme instead of drifting from it.
+ *
+ * No `font` block: the previous one named "AvenirNext-Regular" / "avenirnext
+ * regular", and only SpaceMono is bundled in assets/fonts, so it resolved to
+ * nothing on Android. Stripe's platform default is used until a brand font is
+ * actually shipped with the app.
+ */
+const eversweetAppearance: PaymentSheet.AppearanceParams = {
+  colors: {
+    primary: "#e6aa6b", // primary.DEFAULT
+    background: "#fcf8f3", // background
+    componentBackground: "#ffffff", // card.DEFAULT
+    componentBorder: "#e5e5e5", // border
+    componentDivider: "#e5e5e5",
+    primaryText: "#0a0a0a", // foreground
+    secondaryText: "#737373", // muted.foreground
+    componentText: "#0a0a0a",
+    placeholderText: "#737373",
+    icon: "#737373",
+    error: "#ef4444", // destructive.DEFAULT
   },
   shapes: {
-    borderRadius: 12,
-    borderWidth: 0.5,
+    // 8px is the app's --radius (0.5rem), the same corner its cards and inputs
+    // use, so the sheet's fields match the ones behind it.
+    borderRadius: 8,
+    borderWidth: 1,
   },
   primaryButton: {
-    shapes: {
-      borderRadius: 20,
+    colors: {
+      background: "#e6aa6b",
+      text: "#ffffff",
+      border: "#e6aa6b",
     },
-  },
-  colors: {
-    primary: "#fcfdff",
-    background: "#ffffff",
-    componentBackground: "#f3f8fa",
-    componentBorder: "#f3f8fa",
-    componentDivider: "#000000",
-    primaryText: "#000000",
-    secondaryText: "#000000",
-    componentText: "#000000",
-    placeholderText: "#73757b",
+    shapes: {
+      // Matches the rounded-lg on "Place Order" and "Add New Card".
+      borderRadius: 8,
+    },
   },
 }
 
@@ -61,9 +78,10 @@ export const openPaymentSheetForSetup = async (
       customerId: customer,
       customerEphemeralKeySecret: ephemeralKey,
       setupIntentClientSecret: setupIntent,
-      merchantDisplayName: "eversweet",
+      merchantDisplayName: "Eversweet",
       allowsDelayedPaymentMethods: false,
       returnURL: "eversweet://stripe-redirect",
+      appearance: eversweetAppearance,
     })
     if (initError) throw initError
 

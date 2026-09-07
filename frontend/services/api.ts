@@ -24,6 +24,7 @@ import {
   Order,
 } from "@/utils/types"
 import { formatDayStamp } from "@/lib/formatters"
+import { normaliseStoreHours } from "@/lib/businessHours"
 import { getErrorMessage } from "@/utils/getError"
 import { apiFetch, apiRequest } from "./apiClient"
 
@@ -229,6 +230,7 @@ export async function createOrder(
   pickUpTime: Date,
   eatIn: boolean,
   paymentIntentId: string | null,
+  idempotencyKey: string,
 ) {
   // Kept on apiFetch: a failure here has to distinguish "the order may already
   // exist" from "it definitely does not", which no single message can carry.
@@ -242,10 +244,19 @@ export async function createOrder(
       paymentIntentId,
     },
     authMessage: UNAUTHENTICATED,
+    idempotencyKey,
   })
 
   if (res.status === 401) {
     throw new Error("Please sign in to place an order")
+  }
+
+  // The same order is already being placed on the server. Not a failure, and
+  // above all not a reason to send a paid customer back to pay again.
+  if (res.status === 409 && data?.inProgress) {
+    throw new Error(
+      "Your order is already being placed. Check your orders in a moment.",
+    )
   }
 
   if (res.status === 400) {
@@ -467,9 +478,26 @@ export const resetPassword = async (
 }
 
 export const getStoreHours = async (): Promise<StoreHours> =>
-  apiRequest<StoreHours>("/api/getStoreHours", {
-    errorMessage: "Error: Could not get store hours",
+  // Normalised on the way in: the API keys these by lower-case day name, while
+  // everything downstream looks them up by the capitalised name date-fns gives.
+  normaliseStoreHours(
+    await apiRequest<StoreHours>("/api/getStoreHours", {
+      errorMessage: "Error: Could not get store hours",
+    }),
+  )
+
+/**
+ * One-off dates the store is shut, on top of its weekly hours. The admin app
+ * writes these as midnight on the chosen day, so the instant is only meaningful
+ * once resolved back to a New Zealand calendar day — see `toDaysOff`.
+ */
+export const getDaysOff = async (): Promise<Date[]> => {
+  const { dates } = await apiRequest<{ dates: string[] }>("/api/getDaysOff", {
+    errorMessage: "Error: Could not get the store's days off",
   })
+
+  return dates.map((date) => new Date(date))
+}
 
 export const getStoreInfo = async (): Promise<StoreInfo> =>
   apiRequest<StoreInfo>("/api/getStoreInfo", {

@@ -1,4 +1,10 @@
-// This file contains the API calls to your backend for Stripe operations
+// Backend calls for Stripe operations.
+//
+// These all went through their own copy of fetch + token header + status
+// handling, which meant they never reached the 401 handling in apiClient: a
+// session that expired left the membership and card screens erroring instead of
+// signing the customer out. Going through `apiRequest` gets that for free, and
+// `authMessage` is what marks each of these as needing a token.
 import {
   MembershipDetails,
   MembershipStatus,
@@ -7,123 +13,57 @@ import {
   SetUpIntent,
   UsersMembership,
 } from "@/utils/types"
-import { getToken } from "./authToken"
+import { apiFetch, apiRequest } from "./apiClient"
 import { getErrorMessage } from "@/utils/getError"
+
+const UNAUTHENTICATED = "Unauthenticated"
+const NO_MEMBERSHIP = "No membership found"
+
 /**
  * Fetches saved cards from the server
  * @returns Array of saved payment methods
  */
-const url = process.env.EXPO_PUBLIC_URL!
-
 export const getSavedCards = async (): Promise<SavedCard[]> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(`${url}/api/stripe/paymentMethods`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw new Error(getErrorMessage(data, "Failed to fetch payment methods"))
-    }
+  const data = await apiRequest<{ paymentMethods?: SavedCard[] }>(
+    "/api/stripe/paymentMethods",
+    {
+      authMessage: UNAUTHENTICATED,
+      fallback: "Failed to fetch payment methods",
+    },
+  )
 
-    return data.paymentMethods || []
-  } catch (error) {
-    console.error("Error fetching saved cards:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Failed to fetch saved cards. Please try again."),
-    )
-  }
+  return data.paymentMethods ?? []
 }
 
-export const createSetupIntent = async (): Promise<SetUpIntent> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(`${url}/api/stripe/createSetupIntent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw new Error(getErrorMessage(data, "Failed to create setup intent"))
-    }
-    return data
-  } catch (error) {
-    console.error("Error creating setup intent:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Failed to create setup intent. Please try again."),
-    )
-  }
-}
+export const createSetupIntent = async (): Promise<SetUpIntent> =>
+  apiRequest<SetUpIntent>("/api/stripe/createSetupIntent", {
+    method: "POST",
+    authMessage: UNAUTHENTICATED,
+    fallback: "Failed to create setup intent",
+  })
 
 export const retryPayment = async () => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(`${url}/api/stripe/retryPayment`, {
+  const data = await apiRequest<{ success: boolean }>(
+    "/api/stripe/retryPayment",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw new Error(getErrorMessage(data, "Retry payment failed"))
-    }
-    return data.success
-  } catch (error) {
-    console.error("Error retrying payment:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Payment retry failed. Please try again."),
-    )
-  }
+      authMessage: UNAUTHENTICATED,
+      fallback: "Retry payment failed",
+    },
+  )
+
+  return data.success
 }
 
 export const setCardForMembershipPayments = async (
   setupIntentId: string,
 ): Promise<void> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(
-      `${url}/api/stripe/setCardForMembershipPayments`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ setupIntentId }),
-      },
-    )
-
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(getErrorMessage(errorData, "Failed to save card"))
-    }
-  } catch (error) {
-    console.error("Error saving card:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Failed to save card. Please try again."),
-    )
-  }
+  await apiRequest("/api/stripe/setCardForMembershipPayments", {
+    method: "POST",
+    body: { setupIntentId },
+    authMessage: UNAUTHENTICATED,
+    fallback: "Failed to save card",
+  })
 }
 
 /**
@@ -131,30 +71,12 @@ export const setCardForMembershipPayments = async (
  * @param paymentMethodId The Stripe payment method ID to save
  */
 export const saveCard = async (paymentMethodId: string): Promise<void> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(`${url}/api/stripe/saveCard`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ paymentMethodId }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(getErrorMessage(errorData, "Failed to save card"))
-    }
-  } catch (error) {
-    console.error("Error saving card:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Failed to save card. Please try again."),
-    )
-  }
+  await apiRequest("/api/stripe/saveCard", {
+    method: "POST",
+    body: { paymentMethodId },
+    authMessage: UNAUTHENTICATED,
+    fallback: "Failed to save card",
+  })
 }
 
 /**
@@ -162,29 +84,29 @@ export const saveCard = async (paymentMethodId: string): Promise<void> => {
  * @param paymentMethodId The Stripe payment method ID to remove
  */
 export const removeCard = async (paymentMethodId: string): Promise<void> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(`${url}/api/stripe/removeCard`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ paymentMethodId }),
-    })
+  await apiRequest("/api/stripe/removeCard", {
+    method: "DELETE",
+    body: { paymentMethodId },
+    authMessage: UNAUTHENTICATED,
+    fallback: "Failed to remove card",
+  })
+}
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(getErrorMessage(errorData, "Failed to remove card"))
-    }
-  } catch (error) {
-    console.error("Error removing card:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(error, "Failed to remove card. Please try again."),
-    )
+/**
+ * The server found an order for the same items placed moments ago and wants
+ * the customer asked before it charges again. Carries the existing order so
+ * the prompt can name it.
+ */
+export class DuplicateOrderError extends Error {
+  constructor(
+    readonly existingOrder: {
+      id: string
+      tempOrderId: string
+      createdAt: string
+    },
+  ) {
+    super("You placed an order for these same items a few minutes ago.")
+    this.name = "DuplicateOrderError"
   }
 }
 
@@ -192,45 +114,46 @@ export const createPaymentIntent = async (
   amount: number,
   currency = "nzd",
   paymentMethodId?: string,
+  // Sent so the server can refuse a slot outside trading hours before the card
+  // is charged. Order creation happens after the charge and cannot refund.
+  pickUp?: {
+    pickUpTime: Date
+    eatIn: boolean
+    /** Set once the customer has confirmed a flagged repeat is intentional. */
+    confirmDuplicate?: boolean
+  },
 ): Promise<{ clientSecret: string; paymentIntentId: string }> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
+  // Kept on apiFetch rather than apiRequest: a flagged repeat is a question
+  // for the customer, not an error message, and it carries a body to read.
+  const { res, data } = await apiFetch("/api/stripe/createPaymentIntent", {
+    method: "POST",
+    body: {
+      // The server prices the charge from the cart itself and refuses a total
+      // that disagrees with this one, so a stale cart is reported rather than
+      // charged at a price the customer never saw.
+      amount,
+      currency,
+      paymentMethodId,
+      pickUpTime: pickUp?.pickUpTime.toISOString(),
+      eatIn: pickUp?.eatIn,
+      confirmDuplicate: pickUp?.confirmDuplicate,
+    },
+    authMessage: UNAUTHENTICATED,
+  })
+
+  if (res.status === 409 && data?.code === "POSSIBLE_DUPLICATE") {
+    throw new DuplicateOrderError(data.existingOrder)
   }
-  try {
-    const response = await fetch(`${url}/api/stripe/createPaymentIntent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        amount,
-        currency,
-        paymentMethodId,
-      }),
-    })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(
-        getErrorMessage(errorData, "Failed to create payment intent"),
-      )
-    }
-
-    const data = await response.json()
-    return {
-      clientSecret: data.clientSecret,
-      paymentIntentId: data.paymentIntentId,
-    }
-  } catch (error) {
-    console.error("Error creating payment intent:", getErrorMessage(error))
+  if (!res.ok) {
     throw new Error(
-      getErrorMessage(
-        error,
-        "Failed to create payment intent. Please try again.",
-      ),
+      getErrorMessage(data, "Failed to create payment intent"),
     )
+  }
+
+  return {
+    clientSecret: data.clientSecret,
+    paymentIntentId: data.paymentIntentId,
   }
 }
 
@@ -241,270 +164,85 @@ export const createPaymentIntent = async (
  */
 export const checkPaymentStatus = async (
   paymentIntentId: string,
-): Promise<PaymentStatusResult> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const response = await fetch(
-      `${url}/api/stripe/checkPaymentStatus/${paymentIntentId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      },
-    )
+): Promise<PaymentStatusResult> =>
+  apiRequest<PaymentStatusResult>(
+    `/api/stripe/checkPaymentStatus/${encodeURIComponent(paymentIntentId)}`,
+    {
+      authMessage: UNAUTHENTICATED,
+      fallback: "Failed to check payment status",
+    },
+  )
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(
-        getErrorMessage(errorData, "Failed to check payment status"),
-      )
-    }
+export const getMembershipDetails = async (): Promise<MembershipDetails> =>
+  apiRequest<MembershipDetails>("/api/stripe/getMembershipDetails", {
+    authMessage: UNAUTHENTICATED,
+    statusMessages: { 401: UNAUTHENTICATED },
+  })
 
-    const data = await response.json()
-    return data
-  } catch (error) {
-    console.error("Error checking payment status:", getErrorMessage(error))
-    throw new Error(
-      getErrorMessage(
-        error,
-        "Failed to check payment status. Please try again.",
-      ),
-    )
-  }
-}
-
-export const getMembershipDetails = async (): Promise<MembershipDetails> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/stripe/getMembershipDetails`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-    return data
-  } catch (error) {
-    console.error("Error fetching membership details:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
-}
-
-export const getUsersMembership = async (): Promise<UsersMembership | null> => {
-  const token = await getToken()
-
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-
-  try {
-    const res = await fetch(`${url}/api/stripe/getUsersMembership`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-    if (res.status === 404) {
-      throw new Error("No membership found")
-    }
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error fetching membership details:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
-}
+export const getUsersMembership = async (): Promise<UsersMembership | null> =>
+  apiRequest<UsersMembership | null>("/api/stripe/getUsersMembership", {
+    authMessage: UNAUTHENTICATED,
+    statusMessages: { 401: UNAUTHENTICATED, 404: NO_MEMBERSHIP },
+  })
 
 export const createMembership = async (
   paymentMethodId: string,
   stripePriceId: string,
 ) => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Please sign in to join our membership.")
-  }
-  try {
-    const res = await fetch(`${url}/api/stripe/createMembership`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ paymentMethodId, stripePriceId }),
-    })
+  const JOIN_SIGN_IN = "Please sign in to join our membership."
 
-    const data = await res.json()
-
-    if (res.status === 401) {
-      throw new Error("Please sign in to join our membership.")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error creating membership:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
+  return apiRequest("/api/stripe/createMembership", {
+    method: "POST",
+    body: { paymentMethodId, stripePriceId },
+    authMessage: JOIN_SIGN_IN,
+    statusMessages: { 401: JOIN_SIGN_IN },
+  })
 }
 
 export const cancelMembership = async (): Promise<Date> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/stripe/cancelMembership`, {
+  const data = await apiRequest<{ endDate: Date }>(
+    "/api/stripe/cancelMembership",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
+      authMessage: UNAUTHENTICATED,
+      statusMessages: { 401: UNAUTHENTICATED, 404: NO_MEMBERSHIP },
+    },
+  )
 
-    const data = await res.json()
-    if (res.status === 404) {
-      throw new Error("No membership found")
-    }
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data.endDate
-  } catch (error) {
-    console.error("Error canceling membership:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
+  return data.endDate
 }
 
 export const resumeMembership = async () => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/stripe/resumeMembership`, {
+  const data = await apiRequest<{ success: boolean }>(
+    "/api/stripe/resumeMembership",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
+      authMessage: UNAUTHENTICATED,
+      statusMessages: { 401: UNAUTHENTICATED, 404: NO_MEMBERSHIP },
+    },
+  )
 
-    const data = await res.json()
-    if (res.status === 404) {
-      throw new Error("No membership found")
-    }
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data.success
-  } catch (error) {
-    console.error("Error canceling membership:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
+  return data.success
 }
 
-export const pollMembershipStatus = async (): Promise<MembershipStatus> => {
-  const token = await getToken()
-  if (!token) {
-    throw new Error("Unauthenticated")
-  }
-  try {
-    const res = await fetch(`${url}/api/stripe/pollMembershipStatus`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    const data = await res.json()
-    if (res.status === 404) {
-      throw new Error("No membership found")
-    }
-    if (res.status === 401) {
-      throw new Error("Unauthenticated")
-    }
-    if (!res.ok) {
-      throw new Error(getErrorMessage(data))
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error fetching membership details:", getErrorMessage(error))
-    throw new Error(getErrorMessage(error))
-  }
-}
+export const pollMembershipStatus = async (): Promise<MembershipStatus> =>
+  apiRequest<MembershipStatus>("/api/stripe/pollMembershipStatus", {
+    authMessage: UNAUTHENTICATED,
+    statusMessages: { 401: UNAUTHENTICATED, 404: NO_MEMBERSHIP },
+  })
 
 export const getCurrentSubscriptionPaymentMethodId =
   async (): Promise<string> => {
-    const token = await getToken()
-    if (!token) {
-      throw new Error("Unauthenticated")
-    }
-    try {
-      const res = await fetch(
-        `${url}/api/stripe/getCurrentSubscriptionPaymentMethodId`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+    const data = await apiRequest<{ paymentMethodId: string }>(
+      "/api/stripe/getCurrentSubscriptionPaymentMethodId",
+      {
+        authMessage: UNAUTHENTICATED,
+        statusMessages: {
+          401: UNAUTHENTICATED,
+          404: "No subscription payment method found",
         },
-      )
+      },
+    )
 
-      const data = await res.json()
-      if (res.status === 404) {
-        throw new Error("No subscription payment method found")
-      }
-      if (res.status === 401) {
-        throw new Error("Unauthenticated")
-      }
-      if (!res.ok) {
-        throw new Error(getErrorMessage(data))
-      }
-
-      return data.paymentMethodId
-    } catch (error) {
-      console.error(
-        "Error fetching current subscription payment method ID:",
-        getErrorMessage(error),
-      )
-      throw new Error(getErrorMessage(error))
-    }
+    return data.paymentMethodId
   }

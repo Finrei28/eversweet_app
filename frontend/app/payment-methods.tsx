@@ -37,8 +37,7 @@ export default function PaymentMethodsStripe() {
 
 function PaymentMethodsContent() {
   const router = useRouter()
-  const { createPaymentMethod, initPaymentSheet, presentPaymentSheet } =
-    useStripe()
+  const { initPaymentSheet, presentPaymentSheet } = useStripe()
   const { token, authLoading, dataLoading, usersMembership } = useAuth()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
