@@ -2,11 +2,12 @@ import dotenv from "dotenv"
 dotenv.config()
 
 import http from "http"
-import { Server, Socket } from "socket.io"
+import { Server } from "socket.io"
 import cron from "node-cron"
-import jwt from "jsonwebtoken"
 import app from "./app"
 import { setIo, emitNewOrder } from "./lib/socket"
+import { registerSocketHandlers } from "./lib/socketAuth"
+import { clearScheduledOrders } from "./lib/orderRelay"
 import {
   checkRestaurantStatus,
   getFutureOrders,
@@ -14,13 +15,6 @@ import {
   updateDailySpecial,
 } from "./controllers/admin.controller"
 import { calculateMonthlyWinner } from "./controllers/client.controller"
-
-// Extend Socket type to include userId
-declare module "socket.io" {
-  interface Socket {
-    userId?: string
-  }
-}
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -39,43 +33,19 @@ export const io = new Server(server, {
 // module — and start a server — just to emit an event.
 setIo(io)
 
-// Authentication middleware for socket connections
-io.use((socket, next) => {
-  const token = socket.handshake.auth.token
-  if (!token) {
-    return next(new Error("Authentication error"))
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET!, (err: jwt.VerifyErrors | null) => {
-    if (err) {
-      return next(new Error("Authentication error"))
-    }
-  })
-
-  // Attach user info to the socket
-  socket.userId = "admin" // This would come from the token verification
-  next()
-})
-
-// Handle socket connections
-io.on("connection", (socket: Socket) => {
-  console.log(`User connected: ${socket.userId}`)
-
-  // Join admin room if user is admin
-  if (socket.userId === "admin") {
-    socket.join("admin-room")
-  }
-
-  socket.on("disconnect", () => {
-    console.log(`User disconnected: ${socket.userId}`)
-  })
-})
+// Authentication and room membership live in `lib/socketAuth`, so the rule
+// that keeps non-admins out of the kitchen room can be tested without this
+// module, which opens a port and schedules cron jobs on import.
+registerSocketHandlers(io)
 
 // Re-exported so existing importers keep working.
 export { emitNewOrder }
 
 try {
-  cron.schedule("* * * * *", getFutureOrders, {
+  // A backstop now rather than the only path: website orders are announced as
+  // they are paid for. Every two minutes is enough to catch what a restart
+  // dropped, and the 6-21 minute preparation leads absorb the extra minute.
+  cron.schedule("*/2 * * * *", getFutureOrders, {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("* * * * *", checkRestaurantStatus, {
@@ -93,6 +63,17 @@ try {
 } catch (err) {
   console.error("Failed to schedule task:", err)
 }
+
+// Orders waiting on an in-memory timer are lost on shutdown either way; the
+// cron re-announces them when the process comes back. Clearing them stops a
+// draining worker from holding handles that can never usefully fire.
+const shutdown = () => {
+  clearScheduledOrders()
+  server.close(() => process.exit(0))
+}
+
+process.on("SIGTERM", shutdown)
+process.on("SIGINT", shutdown)
 
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)

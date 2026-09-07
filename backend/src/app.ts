@@ -7,6 +7,7 @@ import stripeRoutes from "./routes/stripe.routes"
 import cartRoutes from "./routes/cart.routes"
 import notificationRoutes from "./routes/notification.routes"
 import adminRoutes from "./routes/admin.routes"
+import internalRoutes from "./routes/internal.routes"
 import { stripeWebhook } from "./controllers/stripe.controller"
 import { getIo } from "./lib/socket"
 
@@ -72,5 +73,7 @@ app.use("/api/stripe", stripeRoutes)
 app.use("/api/notification", notificationRoutes)
 app.use("/api/admin", adminRoutes)
 app.use("/api/cart", cartRoutes)
+// Server-to-server. Guarded by a shared secret, not a user session.
+app.use("/api/internal", internalRoutes)
 
 export default app

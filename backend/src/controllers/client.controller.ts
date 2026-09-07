@@ -4,6 +4,8 @@ import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import crypto from "crypto"
 import { storeHours, storeInfo } from "../lib/storeInfo"
+import { quoteMinutes } from "../lib/orderTiming"
+import { getPrepTimes } from "../lib/prepTimes"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { announcements } from "../lib/announcements"
 import { homepageCards } from "../lib/homePageContent"
@@ -378,28 +380,37 @@ export const getLoyaltyWinner = async (req: Request, res: Response) => {
   }
 }
 
-export function getEstimatedPickUpTime(req: Request, res: Response) {
+/**
+ * The soonest the mobile app may offer a customer.
+ *
+ * This used to hold its own copy of the timing rule, and the copy was the
+ * kitchen's start-now numbers rather than a customer quote — so a single
+ * dessert was promised in six minutes, the exact moment the kitchen was told
+ * to begin, with no buffer at all. It also disagreed with the website, which
+ * quoted ten. Both now come from `quoteMinutes`.
+ */
+export async function getEstimatedPickUpTime(req: Request, res: Response) {
   const { numOfItems } = req.body ?? {}
-  if (typeof numOfItems !== "number") {
+
+  if (typeof numOfItems !== "number" || !Number.isFinite(numOfItems)) {
     res.status(400).json({ message: "numOfItems is required" })
     return
   }
-  const fiveMinutes = new Date(Date.now() + 6 * 60 * 1000)
-  const tenMinutes = new Date(Date.now() + 11 * 60 * 1000)
-  const fifteenMinutes = new Date(Date.now() + 16 * 60 * 1000)
-  const twentyMinutes = new Date(Date.now() + 21 * 60 * 1000)
 
-  const minTime =
-    numOfItems === 1
-      ? fiveMinutes
-      : numOfItems <= 3
-        ? tenMinutes
-        : numOfItems <= 6
-          ? fifteenMinutes
-          : twentyMinutes
+  try {
+    const minutes = quoteMinutes(numOfItems, await getPrepTimes())
 
-  res.status(200).json({ estimatedTime: minTime })
-  return
+    res
+      .status(200)
+      .json({ estimatedTime: new Date(Date.now() + minutes * 60 * 1000) })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to estimate a pick up time",
+      error: getErrorMessage(error),
+    })
+    return
+  }
 }
 
 export async function calculateMonthlyWinner() {

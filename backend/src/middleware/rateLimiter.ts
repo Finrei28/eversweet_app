@@ -169,3 +169,30 @@ export const otpEmailLongLimiter = rateLimit({
     error: "Too many incorrect codes today. Please try again in 24 hours.",
   },
 })
+
+// ==========================================
+// TIER 3: Service-to-Service
+// ==========================================
+
+/**
+ * For endpoints only our own servers call, authenticated by a shared secret.
+ *
+ * Sized as a runaway guard rather than a brute-force guard: the caller is
+ * trusted, so this only has to sit above any volume the shop could genuinely
+ * produce. The login limiters must not be reused here — `ipLongLimiter` allows
+ * 100 requests a day per IP, and every announcement arrives from the website's
+ * handful of egress addresses, so a busy Saturday would exhaust it and the
+ * kitchen would quietly drop back to waiting on the cron. Sharing their Redis
+ * prefix would also let order traffic spend the login budget.
+ */
+export const serviceLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120, // Two a second sustained, far above real order volume
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: makeStore("rate-limit:service:"),
+  message: {
+    status: 429,
+    error: "Too many requests.",
+  },
+})

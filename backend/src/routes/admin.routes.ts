@@ -8,7 +8,9 @@ import {
   getOverview,
   getPastOrders,
   getPendingOrders,
+  getPrepTimeSettings,
   updateOrderStatus,
+  updatePrepTimeSettings,
   updateDaysOff,
 } from "../controllers/admin.controller"
 import { getLoyaltyWinner } from "../controllers/client.controller"
@@ -82,6 +84,20 @@ router.get(
   authenticateToken,
   authorizeRole("ADMIN"),
   getLoyaltyWinner,
+)
+
+router.get(
+  "/getPrepTimes",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  getPrepTimeSettings,
+)
+
+router.patch(
+  "/updatePrepTimes",
+  authenticateToken,
+  authorizeRole("ADMIN"),
+  updatePrepTimeSettings,
 )
 
 export default router

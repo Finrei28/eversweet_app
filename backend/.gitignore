@@ -6,3 +6,4 @@ sqlQuery.tsx
 .claudeignore
 audit.json
 todo
+.claude

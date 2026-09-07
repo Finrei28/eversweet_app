@@ -14,6 +14,10 @@ import {
   endOfMonth,
 } from "date-fns"
 import { emitNewOrder } from "../lib/socket"
+import { relayOrderSelect } from "../lib/orderRelay"
+import { dueAt, isDue } from "../lib/orderTiming"
+import { getPrepTimes, invalidatePrepTimes } from "../lib/prepTimes"
+import { NZ_TIMEZONE } from "../lib/tradingHours"
 import { OrderType, Status } from "../types/types"
 import { Prisma } from "@prisma/client"
 import { DateTime } from "luxon"
@@ -54,6 +58,17 @@ export const adminSignIn = async (req: Request, res: Response) => {
   return
 }
 
+/**
+ * Everything the shop knows about but has not started yet — the Upcoming list.
+ *
+ * Deliberately server-backed rather than left to the socket. A list built only
+ * from live events is a cache: it misses orders placed before the app launched,
+ * misses orders placed yesterday for today, and empties on every restart.
+ * Fetching it is what lets the app rebuild after a force-quit.
+ *
+ * Bounded to today. This used to return every unaccepted order ever placed, so
+ * a booking for next week turned up in today's list.
+ */
 export const getPendingOrders = async (req: Request, res: Response) => {
   const userId = (req as any).userId
   const role = (req as any).role
@@ -63,65 +78,38 @@ export const getPendingOrders = async (req: Request, res: Response) => {
   }
 
   try {
-    const orders = await db.order.findMany({
-      where: {
-        status: "PENDING",
-        notified: false,
-      },
-      select: {
-        id: true,
-        tempOrderId: true,
-        status: true,
-        createdAt: true,
-        customerFirstName: true,
-        customerLastName: true,
-        customerEmail: true,
-        customerPhoneNumber: true,
-        priceInCents: true,
-        pickUpTime: true,
-        discountedAmountInCents: true,
-        dineIn: true,
-        GST: true,
-        appUserId: true,
-        desserts: {
-          select: {
-            orderId: true,
-            id: true,
-            quantity: true,
-            priceInCents: true,
-            discountedAmountInCents: true,
-            dessert: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                imagePath: true,
-              },
-            },
-            customisations: {
-              select: {
-                id: true,
-                quantity: true,
-                discountedAmountInCents: true,
-                customisation: {
-                  select: {
-                    id: true,
-                    name: true,
-                    chineseName: true,
-                    priceInCents: true,
-                  },
-                },
-              },
-            },
-          },
+    // No lower bound: an order that came due earlier and was never accepted has
+    // to stay on the list rather than disappear at midnight.
+    const endOfTodayNZ = DateTime.now()
+      .setZone(NZ_TIMEZONE)
+      .endOf("day")
+      .toJSDate()
+
+    const [orders, prepTimes] = await Promise.all([
+      db.order.findMany({
+        where: {
+          status: "PENDING",
+          notified: false,
+          pickUpTime: { lte: endOfTodayNZ },
         },
-      },
+        select: relayOrderSelect,
+        orderBy: { pickUpTime: "asc" },
+      }),
+      getPrepTimes(),
+    ])
+
+    res.status(200).json({
+      orders: orders.map(({ notified, ...order }) => ({
+        ...order,
+        // Sent rather than recomputed in the app, so when the kitchen starts is
+        // decided in exactly one place.
+        dueAt: dueAt(order, prepTimes)?.toISOString() ?? null,
+      })),
     })
-    res.status(200).json({ orders })
     return
   } catch (error) {
     res.status(500).json({
-      message: "Error fetching current orders",
+      message: "Error fetching pending orders",
       error: getErrorMessage(error),
     })
     return
@@ -618,94 +606,116 @@ export const checkRestaurantStatus = async () => {
   })
 }
 
-// Get future orders where pickUpTime is more than 15 minutes from when the order was created
+/**
+ * The backstop that puts due orders on the kitchen screen.
+ *
+ * Runs on a cron. It used to be the only way a website order was ever
+ * announced; orders are now announced the moment they are paid for, over
+ * `/api/internal/orders/announce`. This still matters because that path and
+ * the relay's in-memory timers do not survive a restart, and because orders
+ * scheduled further out than the relay will hold are only ever found here.
+ *
+ * Emits every pass until the order is accepted, which is what sets `notified`.
+ */
 export const getFutureOrders = async () => {
   try {
     const now = new Date()
+    // Once per pass, not once per order.
+    const prepTimes = await getPrepTimes()
 
     const orders = await db.order.findMany({
       where: {
         status: "PENDING",
         notified: false,
       },
-      select: {
-        id: true,
-        tempOrderId: true,
-        status: true,
-        createdAt: true,
-        pickedUpAt: true,
-        pickUpTime: true,
-        customerFirstName: true,
-        customerLastName: true,
-        customerEmail: true,
-        customerPhoneNumber: true,
-        priceInCents: true,
-        discountedAmountInCents: true,
-        dineIn: true,
-        notified: true,
-        GST: true,
-        appUserId: true,
-        desserts: {
-          select: {
-            orderId: true,
-            id: true,
-            quantity: true,
-            priceInCents: true,
-            discountedAmountInCents: true,
-            dessert: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                imagePath: true,
-              },
-            },
-            customisations: {
-              select: {
-                id: true,
-                quantity: true,
-                discountedAmountInCents: true,
-                customisation: {
-                  select: {
-                    id: true,
-                    name: true,
-                    chineseName: true,
-                    priceInCents: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      select: relayOrderSelect,
     })
 
-    //@ts-ignore
-    const filteredOrders = orders.filter((order) => {
-      if (order.notified === true) return false
-      // Calculate how early we should start preparing based on dessert count
-      const count = order.desserts.reduce(
-        (total, item) => total + item.quantity,
-        0,
-      )
-      let minutesBefore = 21 // default to item count > 6, taking 20 minutes to prepare
-      if (count === 1) minutesBefore = 6
-      else if (count <= 3) minutesBefore = 11
-      else if (count <= 6) minutesBefore = 16
+    for (const order of orders) {
+      if (!isDue(order, now, prepTimes)) continue
 
-      const thresholdTime = new Date(
-        order.pickUpTime.getTime() - minutesBefore * 60 * 1000,
-      )
-
-      return thresholdTime <= new Date() // Ready to fetch
-    })
-
-    for (const order of filteredOrders) {
+      // `notified` is set when the order is accepted, in updateOrderStatus().
       const { notified, ...orderWithoutNotified } = order
-      emitNewOrder(orderWithoutNotified) // change notified to true when order is accepted at updateOrderStatus()
+      emitNewOrder(orderWithoutNotified)
     }
   } catch (error) {
     console.error("Error fetching future orders:", error)
+  }
+}
+
+export const getPrepTimeSettings = async (_req: Request, res: Response) => {
+  try {
+    res.status(200).json({ prepTimes: await getPrepTimes() })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to load preparation times",
+      error: getErrorMessage(error),
+    })
+    return
+  }
+}
+
+/** Minutes. Upper bounds are a guard against a typo closing the shop's book. */
+const PREP_TIME_LIMITS: Record<string, { min: number; max: number }> = {
+  singleItem: { min: 1, max: 120 },
+  upToThree: { min: 1, max: 120 },
+  upToSix: { min: 1, max: 120 },
+  moreThanSix: { min: 1, max: 240 },
+  kitchenSlack: { min: 0, max: 60 },
+  quoteFloor: { min: 1, max: 240 },
+}
+
+export const updatePrepTimeSettings = async (req: Request, res: Response) => {
+  const body = req.body ?? {}
+  const data: Record<string, number> = {}
+
+  for (const [field, { min, max }] of Object.entries(PREP_TIME_LIMITS)) {
+    const value = body[field]
+
+    // Absent means "leave it alone", so a screen can send only what changed.
+    if (value === undefined) continue
+
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value < min ||
+      value > max
+    ) {
+      res.status(400).json({
+        message: `${field} must be a whole number of minutes between ${min} and ${max}`,
+      })
+      return
+    }
+
+    data[field] = value
+  }
+
+  if (Object.keys(data).length === 0) {
+    res.status(400).json({ message: "No preparation times to update" })
+    return
+  }
+
+  try {
+    // One row, addressed the way `checkRestaurantStatus` addresses its own
+    // singleton. `updateMany` matches nothing if the table has not been
+    // seeded, so fall back to creating it rather than silently doing nothing.
+    const { count } = await db.prepTimeSetting.updateMany({ data })
+
+    if (count === 0) {
+      await db.prepTimeSetting.create({ data })
+    }
+
+    invalidatePrepTimes()
+
+    res.status(200).json({ prepTimes: await getPrepTimes() })
+    return
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to update preparation times",
+      error: getErrorMessage(error),
+    })
+    return
   }
 }
 

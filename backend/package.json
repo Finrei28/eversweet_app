@@ -50,6 +50,7 @@
     "@types/tailwindcss": "^3.1.0",
     "nodemon": "^3.1.14",
     "prisma": "^6.19.3",
+    "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3",
