@@ -14,40 +14,58 @@ import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { getErrorMessage } from "../utils/getError"
+import { cached, CACHE_KEYS } from "../lib/cache"
+
+/*
+ * Where an admin endpoint exists to make one of these wrong it calls
+ * `invalidate` directly, and the TTL is only a backstop. The menu is the
+ * exception: nothing in this API edits desserts, categories, offers or prices —
+ * those changes are made against the database out of band — so for the menu the
+ * TTL *is* the mechanism, and it is kept short enough that a price change is
+ * live within a couple of minutes.
+ */
+const MENU_TTL_SECONDS = 120
+const OFFERS_TTL_SECONDS = 120
+const DAYS_OFF_TTL_SECONDS = 300
+const LEADERBOARD_TTL_SECONDS = 300
+const CUSTOMISATIONS_TTL_SECONDS = 300
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
-    const rawMenu = await db.category.findMany({
-      include: {
-        desserts: {
-          where: { isAvailableForPurchase: true },
-          orderBy: { priceInCents: "asc" },
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { include: { ingredient: true } },
-            description: true,
-            promo: true,
+    // The largest payload the app fetches and the most static: a deep nested
+    // include over categories, desserts and ingredients that every customer
+    // triggered on every visit.
+    const menu = await cached(CACHE_KEYS.menu, MENU_TTL_SECONDS, async () => {
+      const rawMenu = await db.category.findMany({
+        include: {
+          desserts: {
+            where: { isAvailableForPurchase: true },
+            orderBy: { priceInCents: "asc" },
+            select: {
+              id: true,
+              name: true,
+              chineseName: true,
+              priceInCents: true,
+              priceInLoyaltyPoints: true,
+              imagePath: true,
+              ingredients: { include: { ingredient: true } },
+              description: true,
+              promo: true,
+            },
           },
         },
-      },
+      })
+
+      return rawMenu.map((category) => ({
+        ...category,
+        desserts: category.desserts.map((dessert) => ({
+          ...dessert,
+          ingredients: dessert.ingredients.map((i) => i.ingredient),
+        })),
+      }))
     })
 
-    if (!rawMenu) {
-      res.status(404).json({ message: "No products found" })
-      return
-    }
-    const menu = rawMenu.map((category) => ({
-      ...category,
-      desserts: category.desserts.map((dessert) => ({
-        ...dessert,
-        ingredients: dessert.ingredients.map((i) => i.ingredient),
-      })),
-    }))
+    res.set("Cache-Control", "public, max-age=60")
     res.status(200).json({ menu })
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch menu" })
@@ -68,24 +86,37 @@ export const getAvailableCustomisations = async (
         .json({ message: "Dessert id is required to view customisations" })
       return
     }
-    const dessert = await db.dessert.findFirst({ where: { id } })
-    const customisations = await db.ingredient.findMany({
-      where: {
-        isAvailableForPurchase: true,
-        categories: { some: { categoryId: dessert?.categoryId } },
-      },
-      orderBy: { priceInCents: "asc" },
-      select: {
-        id: true,
-        chineseName: true,
-        name: true,
-        priceInCents: true,
-      },
-    })
+    // This request sits between tapping a dessert and seeing the modal, so it
+    // is squarely on an interactive path. It used to run two queries in series
+    // — fetch the dessert, then its category's ingredients — where the
+    // relation lets one do the work.
+    const customisations = await cached(
+      CACHE_KEYS.customisations(id),
+      CUSTOMISATIONS_TTL_SECONDS,
+      () =>
+        db.ingredient.findMany({
+          where: {
+            isAvailableForPurchase: true,
+            categories: {
+              some: { category: { desserts: { some: { id } } } },
+            },
+          },
+          orderBy: { priceInCents: "asc" },
+          select: {
+            id: true,
+            chineseName: true,
+            name: true,
+            priceInCents: true,
+          },
+        }),
+    )
+
     if (!customisations) {
       res.status(404).json({ message: "No customisations available" })
       return
     }
+
+    res.set("Cache-Control", "public, max-age=60")
     res.status(200).json({ customisations })
   } catch (error) {
     res.status(500).json({ message: error })
@@ -297,7 +328,12 @@ export const getLoyaltyRates = (req: Request, res: Response) => {
 }
 
 export const getLeaderboardDetails = async (req: Request, res: Response) => {
-  const leaderboardDetails = await organiseLeaderboardDetails()
+  const leaderboardDetails = await cached(
+    CACHE_KEYS.leaderboardDetails,
+    LEADERBOARD_TTL_SECONDS,
+    organiseLeaderboardDetails,
+  )
+  res.set("Cache-Control", "public, max-age=60")
   res.status(200).json(leaderboardDetails)
   return
 }
@@ -312,13 +348,20 @@ export const showOfferForClient = async (req: Request, res: Response) => {
     // isActive was missing here, so the public home carousel was advertising
     // deactivated offers. `audience` rides along as a scalar so the carousel
     // can vary its call to action.
-    const offers = await db.offer.findMany({
-      where: { isActive: true },
-      include: {
-        dessert: { select: { imagePath: true } },
-        category: { select: { desserts: { select: { imagePath: true } } } },
-      },
-    })
+    const offers = await cached(
+      CACHE_KEYS.clientOffers,
+      OFFERS_TTL_SECONDS,
+      () =>
+        db.offer.findMany({
+          where: { isActive: true },
+          include: {
+            dessert: { select: { imagePath: true } },
+            category: { select: { desserts: { select: { imagePath: true } } } },
+          },
+        }),
+    )
+
+    res.set("Cache-Control", "public, max-age=60")
     res.status(200).json({ offers })
     return
   } catch (error) {
@@ -339,8 +382,12 @@ export const getTermAndConditions = (req: Request, res: Response) => {
 
 export const getDaysOff = async (req: Request, res: Response) => {
   try {
-    const daysOff = await db.daysOff.findMany({ select: { date: true } })
-    const dates = daysOff.map((day) => day.date)
+    const dates = await cached(CACHE_KEYS.daysOff, DAYS_OFF_TTL_SECONDS, async () => {
+      const daysOff = await db.daysOff.findMany({ select: { date: true } })
+      return daysOff.map((day) => day.date)
+    })
+
+    res.set("Cache-Control", "public, max-age=60")
     res.status(200).json({ dates })
     return
   } catch (error) {
