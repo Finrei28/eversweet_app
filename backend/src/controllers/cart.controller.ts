@@ -11,6 +11,11 @@ import {
   RawCartItem,
   CartItem,
 } from "../types/types"
+import {
+  canRedeemAudience,
+  isNewCustomer,
+  offerRefusalMessage,
+} from "../lib/offerAudience"
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -48,40 +53,8 @@ function calculateBestDiscount(
   return finalDiscountedAmount
 }
 
-export const unlockOfferForMembership = async (
-  membershipId: string,
-  offerId: string,
-) => {
-  const offer = await db.offer.findUnique({ where: { id: offerId } })
-  try {
-    if (!offer) throw new Error("Offer does not exist")
-    const existing = await db.offerRedemption.findUnique({
-      where: {
-        offerId_membershipId: { offerId, membershipId },
-      },
-    })
-    if (existing) {
-      return await db.offerRedemption.update({
-        where: { id: existing.id },
-        data: { unlockedAt: new Date(), status: "AVAILABLE" },
-      })
-    } else {
-      return await db.offerRedemption.create({
-        data: {
-          offerId,
-          membershipId,
-          unlockedAt: new Date(),
-          status: "AVAILABLE",
-        },
-      })
-    }
-  } catch (error) {
-    throw new Error("Failed to unlock offer for membership")
-  }
-}
-
-export const redeemOfferForMembership = async (
-  membershipId: string,
+export const redeemOfferForUser = async (
+  userId: string,
   offerId: string,
   tx: Omit<
     PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
@@ -95,7 +68,7 @@ export const redeemOfferForMembership = async (
   if (!offer) throw new Error("Offer does not exist")
   const existing = await tx.offerRedemption.findUnique({
     where: {
-      offerId_membershipId: { offerId, membershipId },
+      offerId_userId: { offerId, userId },
     },
   })
 
@@ -122,7 +95,7 @@ export const redeemOfferForMembership = async (
   return await tx.offerRedemption.create({
     data: {
       offerId,
-      membershipId,
+      userId,
       used: 1,
       redeemedAt: new Date(),
       status: "REDEEMED",
@@ -175,15 +148,36 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     // check offer
+    //
+    // The offer is loaded here rather than in the pricing branch below because
+    // the guard now turns on `audience` — it cannot decide anything without
+    // the row. The pricing branch reuses it, so this is one query, not two.
+    let offer: Prisma.OfferGetPayload<{ include: { dessert: true } }> | null =
+      null
+
     if (cartItem.offerId) {
-      if (
-        !membership ||
-        !membership.isActive ||
-        membership.paymentStatus !== "SUCCESS"
-      ) {
-        res.status(403).json({
-          message: "Join our membership to redeem this awesome offer!",
-        })
+      offer = await db.offer.findUnique({
+        where: { id: cartItem.offerId },
+        include: { dessert: true },
+      })
+
+      if (!offer) {
+        res.status(404).json({ message: "Offer may be expired or finished" })
+        return
+      }
+
+      const viewer = {
+        isActiveMember:
+          !!membership &&
+          membership.isActive &&
+          membership.paymentStatus === "SUCCESS",
+        // Only worth the query when the answer can change the outcome.
+        isNewCustomer:
+          offer.audience === "NEW_USERS" ? await isNewCustomer(userId) : false,
+      }
+
+      if (!canRedeemAudience(offer.audience, viewer)) {
+        res.status(403).json({ message: offerRefusalMessage(offer.audience) })
         return
       }
     }
@@ -208,15 +202,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     let finalDiscountedAmount = 0
 
-    if (cartItem.offerId) {
-      const offer = await db.offer.findUnique({
-        where: { id: cartItem.offerId },
-        include: { dessert: true },
-      })
-      if (!offer) {
-        res.status(404).json({ message: "Offer may be expired or finished" })
-        return
-      }
+    if (offer) {
       const offerPrice =
         offer?.itemPriceInCents !== null
           ? offer?.itemPriceInCents
@@ -306,8 +292,14 @@ export const addItemToCart = async (req: Request, res: Response) => {
         },
       })
       // redeem offer
-      if (cartItem.offerId && membership) {
-        await redeemOfferForMembership(membership.id, cartItem.offerId, tx)
+      //
+      // Not conditional on a membership any more. It used to be, harmlessly,
+      // because only a member could reach this line — but an open offer held
+      // by a non-member would then be priced without ever writing a
+      // redemption, so `used` would never increment and `limit` would never
+      // be enforced.
+      if (cartItem.offerId) {
+        await redeemOfferForUser(userId, cartItem.offerId, tx)
       }
 
       // If user used loyalty points, deduct from their account
@@ -474,7 +466,14 @@ export const getCartItems = async (req: Request, res: Response) => {
         id: true,
         expiresAt: true,
         cartItems: {
-          select: { id: true, offerId: true, loyaltyPointsUsed: true },
+          select: {
+            id: true,
+            offerId: true,
+            loyaltyPointsUsed: true,
+            // Needed below to tell a members-only item (which dies with a
+            // lapsed membership) from one anybody may hold.
+            offer: { select: { audience: true } },
+          },
         },
       },
     })
@@ -498,24 +497,22 @@ export const getCartItems = async (req: Request, res: Response) => {
         })
       }
 
-      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
-
-      for (const item of cartItemsWithOffer) {
-        if (item.offerId) {
-          if (!membership) {
-            break
-          }
-          await db.offerRedemption.updateMany({
-            where: {
-              offerId: item.offerId,
-              membershipId: membership.id,
-              used: { gt: 0 },
-            },
-            data: {
-              used: { decrement: 1 },
-            },
-          })
-        }
+      // An expired cart hands every held redemption back, whoever holds it.
+      // The membership lookup this used to need is gone with the re-key — as
+      // is the `break`, which abandoned the refund for every later item once
+      // one lookup came up empty.
+      for (const item of cart.cartItems) {
+        if (!item.offerId) continue
+        await db.offerRedemption.updateMany({
+          where: {
+            offerId: item.offerId,
+            userId,
+            used: { gt: 0 },
+          },
+          data: {
+            used: { decrement: 1 },
+          },
+        })
       }
       await db.cart.delete({ where: { id: cart.id } })
       res.status(200).json({ success: true, message: "Cart expired" })
@@ -524,32 +521,31 @@ export const getCartItems = async (req: Request, res: Response) => {
 
     let warning: string | null = null
 
-    // if user is not a member, remove all offers from cart and restore redemptions
+    // A lapsed membership only invalidates the members-only offers. An offer
+    // open to everyone (or to new customers) is still perfectly valid, so it
+    // must survive — this used to delete every offer item indiscriminately,
+    // which would strip a non-member's legitimate item on every cart load.
     if (!membership?.isActive && cart) {
-      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
-      if (cartItemsWithOffer.length > 0) {
-        for (const item of cartItemsWithOffer) {
-          if (item.offerId) {
-            if (!membership) {
-              break
-            }
-            await db.offerRedemption.updateMany({
-              where: {
-                offerId: item.offerId,
-                membershipId: membership.id,
-                used: { gt: 0 },
-              },
-              data: {
-                used: { decrement: 1 },
-              },
-            })
-          }
+      const memberOnlyItems = cart.cartItems.filter(
+        (item) => item.offerId && item.offer?.audience === "MEMBERS",
+      )
+
+      if (memberOnlyItems.length > 0) {
+        for (const item of memberOnlyItems) {
+          await db.offerRedemption.updateMany({
+            where: {
+              offerId: item.offerId!,
+              userId,
+              used: { gt: 0 },
+            },
+            data: {
+              used: { decrement: 1 },
+            },
+          })
         }
+
         const deletedItems = await db.cartItem.deleteMany({
-          where: {
-            cart: { userId },
-            offerId: { not: null },
-          },
+          where: { id: { in: memberOnlyItems.map((item) => item.id) } },
         })
 
         if (deletedItems.count > 0) {
@@ -643,27 +639,21 @@ export const clearCart = async (req: Request, res: Response) => {
         })
       }
 
-      const cartItemsWithOffer = cart.cartItems.filter((item) => item.offerId)
-
-      for (const item of cartItemsWithOffer) {
-        if (item.offerId) {
-          const membership = await tx.membership.findUnique({
-            where: { userId },
-          })
-          if (!membership) {
-            break
-          }
-          await tx.offerRedemption.updateMany({
-            where: {
-              offerId: item.offerId,
-              membershipId: membership.id,
-              used: { gt: 0 },
-            },
-            data: {
-              used: { decrement: 1 },
-            },
-          })
-        }
+      // Clearing the cart hands back every held redemption. The per-item
+      // membership lookup this used to do was both an N+1 and, via `break`,
+      // a way to skip the refund for every item after the first miss.
+      for (const item of cart.cartItems) {
+        if (!item.offerId) continue
+        await tx.offerRedemption.updateMany({
+          where: {
+            offerId: item.offerId,
+            userId,
+            used: { gt: 0 },
+          },
+          data: {
+            used: { decrement: 1 },
+          },
+        })
       }
 
       await tx.cart.delete({ where: { userId } })
@@ -691,38 +681,32 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       return
     }
 
-    const [cartItem, membership] = await Promise.all([
-      db.cartItem.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          loyaltyPointsUsed: true,
-          itemPriceInCents: true,
-          offerId: true,
-        },
-      }),
-
-      db.membership.findUnique({ where: { userId } }),
-    ])
+    // No membership lookup: removing an item is not a membership-gated
+    // action, and the redemption is keyed on the user now.
+    const cartItem = await db.cartItem.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        loyaltyPointsUsed: true,
+        itemPriceInCents: true,
+        offerId: true,
+      },
+    })
 
     if (!cartItem) {
       res.status(404).json({ message: "cart item not found" })
       return
     }
 
-    if (cartItem?.offerId) {
-      if (!membership) {
-        res.status(403).json({ message: "No membership record found" })
-        return
-      }
-    }
-
     await db.$transaction(async (tx) => {
-      if (cartItem.offerId && membership) {
+      // This used to 403 with "No membership record found" when the user had
+      // no membership, which left a non-member's open-offer item stuck in
+      // their cart until it expired — they could add it but never remove it.
+      if (cartItem.offerId) {
         await tx.offerRedemption.updateMany({
           where: {
             offerId: cartItem.offerId,
-            membershipId: membership.id,
+            userId,
             used: { gt: 0 },
           },
           data: {
@@ -905,6 +889,25 @@ export const updateCartItem = async (req: Request, res: Response) => {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
       }
+
+      // Same audience check as addItemToCart. Without it this path would
+      // reprice at offer rates for anyone the offer is not meant for.
+      if (
+        !canRedeemAudience(offer.audience, {
+          isActiveMember:
+            !!membership &&
+            membership.isActive &&
+            membership.paymentStatus === "SUCCESS",
+          isNewCustomer:
+            offer.audience === "NEW_USERS"
+              ? await isNewCustomer(userId)
+              : false,
+        })
+      ) {
+        res.status(403).json({ message: offerRefusalMessage(offer.audience) })
+        return
+      }
+
       const offerPrice =
         offer?.itemPriceInCents !== null
           ? offer?.itemPriceInCents
@@ -918,7 +921,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
       finalDiscountedAmount = Math.max(
         0,
         Math.round(itemPriceInCentsBeforeDiscount - offerPrice),
-      ) // this calculates the discount from member offers
+      ) // this calculates the discount from the offer
     } else {
       finalDiscountedAmount = calculateBestDiscount(
         // this calculates the discounts on normal and promo items

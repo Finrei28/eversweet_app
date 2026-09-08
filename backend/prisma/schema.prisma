@@ -64,9 +64,10 @@ model User {
   cart                      Cart?
   Loyalty                   Loyalty?
   membership                Membership?
-  appOrders                 Order[]         @relation("UserOrders")
+  appOrders                 Order[]           @relation("UserOrders")
   sessions                  Session[]
   loyaltyWinners            LoyaltyWinner[]
+  redemptions               OfferRedemption[]
 }
 
 model Membership {
@@ -87,7 +88,6 @@ model Membership {
   totalMonths           Int               @default(0)
   plan                  MembershipPlan    @relation(fields: [planId], references: [id])
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  redemptions           OfferRedemption[]
 }
 
 model MembershipPlan {
@@ -105,6 +105,7 @@ model Offer {
   description      String?
   image            String?
   isActive         Boolean            @default(true)
+  audience         OfferAudience      @default(MEMBERS)
   dessertId        String?
   categoryId       String?
   itemPriceInCents Int?
@@ -135,18 +136,18 @@ model OfferRequirement {
 }
 
 model OfferRedemption {
-  id           String      @id @default(cuid())
-  offerId      String
-  membershipId String
-  unlockedAt   DateTime    @default(now())
-  redeemedAt   DateTime?
-  renewsAt     DateTime?
-  status       OfferStatus
-  used         Int         @default(0)
-  membership   Membership  @relation(fields: [membershipId], references: [id])
-  offer        Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  id         String      @id @default(cuid())
+  offerId    String
+  userId     String
+  unlockedAt DateTime    @default(now())
+  redeemedAt DateTime?
+  renewsAt   DateTime?
+  status     OfferStatus
+  used       Int         @default(0)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offer      Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
-  @@unique([offerId, membershipId])
+  @@unique([offerId, userId])
 }
 
 model Authenticator {
@@ -445,6 +446,12 @@ enum OfferStatus {
   AVAILABLE
   REDEEMED
   EXPIRED
+}
+
+enum OfferAudience {
+  MEMBERS
+  EVERYONE
+  NEW_USERS
 }
 
 enum PromoType {
