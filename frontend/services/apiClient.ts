@@ -4,6 +4,13 @@ import { getToken } from "./authToken"
 export const API_URL = process.env.EXPO_PUBLIC_URL!
 
 /**
+ * Without this a request that stalls rather than fails hangs until the OS
+ * gives up — around a minute on iOS — and because loading state gates
+ * full-screen spinners, the customer just watches a loader the whole time.
+ */
+const REQUEST_TIMEOUT_MS = 15000
+
+/**
  * Called when the server refuses a token the app actually sent. AuthProvider
  * registers it so a session that expires mid-use is cleared, instead of leaving
  * the app looking signed in while every request is rejected. Only the expiry at
@@ -63,11 +70,29 @@ export async function apiFetch(
     headers.Authorization = `Bearer ${token}`
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      signal: controller.signal,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    })
+  } catch (error) {
+    // An abort is this timeout firing, not a caller cancelling — nothing else
+    // holds the controller — so it is reported as what it is.
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        "The request took too long. Please check your connection and try again.",
+      )
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
 
   // Failed responses are not reliably JSON — gateways and proxies return HTML,
   // and some endpoints return an empty body. Parsing must never be the thing
@@ -103,7 +128,13 @@ export async function apiRequest<T>(
       errorMessage ??
       getErrorMessage(data, fallback ?? `Request failed with status ${res.status}`)
 
-    console.error(`${options.method ?? "GET"} ${path} failed:`, message)
+    // Only in development, and not for statuses the caller named itself: a 404
+    // from getUsersMembership just means "not a member", and getPushToken is
+    // expected to fail on a fresh install. Logging those unconditionally put
+    // several LogBox redboxes on the screen during a normal startup.
+    if (__DEV__ && statusMessages?.[res.status] === undefined) {
+      console.error(`${options.method ?? "GET"} ${path} failed:`, message)
+    }
     throw new Error(message)
   }
 

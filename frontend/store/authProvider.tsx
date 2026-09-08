@@ -1,15 +1,15 @@
-import { removeToken } from "@/services/authToken"
+import { getToken, removeToken, saveToken } from "@/services/authToken"
 import { setUnauthorizedHandler } from "@/services/apiClient"
 import React, {
   createContext,
   useContext,
   useState,
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   ReactNode,
 } from "react"
-import * as SecureStore from "expo-secure-store"
 import { jwtDecode } from "jwt-decode"
 import {
   LeaderBoardDetails,
@@ -105,26 +105,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // Load user from localStorage/sessionStorage/etc.
   useEffect(() => {
-    const initialize = async () => {
+    // Whether there is a session depends only on the locally stored token.
+    // This used to share a Promise.all with the store hours and days off, so
+    // authLoading — which gates most of the app — was held behind two network
+    // calls that say nothing about being signed in.
+    const resolveSession = async () => {
       try {
-        const [storeHoursResult, daysOffResult, storedToken] =
-          await Promise.all([
-            getStoreHours().catch((error) => {
-              console.error("Failed to fetch store hours:", error)
-              return fallbackHours
-            }),
-            // An empty list on failure keeps the store on its weekly hours
-            // rather than shutting ordering down over a dropped request. The
-            // order endpoint is the backstop for a day off missed this way.
-            getDaysOff().catch((error) => {
-              console.error("Failed to fetch days off:", error)
-              return [] as Date[]
-            }),
-            SecureStore.getItemAsync("token"),
-          ])
-
-        setStoreHours(storeHoursResult)
-        setDaysOff(toDaysOff(daysOffResult))
+        const storedToken = await getToken()
 
         if (!storedToken) {
           return
@@ -145,7 +132,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
-    void initialize()
+    // Public data, and nothing waits on it: fallbackHours stands in until it
+    // lands, which is the same contract the fallback already had.
+    const loadTradingCalendar = async () => {
+      const [storeHoursResult, daysOffResult] = await Promise.all([
+        getStoreHours().catch((error) => {
+          console.error("Failed to fetch store hours:", error)
+          return fallbackHours
+        }),
+        // An empty list on failure keeps the store on its weekly hours
+        // rather than shutting ordering down over a dropped request. The
+        // order endpoint is the backstop for a day off missed this way.
+        getDaysOff().catch((error) => {
+          console.error("Failed to fetch days off:", error)
+          return [] as Date[]
+        }),
+      ])
+
+      setStoreHours(storeHoursResult)
+      setDaysOff(toDaysOff(daysOffResult))
+    }
+
+    void resolveSession()
+    void loadTradingCalendar()
   }, [])
 
   useEffect(() => {
@@ -154,6 +163,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUsersMembership(null)
       setMembershipDetails(null)
       setLeaderboardDetails(null)
+      // There is no per-user data to wait for when signed out. Without this the
+      // flag stayed true for the whole session and every screen gating on it
+      // (home, menu, profile, offers, leaderboard, membership, payment methods)
+      // sat on a loader that could never clear.
+      setDataLoading(false)
       return
     }
 
@@ -208,7 +222,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void loadUserData()
   }, [token])
 
-  const refetchUsersMembership = async () => {
+  const refetchUsersMembership = useCallback(async () => {
     if (!token) return
     try {
       setDataLoading(true)
@@ -227,9 +241,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setDataLoading(false)
     }
-  }
+  }, [token])
 
-  const refetchUserDetails = async () => {
+  const refetchUserDetails = useCallback(async () => {
     if (!token) return
     try {
       setDataLoading(true)
@@ -248,11 +262,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setDataLoading(false)
     }
-  }
+  }, [token])
 
-  const signInProvider = async (newToken: string) => {
+  const signInProvider = useCallback(async (newToken: string) => {
     try {
-      await SecureStore.setItemAsync("token", newToken)
+      await saveToken(newToken)
       // Setting the token drives the loadUserData effect above, which fetches
       // the membership and profile. Calling the refetch helpers here instead
       // did nothing: they read `token` from this render's closure, which is
@@ -272,9 +286,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error("Failed to register push notifications:", error)
     }
-  }
+  }, [])
 
-  const signOutProvider = async () => {
+  const signOutProvider = useCallback(async () => {
     // Re-entrancy guard. signOutProvider calls removePushToken, which is an
     // authenticated request; if that returns 401 it fires the unauthorized
     // handler, which calls signOutProvider again. Without this the two call
@@ -297,29 +311,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       signingOut.current = false
     }
-  }
+  }, [])
+
+  // A fresh object here re-rendered all 21 useAuth consumers on every one of
+  // this provider's renders — and a signed-in cold start produces about nine of
+  // them. The callbacks above are useCallback'd first; memoising the object
+  // while they were recreated each render would have changed nothing.
+  const value = useMemo<AuthContextType>(
+    () => ({
+      token,
+      usersMembership,
+      membershipDetails,
+      userDetails,
+      leaderboardDetails,
+      setUserDetails,
+      refetchUserDetails,
+      refetchUsersMembership,
+      signInProvider,
+      signOutProvider,
+      authLoading,
+      dataLoading,
+      storeHours,
+      tradingCalendar,
+    }),
+    [
+      token,
+      usersMembership,
+      membershipDetails,
+      userDetails,
+      leaderboardDetails,
+      refetchUserDetails,
+      refetchUsersMembership,
+      signInProvider,
+      signOutProvider,
+      authLoading,
+      dataLoading,
+      storeHours,
+      tradingCalendar,
+    ],
+  )
 
   return (
-    <AuthContext.Provider
-      value={{
-        token,
-        usersMembership,
-        membershipDetails,
-        userDetails,
-        leaderboardDetails,
-        setUserDetails,
-        refetchUserDetails,
-        refetchUsersMembership,
-        signInProvider,
-        signOutProvider,
-        authLoading,
-        dataLoading,
-        storeHours,
-        tradingCalendar,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
   )
 }
 

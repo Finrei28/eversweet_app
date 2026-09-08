@@ -1,6 +1,6 @@
+import { CachedImage } from "@/_components/cachedImage"
 import {
   View,
-  Image,
   Text,
   TouchableOpacity,
   ScrollView,
@@ -12,15 +12,14 @@ import {
 import Modal from "react-native-modal"
 import { CartItem, Dessert, Customisations } from "../utils/types"
 import { useCartStore } from "@/store/cart"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import BouncingLoader from "@/_components/loader"
-import useFetch from "@/services/use_fetch"
-import { getAvailableCustomisations } from "@/services/api"
+import { useCustomisationsQuery } from "@/services/queries"
 import { formatCurrency } from "@/lib/formatters"
 import { useAuth } from "@/store/authProvider"
 import {
@@ -74,10 +73,12 @@ export default function CustomModal({
   const editItem = useCartStore((state) => state.editItem)
 
   const addItem = useCartStore((state) => state.addItem)
+  // Cached per dessert, so reopening one the customer already looked at is
+  // instant instead of another round trip behind a spinner over the modal.
   const {
     data: availableCustomisations,
-    loading: availableCustomisationsLoading,
-  } = useFetch(() => getAvailableCustomisations(selectedDessert.id))
+    isLoading: availableCustomisationsLoading,
+  } = useCustomisationsQuery(selectedDessert?.id)
   const modalIdRef = useRef(Date.now())
   const [customisationPrice, setCustomisationPrice] = useState(
     cartItem?.customisations.reduce(
@@ -87,6 +88,26 @@ export default function CustomModal({
   )
   const [buttonLoading, setButtonLoading] = useState(false)
   const [customisations, setCustomisations] = useState<Customisations>([])
+
+  /*
+   * These three turn the per-row scans below into O(1) lookups. Rendering the
+   * list used to run an O(n×m) filter plus a `.find` for every row, and both
+   * ran again on each +/- tap because that sets state and re-renders the modal.
+   */
+  const availableIds = useMemo(
+    () => new Set((availableCustomisations ?? []).map((c) => c.id)),
+    [availableCustomisations],
+  )
+
+  const dessertIngredientIds = useMemo(
+    () => new Set((selectedDessert?.ingredients ?? []).map((i) => i.id)),
+    [selectedDessert],
+  )
+
+  const quantityById = useMemo(
+    () => new Map(customisations.map((item) => [item.id, item.quantity])),
+    [customisations],
+  )
 
   const price = selectedDessert.priceInCents
   const points = selectedDessert.priceInLoyaltyPoints
@@ -307,8 +328,8 @@ export default function CustomModal({
                       </View>
                     </View>
 
-                    <Image
-                      source={{ uri: selectedDessert.imagePath }}
+                    <CachedImage
+                      uri={selectedDessert.imagePath}
                       style={{ width: "100%", height: 200, borderRadius: 10 }}
                       resizeMode="contain"
                       className="px-3"
@@ -360,15 +381,9 @@ export default function CustomModal({
                   showsVerticalScrollIndicator={false}
                 >
                   {selectedDessert.ingredients
-                    .filter((ingredient) =>
-                      availableCustomisations?.some(
-                        (c) => c.id === ingredient.id,
-                      ),
-                    )
+                    .filter((ingredient) => availableIds.has(ingredient.id))
                     .map((ingredient) => {
-                      const toppingQuantity = customisations.find(
-                        (item) => item.id === ingredient.id,
-                      )?.quantity
+                      const toppingQuantity = quantityById.get(ingredient.id)
 
                       const quantity =
                         toppingQuantity === undefined
@@ -442,16 +457,9 @@ export default function CustomModal({
 
                   {type === "cents" &&
                     availableCustomisations
-                      ?.filter(
-                        (c) =>
-                          !selectedDessert.ingredients.some(
-                            (ingredient) => ingredient.id === c.id,
-                          ),
-                      )
+                      ?.filter((c) => !dessertIngredientIds.has(c.id))
                       .map((c) => {
-                        const toppingQuantity = customisations.find(
-                          (item) => item.id === c.id,
-                        )?.quantity
+                        const toppingQuantity = quantityById.get(c.id)
 
                         const quantity =
                           toppingQuantity === undefined

@@ -1,12 +1,11 @@
 "use client"
 import { View, Text, ScrollView } from "react-native"
 import CustomHeader from "@/_components/custom-header"
-import useFetch from "@/services/use_fetch"
-import { getPrivacyPolicy } from "@/services/api"
+import { usePrivacyPolicyQuery } from "@/services/queries"
 import BouncingLoader from "@/_components/loader"
 
 export default function PrivacyPolicy() {
-  const { data: privacyPolicy, loading } = useFetch(getPrivacyPolicy)
+  const { data: privacyPolicy, isLoading: loading } = usePrivacyPolicyQuery()
 
   if (loading) {
     return (

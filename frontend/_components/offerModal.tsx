@@ -5,11 +5,11 @@ import {
   Text,
   TouchableOpacity,
   Modal,
-  Image,
   ScrollView,
 } from "react-native"
 import { formatCurrency } from "@/lib/formatters"
 import CustomModal from "./modal"
+import { CachedImage } from "@/_components/cachedImage"
 
 type OfferModalProps = {
   offer: Offer
@@ -88,10 +88,11 @@ export default function OfferModal({
                       className="flex-row items-center justify-between bg-secondary rounded-lg p-4"
                     >
                       <View className="flex-row items-center flex-1">
-                        <Image
-                          source={{ uri: dessert.imagePath }}
+                        <CachedImage
+                          uri={dessert.imagePath}
                           className="w-20 h-20 rounded-lg mr-4"
                           resizeMode="cover"
+                          recyclingKey={dessert.id}
                         />
                         {/* Wrap the name text */}
                         <Text

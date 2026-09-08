@@ -195,19 +195,28 @@ export const setMembershipPopupExpiration = async () => {
 // Read the flag and check if it has expired
 export const hasMembershipPopupExpired = async (): Promise<boolean> => {
   try {
+    // The local flag is checked first on purpose. For the common case — someone
+    // who dismissed the popup within the last month — it settles the question
+    // on its own, and asking the server first meant every launch paid an
+    // authenticated round trip to reach the same answer.
+    const dataStr = await SecureStore.getItemAsync("showMembershipPopup")
+    const dismissalStillHolds = dataStr !== null && Date.now() <= Number(dataStr)
+
+    if (dismissalStillHolds) return false
+
+    // Past the dismissal window (or never dismissed), so membership is what
+    // decides it: members are never shown the popup.
     const usersMembership = await getUsersMembership()
     if (usersMembership?.isActive) {
       return false
-    } // don't show if user is already a member
+    }
 
-    const dataStr = await SecureStore.getItemAsync("showMembershipPopup")
-    if (!dataStr) return true // default: show popup if nothing stored
-    if (Date.now() > Number(dataStr)) {
+    if (dataStr !== null) {
       // expired, remove it
       await SecureStore.deleteItemAsync("showMembershipPopup")
-      return true // show popup again
     }
-    return false
+
+    return true
   } catch {
     return true // fallback in case of corrupted data
   }
@@ -219,9 +228,13 @@ export async function syncPushToken() {
     if (!authToken) {
       return
     }
-    const pushToken = await registerForPushNotificationsAsync()
-
-    const storedToken = await getPushToken()
+    // Independent of each other: one asks the OS and Expo's push service for a
+    // token, the other asks our server what it already has on file. This runs
+    // on every app foreground, so the serial version paid the sum all day.
+    const [pushToken, storedToken] = await Promise.all([
+      registerForPushNotificationsAsync(),
+      getPushToken(),
+    ])
 
     if (pushToken && pushToken !== storedToken) {
       await savePushToken(pushToken)

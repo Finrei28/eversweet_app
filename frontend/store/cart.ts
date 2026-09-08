@@ -11,18 +11,20 @@ import {
   clearCart,
   updateCartItemQuantity,
   getCartItems,
-  getLoyaltyRates,
   removeItemFromCart,
   updateCartItem,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
-import { isEqual } from "lodash"
+// Deep import: lodash's package entry is one monolithic CommonJS file and
+// Metro does not tree-shake, so the named import pulled the whole library in.
+import isEqual from "lodash/isEqual"
 import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
+import { fetchLoyaltyRates } from "@/services/queries"
 
 interface CartState {
   items: CartItem[]
@@ -492,7 +494,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       0,
     ),
   getEarnablePoints: async (usersMembership: UsersMembership | null) => {
-    const rates = await getLoyaltyRates()
+    // Cached: incrementing or decrementing an item re-runs this, and the
+    // uncached version put a request on the wire for every tap.
+    const rates = await fetchLoyaltyRates()
     return get().items.reduce(
       (acc, item) =>
         acc +

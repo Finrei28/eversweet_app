@@ -6,7 +6,7 @@ export default function StarDance() {
 
   useEffect(() => {
     // Loop forever between 0 → 1 → 0
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(anim, {
           toValue: 1,
@@ -21,7 +21,13 @@ export default function StarDance() {
           useNativeDriver: true,
         }),
       ])
-    ).start()
+    )
+
+    loop.start()
+
+    // Held in a variable so it can be stopped: previously the loop was started
+    // inline, leaving no handle to it, and two of these sit on the home screen.
+    return () => loop.stop()
   }, [anim])
 
   // Interpolate 0 → 1 → 0 into smooth left-right translation

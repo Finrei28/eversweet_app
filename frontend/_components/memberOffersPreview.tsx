@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from "react"
-import { View, Text, TouchableOpacity, Image } from "react-native"
-import { useFocusEffect, useRouter } from "expo-router"
-import { showOffers } from "@/services/api"
+import React, { useMemo } from "react"
+import { View, Text, TouchableOpacity } from "react-native"
+import { useRouter } from "expo-router"
+import { useOffersQuery } from "@/services/queries"
 import { Offers } from "@/utils/types"
+import { CachedImage } from "@/_components/cachedImage"
 
 /**
  * A short strip of the member's offers on the Membership page, linking through
@@ -15,32 +16,15 @@ const PREVIEW_LIMIT = 2
 
 export default function MemberOffersPreview() {
   const router = useRouter()
-  const [offers, setOffers] = useState<Offers>([])
-  const [loading, setLoading] = useState(true)
 
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false
+  // Shares its cache with the Offers page rather than fetching the same
+  // payload again: this used to refetch on every focus, so bouncing between
+  // Membership and Offers issued the request three times over.
+  const { data, isLoading: loading } = useOffersQuery()
 
-      showOffers()
-        .then((result) => {
-          if (cancelled) return
-          setOffers(
-            (result.offers ?? []).filter((o) => o.audience === "MEMBERS"),
-          )
-        })
-        .catch((error) => {
-          console.error("Failed to load member offers", error)
-          if (!cancelled) setOffers([])
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false)
-        })
-
-      return () => {
-        cancelled = true
-      }
-    }, []),
+  const offers: Offers = useMemo(
+    () => (data?.offers ?? []).filter((o) => o.audience === "MEMBERS"),
+    [data],
   )
 
   if (loading) {
@@ -102,8 +86,8 @@ export default function MemberOffersPreview() {
                 }`}
               >
                 {uri && (
-                  <Image
-                    source={{ uri }}
+                  <CachedImage
+                    uri={uri}
                     className="w-12 h-12 rounded-md mr-3"
                     resizeMode="contain"
                   />

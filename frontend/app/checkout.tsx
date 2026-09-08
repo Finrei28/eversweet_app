@@ -32,7 +32,6 @@ import DateTimePicker, {
 import {
   createOrder,
   checkOrderStatus,
-  getRestaurantStatus,
   getEstimatedPickUpTime,
 } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
@@ -55,7 +54,7 @@ import {
 } from "@/lib/formatters"
 import { addNZMonths, NZ_TIMEZONE, withNZTimeOfDay } from "@/lib/nzTime"
 import Toast from "react-native-toast-message"
-import useFetch from "@/services/use_fetch"
+import { useRestaurantStatusQuery } from "@/services/queries"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { getErrorMessage } from "@/utils/getError"
 import { TickAnimation } from "@/_components/tickAnimation"
@@ -70,9 +69,8 @@ function CheckoutContent() {
   const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
   const { token, authLoading, dataLoading, usersMembership, tradingCalendar } =
     useAuth()
-  const { data: restaurantStatus, loading: loadingRestaurantStatus } = useFetch(
-    () => getRestaurantStatus(),
-  )
+  const { data: restaurantStatus, isLoading: loadingRestaurantStatus } =
+    useRestaurantStatusQuery()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
@@ -104,8 +102,18 @@ function CheckoutContent() {
   const getTotalItems = useCartStore((state) => state.getTotalItems)
   const getTotalCost = useCartStore((state) => state.getTotalCost)
   const processOrder = useCartStore((state) => state.processOrder)
-  const totalItems = getTotalItems()
-  const totalPrice = getTotalCost()
+  // Derived straight from the subscribed items rather than through the store
+  // getter, so the dependency is the array itself.
+  const totalItems = useMemo(
+    () => cartItems.reduce((acc, item) => acc + item.quantity, 0),
+    [cartItems],
+  )
+
+  // getTotalCost reduces over every item and its customisations. It reads the
+  // store through get(), so cartItems is the real trigger even though the
+  // callback never names it — which is what the lint rule is objecting to.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const totalPrice = useMemo(() => getTotalCost(), [getTotalCost, cartItems])
 
   // Pickup time state
 
@@ -126,9 +134,12 @@ function CheckoutContent() {
   const [showDoneButton, setShowDoneButton] = useState(false)
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
-  const { closeTime } = getOpenCloseTime(
-    eatIn ? eatInDate : pickupDate,
-    tradingCalendar,
+  // Resolves the New Zealand calendar day several times over through
+  // date-fns-tz, each with its own Intl work — too expensive to repeat on every
+  // render of a screen this size.
+  const { closeTime } = useMemo(
+    () => getOpenCloseTime(eatIn ? eatInDate : pickupDate, tradingCalendar),
+    [eatIn, eatInDate, pickupDate, tradingCalendar],
   )
 
   // Eat-in has to be ordered further ahead of closing than a pickup does.
@@ -138,16 +149,21 @@ function CheckoutContent() {
 
   // Fetch saved cards when component mounts
 
+  // Once per mount. Keying this on `cartOperations === 0` meant removing an
+  // item — which bumps the counter to 1 and back to 0 — refetched the whole
+  // cart over the network and flashed the loader, even though the store had
+  // already applied the removal locally.
+  const hasLoadedCart = useRef(false)
   useEffect(() => {
-    if (cartOperations === 0) {
-      const getNewItems = async () => {
-        setLoading(true)
-        await useCartStore.getState().fetchCart()
-        setLoading(false)
-        // useCartStore.getState().getTotalItems()
-      }
-      getNewItems()
+    if (hasLoadedCart.current || cartOperations !== 0) return
+    hasLoadedCart.current = true
+
+    const getNewItems = async () => {
+      setLoading(true)
+      await useCartStore.getState().fetchCart()
+      setLoading(false)
     }
+    getNewItems()
   }, [cartOperations])
 
   useEffect(() => {
@@ -657,21 +673,22 @@ function CheckoutContent() {
     }
   }
 
-  const calculateGST = () => {
-    // Extracted from the total, not added to it. New Zealand prices include
-    // GST, so the 15% rate applies to the ex-GST amount: $23.00 inclusive
-    // holds $3.00 of GST, because $20.00 x 1.15 = $23.00. Taking 15% of the
-    // inclusive price gave $3.45 and overstated the line by 15%.
-    return (getTotalCost() * 3) / 23 / 100
-  }
+  // Extracted from the total, not added to it. New Zealand prices include
+  // GST, so the 15% rate applies to the ex-GST amount: $23.00 inclusive
+  // holds $3.00 of GST, because $20.00 x 1.15 = $23.00. Taking 15% of the
+  // inclusive price gave $3.45 and overstated the line by 15%.
+  const gstAmount = (totalPrice * 3) / 23 / 100
 
-  const calculateTotal = () => {
-    return getTotalCost() / 100
-  }
+  const orderTotal = totalPrice / 100
 
-  const calculateMembershipDiscount = () => {
-    return getTotalMembershipDiscount(usersMembership) / 100
-  }
+  // The heaviest of the three: per item it applies the membership discount and
+  // the promo (which allocates dates) and reduces over the customisations.
+  // Reads the store through get(), as above.
+  const membershipDiscount = useMemo(
+    () => getTotalMembershipDiscount(usersMembership) / 100,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [getTotalMembershipDiscount, usersMembership, cartItems],
+  )
 
   const handlePlaceOrder = async () => {
     if (!nextValidTime) {
@@ -1116,7 +1133,7 @@ function CheckoutContent() {
                     Membership Discount Included
                   </Text>
                   <Text className="font-medium">
-                    - {formatCurrency(calculateMembershipDiscount())}
+                    - {formatCurrency(membershipDiscount)}
                   </Text>
                 </View>
               )}
@@ -1129,13 +1146,13 @@ function CheckoutContent() {
               >
                 <Text className="text-gray-500">GST Included (15%)</Text>
                 <Text className="font-medium">
-                  {formatCurrency(calculateGST())}
+                  {formatCurrency(gstAmount)}
                 </Text>
               </View>
               <View className="flex-row justify-between mt-2 pt-2 border-t border-gray-200">
                 <Text className="font-bold">Total</Text>
                 <Text className="font-bold">
-                  {formatCurrency(calculateTotal())}
+                  {formatCurrency(orderTotal)}
                 </Text>
               </View>
             </View>

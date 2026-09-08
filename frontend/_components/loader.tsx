@@ -29,6 +29,11 @@ const BouncingLoader = () => {
     )
 
     loop.start()
+
+    // This component is the loading state on almost every screen, so without a
+    // stop here each visit left a running loop behind and they accumulated for
+    // the rest of the session.
+    return () => loop.stop()
   }, [])
 
   return (

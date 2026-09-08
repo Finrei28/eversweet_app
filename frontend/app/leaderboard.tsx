@@ -1,7 +1,6 @@
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
-import { getLeaderBoard } from "@/services/api"
-import useFetch from "@/services/use_fetch"
+import { useLeaderboardQuery } from "@/services/queries"
 import { useAuth } from "@/store/authProvider"
 import { LeaderBoard, UserLeaderBoardRank } from "@/utils/types"
 import { router } from "expo-router"
@@ -18,7 +17,9 @@ const getRankStyle = (index: number) => {
 export default function LeaderBoardPage() {
   const { token, authLoading, dataLoading, userDetails, leaderboardDetails } =
     useAuth()
-  const { data, loading } = useFetch(getLeaderBoard)
+  const { data, isLoading: loading } = useLeaderboardQuery({
+    enabled: !!token,
+  })
   useEffect(() => {
     if (authLoading) return
 

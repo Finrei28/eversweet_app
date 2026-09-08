@@ -1,12 +1,12 @@
 "use client"
 import { View, Text, ScrollView } from "react-native"
 import CustomHeader from "@/_components/custom-header"
-import useFetch from "@/services/use_fetch"
-import { getTermAndConditions } from "@/services/api"
+import { useTermsAndConditionsQuery } from "@/services/queries"
 import BouncingLoader from "@/_components/loader"
 
 export default function TermsAndConditions() {
-  const { data: termsAndConditions, loading } = useFetch(getTermAndConditions)
+  const { data: termsAndConditions, isLoading: loading } =
+    useTermsAndConditionsQuery()
 
   if (loading) {
     return (

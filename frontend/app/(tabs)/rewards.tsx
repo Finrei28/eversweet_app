@@ -6,40 +6,56 @@ import {
   ScrollView,
   Platform,
 } from "react-native"
-import React, { useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import PageHeader from "@/_components/pageheader"
 import { Dessert, DessertCategory } from "@/utils/types"
 import { useRouter } from "expo-router"
 import BouncingLoader from "@/_components/loader"
 import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
-import { fetchCategoriesWithDesserts } from "@/services/api"
-import useFetch from "@/services/use_fetch"
+import { useMenuQuery } from "@/services/queries"
 import CustomModal from "@/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 import { DessertCard } from "@/_components/dessertCard"
 
 export default function Loyalty() {
-  const { usersMembership } = useAuth()
+  const { token, authLoading, usersMembership } = useAuth()
   const [selectedCategory, setSelectedCategory] =
     useState<DessertCategory | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>("")
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [previousIndex, setPreviousIndex] = useState(0)
-  const flatListRef = useRef<FlatList<DessertCategory>>(null)
+  const flatListRef = useRef<FlatList<Dessert>>(null)
   const router = useRouter()
 
   const cartItems = useCartStore((state) => state.items)
 
-  const { data: categories, loading: categoriesLoading } = useFetch(
-    fetchCategoriesWithDesserts,
+  const loyaltyPoints = useLoyaltyStore((state) => state.points)
+
+  const { data: categories, isLoading: categoriesLoading } = useMenuQuery()
+
+  // Hoisted to keep a stable identity across renders — see the note on the
+  // list below.
+  const renderDessert = useCallback(
+    ({ item }: { item: Dessert }) => (
+      <DessertCard
+        dessert={item}
+        token={token}
+        usersMembership={usersMembership}
+        setSelectedDessert={setSelectedDessert}
+        setModalVisible={setModalVisible}
+        router={router}
+        currency="points"
+        loyaltyPoints={loyaltyPoints}
+      />
+    ),
+    [token, usersMembership, router, loyaltyPoints],
   )
 
-  const { token, authLoading } = useAuth()
+  const keyExtractor = useCallback((item: Dessert) => item.id.toString(), [])
 
-  const loyaltyPoints = useLoyaltyStore((state) => state.points)
 
   useEffect(() => {
     if (token) {
@@ -180,38 +196,24 @@ export default function Loyalty() {
                   </Text>
                 </View>
                 {selectedCategory ? (
+                  /* Flattened for the same reason as the menu screen: a
+                     vertical FlatList nested in a vertical FlatList cannot
+                     virtualise, so every dessert mounted eagerly. */
                   <FlatList
                     ref={flatListRef}
-                    data={[selectedCategory]}
-                    keyExtractor={(item) => item.id.toString()}
-                    renderItem={({ item }) => (
-                      <View className="mb-8">
-                        {/* Category Name */}
-                        <Text className="text-3xl font-bold text-center mb-6">
-                          {item.name}
-                        </Text>
-
-                        {/* Desserts List */}
-                        <FlatList
-                          data={item.desserts} // Only this category's desserts
-                          keyExtractor={(dessert) => dessert.id.toString()}
-                          renderItem={({ item: dessert }) => {
-                            return (
-                              <DessertCard
-                                dessert={dessert}
-                                token={token}
-                                usersMembership={usersMembership}
-                                setSelectedDessert={setSelectedDessert}
-                                setModalVisible={setModalVisible}
-                                router={router}
-                                currency="points"
-                                loyaltyPoints={loyaltyPoints}
-                              />
-                            )
-                          }}
-                        />
-                      </View>
-                    )}
+                    data={selectedCategory.desserts}
+                    keyExtractor={keyExtractor}
+                    renderItem={renderDessert}
+                    ListHeaderComponent={
+                      <Text className="text-3xl font-bold text-center mb-6">
+                        {selectedCategory.name}
+                      </Text>
+                    }
+                    initialNumToRender={4}
+                    maxToRenderPerBatch={4}
+                    windowSize={7}
+                    removeClippedSubviews
+                    contentContainerStyle={{ paddingBottom: 32 }}
                   />
                 ) : (
                   <View className="flex-1 items-center justify-center">

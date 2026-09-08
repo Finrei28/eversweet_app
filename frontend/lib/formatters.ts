@@ -25,38 +25,48 @@ export function formatNumber(amount: number) {
  * resolves the value against the device's own timezone.
  */
 
+/*
+ * Built once at module scope, like the two number formatters above. Building an
+ * Intl.DateTimeFormat resolves locale data and compiles an ICU pattern, which
+ * is among the more expensive things Hermes does — and these are called once
+ * per order per render on the orders and order-history screens.
+ */
+const Short_Date_Formatter = new Intl.DateTimeFormat("en-NZ", {
+  timeZone: NZ_TIMEZONE,
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+})
+
+const Long_Date_Formatter = new Intl.DateTimeFormat("en-NZ", {
+  timeZone: NZ_TIMEZONE,
+  weekday: "long",
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+})
+
+const Collection_Time_Formatter = new Intl.DateTimeFormat("en-NZ", {
+  timeZone: NZ_TIMEZONE,
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+})
+
 export const formatShortDate = (date: Date) => {
-  const newDate = new Date(date)
-  return new Intl.DateTimeFormat("en-NZ", {
-    timeZone: NZ_TIMEZONE,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-  }).format(newDate)
+  return Short_Date_Formatter.format(new Date(date))
 }
 
 export const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
-  return new Intl.DateTimeFormat("en-NZ", {
-    timeZone: NZ_TIMEZONE,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  }).format(date)
+  return Long_Date_Formatter.format(new Date(dateString))
 }
 
 export const getCollectionTime = (date: Date) => {
-  return new Intl.DateTimeFormat("en-NZ", {
-    timeZone: NZ_TIMEZONE,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  }).format(date)
+  return Collection_Time_Formatter.format(date)
 }
 
 /** Time of day, e.g. "2:30 PM". */

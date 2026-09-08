@@ -7,8 +7,12 @@ import { useAuth } from "@/store/authProvider"
 
 const ViewCart = () => {
   const router = useRouter()
-  const getTotalItems = useCartStore((state) => state.getTotalItems)
-  const totalQuantity = getTotalItems()
+  // Selecting getTotalItems returns a stable function, so this component was
+  // subscribed to nothing and the badge only refreshed when its parent happened
+  // to re-render. Selecting the derived number subscribes it to the cart.
+  const totalQuantity = useCartStore((state) =>
+    state.items.reduce((total, item) => total + item.quantity, 0),
+  )
   const { token } = useAuth()
 
   const handlePress = () => {

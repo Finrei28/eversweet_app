@@ -1,15 +1,14 @@
+import { CachedImage } from "@/_components/cachedImage"
 import BouncingLoader from "@/_components/loader"
 import { StatusBadge } from "@/_components/orderStatusBadge"
 import PageHeader from "@/_components/pageheader"
 import { formatCurrency, formatDate, getCollectionTime } from "@/lib/formatters"
-import { getUserOrders } from "@/services/api"
-import useFetch from "@/services/use_fetch"
+import { useOrdersQuery } from "@/services/queries"
 import { useAuth } from "@/store/authProvider"
 import { Feather } from "@expo/vector-icons"
 import { useFocusEffect, useRouter } from "expo-router"
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import {
-  Image,
   Platform,
   RefreshControl,
   ScrollView,
@@ -26,12 +25,15 @@ export default function Orders() {
 
   // Use our custom animation hook
 
+  // isLoading rather than isPending: a query disabled for want of a token stays
+  // "pending" forever, which would hold the spinner up for signed-out users.
   const {
     data: orders,
-    loading: ordersLoading,
+    isLoading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useFetch(() => getUserOrders("PENDING")) // Gets pending and completed orders from backend
+    isStale,
+  } = useOrdersQuery("PENDING", { enabled: !!token }) // pending and completed orders
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -42,13 +44,15 @@ export default function Orders() {
     }
   }, [refetchOrders])
 
-  // Poll for updates every 30 seconds for pending orders
+  // Refetch on focus only once the cached list has actually gone stale. This
+  // used to fire unconditionally, so opening the tab issued one request on
+  // mount and a second on first focus, and every tab switch issued another.
   useFocusEffect(
     useCallback(() => {
-      if (!token) return
+      if (!token || !isStale) return
 
-      refetchOrders()
-    }, [token, refetchOrders]),
+      void refetchOrders()
+    }, [token, isStale, refetchOrders]),
   )
 
   const formatPickupTime = (pickupTime: string | null) => {
@@ -62,10 +66,15 @@ export default function Orders() {
     }
   }
 
-  const pendingOrders =
-    orders?.filter((order) => order.status !== "READY") || []
-  const completedOrders =
-    orders?.filter((order) => order.status === "READY") || []
+  // Memoised because expanding a single order re-renders this screen, and both
+  // passes plus the nested reduces below used to run again for every order.
+  const [pendingOrders, completedOrders] = useMemo(
+    () => [
+      orders?.filter((order) => order.status !== "READY") ?? [],
+      orders?.filter((order) => order.status === "READY") ?? [],
+    ],
+    [orders],
+  )
 
   if (authLoading || ordersLoading) {
     return (
@@ -322,10 +331,11 @@ export default function Orders() {
                             }`}
                           >
                             <View className="w-14 h-14 rounded-md mr-3 overflow-hidden">
-                              <Image
-                                source={{ uri: item.dessert.imagePath }}
-                                style={{ width: "100%", height: "100%" }} // 8 * 4 = 32
+                              <CachedImage
+                                uri={item.dessert.imagePath}
+                                style={{ width: "100%", height: "100%" }}
                                 resizeMode="cover"
+                                recyclingKey={item.dessert.id}
                               />
                             </View>
                             <View className="flex-1">
@@ -504,10 +514,11 @@ export default function Orders() {
                             }`}
                           >
                             <View className="w-14 h-14 rounded-md mr-3 overflow-hidden">
-                              <Image
-                                source={{ uri: item.dessert.imagePath }}
-                                style={{ width: "100%", height: "100%" }} // 8 * 4 = 32
+                              <CachedImage
+                                uri={item.dessert.imagePath}
+                                style={{ width: "100%", height: "100%" }}
                                 resizeMode="cover"
+                                recyclingKey={item.dessert.id}
                               />
                             </View>
                             <View className="flex-1">

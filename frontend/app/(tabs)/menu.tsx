@@ -13,8 +13,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router"
 import BouncingLoader from "@/_components/loader"
 import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"
-import { fetchCategoriesWithDesserts } from "@/services/api"
-import useFetch from "@/services/use_fetch"
+import { useMenuQuery } from "@/services/queries"
 import CustomModal from "@/_components/modal"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
@@ -28,11 +27,33 @@ export default function Menu() {
   const [modalVisible, setModalVisible] = useState(false)
   const [previousIndex, setPreviousIndex] = useState(0)
   const { token, usersMembership, authLoading, dataLoading } = useAuth()
-  const flatListRef = useRef<FlatList<DessertCategory>>(null)
+  const flatListRef = useRef<FlatList<Dessert>>(null)
   const router = useRouter()
   const cartItems = useCartStore((state) => state.items)
 
-  const { data: menu, loading } = useFetch(fetchCategoriesWithDesserts)
+  // Shared cache key with the home and rewards tabs, so the menu is fetched
+  // once per session rather than once per tab.
+  const { data: menu, isLoading: loading } = useMenuQuery()
+
+  // Hoisted so the list keeps a stable renderItem identity across renders;
+  // an inline arrow defeats FlatList's own cell memoisation.
+  const renderDessert = useCallback(
+    ({ item }: { item: Dessert }) => (
+      <DessertCard
+        dessert={item}
+        token={token}
+        usersMembership={usersMembership}
+        setSelectedDessert={setSelectedDessert}
+        setModalVisible={setModalVisible}
+        router={router}
+        currency="cents"
+        membershipPending={dataLoading}
+      />
+    ),
+    [token, usersMembership, router, dataLoading],
+  )
+
+  const keyExtractor = useCallback((item: Dessert) => item.id.toString(), [])
 
   useFocusEffect(
     useCallback(() => {
@@ -110,7 +131,7 @@ export default function Menu() {
       <View className="flex-1 bg-background">
         <PageHeader />
         {cartItems?.length > 0 && <ViewCart />}
-        {loading || authLoading || dataLoading ? (
+        {loading || authLoading ? (
           <View
             className={`flex-1 items-center justify-center ${
               Platform.OS === "ios" ? "mt-32" : "mt-24"
@@ -150,35 +171,27 @@ export default function Menu() {
               </ScrollView>
             )}
             {selectedCategory ? (
+              /* One flat list of desserts. This used to be a vertical FlatList
+                 of desserts nested inside a vertical FlatList whose data was
+                 `[selectedCategory]` — the inner list could not resolve a
+                 viewport through the outer one's cell, so virtualisation was
+                 off and every dessert mounted at once, each with a 288pt
+                 remote image. */
               <FlatList
                 ref={flatListRef}
-                data={[selectedCategory]}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => (
-                  <View className="my-8">
-                    {/* Category Name */}
-                    <Text className="text-3xl font-bold text-center mb-6">
-                      {item.name}
-                    </Text>
-
-                    {/* Desserts List */}
-                    <FlatList
-                      data={item.desserts} // Only this category's desserts
-                      keyExtractor={(dessert) => dessert.id.toString()}
-                      renderItem={({ item: dessert }) => (
-                        <DessertCard
-                          dessert={dessert}
-                          token={token}
-                          usersMembership={usersMembership}
-                          setSelectedDessert={setSelectedDessert}
-                          setModalVisible={setModalVisible}
-                          router={router}
-                          currency="cents"
-                        />
-                      )}
-                    />
-                  </View>
-                )}
+                data={selectedCategory.desserts}
+                keyExtractor={keyExtractor}
+                renderItem={renderDessert}
+                ListHeaderComponent={
+                  <Text className="text-3xl font-bold text-center mb-6 mt-8">
+                    {selectedCategory.name}
+                  </Text>
+                }
+                initialNumToRender={4}
+                maxToRenderPerBatch={4}
+                windowSize={7}
+                removeClippedSubviews
+                contentContainerStyle={{ paddingBottom: 32 }}
               />
             ) : (
               <View className="flex-1 items-center justify-center mt-16">
