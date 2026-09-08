@@ -223,7 +223,7 @@ export default function OrderHistory() {
                             <View className="flex flex-row items-center justify-between">
                               <Text className="font-medium">
                                 {item.dessert.name}{" "}
-                                {item.offerId && `(Members Offer)`}
+                                {item.offerId && `(Offer)`}
                               </Text>
                               <Text>
                                 {formatCurrency(

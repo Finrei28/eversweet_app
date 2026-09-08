@@ -7,9 +7,9 @@ import {
   CartItem,
   DessertCategory,
   Offers,
+  OfferViewer,
   LoyaltyRates,
   Announcements,
-  HomePageContent,
   RestaurantStatus,
   offerForClient,
   PrivacyPolicy,
@@ -405,12 +405,20 @@ export const updateCartItemQuantity = async (
   return data.cartItem
 }
 
-export const showOffers = async (): Promise<Offers> => {
-  const data = await apiRequest<{ offers: Offers }>("/api/auth/showOffers", {
-    authMessage: "Please sign in to see membership offers",
-    statusMessages: { 401: UNAUTHENTICATED },
-  })
-  return data.offers
+export const showOffers = async (): Promise<{
+  offers: Offers
+  viewer: OfferViewer
+}> => {
+  const data = await apiRequest<{ offers: Offers; viewer: OfferViewer }>(
+    "/api/auth/showOffers",
+    {
+      authMessage: "Please sign in to see offers",
+      statusMessages: { 401: UNAUTHENTICATED },
+    },
+  )
+  // `viewer` says which gated audiences this customer qualifies for. The app
+  // can work out membership itself but not whether they are a new customer.
+  return { offers: data.offers ?? [], viewer: data.viewer }
 }
 
 export const showOfferForClient = async (): Promise<offerForClient[]> => {
@@ -522,9 +530,6 @@ export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> =>
 
 export const getAnnouncements = async (): Promise<Announcements> =>
   apiRequest<Announcements>("/api/getAnnouncements")
-
-export const getHomepageCards = async (): Promise<HomePageContent[]> =>
-  apiRequest<HomePageContent[]>("/api/getHomepageCards")
 
 export const getPrivacyPolicy = async (): Promise<PrivacyPolicy> =>
   apiRequest<PrivacyPolicy>("/api/getPrivacyPolicy")

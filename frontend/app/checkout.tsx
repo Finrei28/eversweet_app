@@ -1053,7 +1053,7 @@ function CheckoutContent() {
                       ellipsizeMode="tail"
                       className="flex-shrink"
                     >
-                      {item.dessert.name} {item.offerId && "(Members Offer)"}
+                      {item.dessert.name} {item.offerId && "(Offer)"}
                     </Text>
                   </View>
 

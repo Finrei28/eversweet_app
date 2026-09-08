@@ -179,12 +179,22 @@ export type OfferRequirement = {
   quantity: number
 }
 
+/** Who an offer is for. Mirrors the OfferAudience enum in the Prisma schema. */
+export type OfferAudience = "MEMBERS" | "EVERYONE" | "NEW_USERS"
+
+/** Whether the signed-in viewer qualifies for each gated audience. */
+export type OfferViewer = {
+  isActiveMember: boolean
+  isNewCustomer: boolean
+}
+
 // A single redemption record
 export type Offer = {
   id: string
   name: string
   description: string | null
   image: string | null
+  audience: OfferAudience
   dessertId: string | null
   categoryId: string | null
   itemPriceInCents: number | null
@@ -195,7 +205,7 @@ export type Offer = {
   requirements: OfferRequirement[]
   redemptions: {
     id: string
-    membershipId: string
+    userId: string
     offerId: string
     redeemedAt: Date | null
     used: number
@@ -210,6 +220,7 @@ export type offerForClient = {
   id: string
   image: string | null
   description: string | null
+  audience: OfferAudience
   dessertId: string | null
   categoryId: string | null
   itemPriceInCents: number | null
@@ -253,12 +264,6 @@ export type Announcement = {
 }
 
 export type Announcements = Announcement[]
-
-export type HomePageContent = {
-  title: string
-  image: string
-  category: string
-}
 
 export type SetUpIntent = {
   setupIntent: string | null

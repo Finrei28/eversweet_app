@@ -17,18 +17,16 @@ import {
   createMembership,
   getSavedCards,
   pollMembershipStatus,
-  resumeMembership,
   retryPayment,
 } from "@/services/stripe-api"
 import { useAuth } from "@/store/authProvider"
 import BouncingLoader from "@/_components/loader"
-import { formatCurrency, formatShortDate } from "@/lib/formatters"
-import ShowOffers from "@/_components/showOffersToMembers"
-import CancelMembershipModal from "@/_components/cancelMembershipModal"
+import { formatCurrency } from "@/lib/formatters"
+import MemberOffersPreview from "@/_components/memberOffersPreview"
+import MemberDiscountCard from "@/_components/memberDiscountCard"
+import ManageMembershipCard from "@/_components/manageMembershipCard"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
-import DancingStar from "@/_components/dancingStar"
-import Toast from "react-native-toast-message"
 import { getErrorMessage } from "@/utils/getError"
 
 export default function MembershipPage() {
@@ -60,10 +58,8 @@ function MembershipContent() {
   const [submitted, setSubmitted] = useState(false)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
-  const [cancelMembership, setCancelMembership] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
-  const [isResuming, setIsResuming] = useState(false)
   const membershipStatus = usersMembership?.paymentStatus
 
   // Fetch saved cards when component mounts
@@ -200,37 +196,6 @@ function MembershipContent() {
     }
   }
 
-  const handleResumeMembership = async () => {
-    setIsResuming(true)
-    try {
-      await resumeMembership()
-      await refetchUsersMembership()
-      Toast.show({
-        type: "success",
-        text1: `Your membership has been resumed.`,
-        position: "bottom",
-        visibilityTime: 3000,
-        autoHide: true,
-        bottomOffset: 60,
-        props: {
-          text1NumberOfLines: 0,
-          text2NumberOfLines: 0, // allow wrapping
-        },
-      })
-      // await new Promise((resolve) => setTimeout(resolve, 2000))
-    } catch (error) {
-      Alert.alert(
-        "Failed to resume your membership",
-        getErrorMessage(
-          error,
-          "Could not resume your membership at this time. Please try again later or contact support.",
-        ),
-      )
-    } finally {
-      setIsResuming(false)
-    }
-  }
-
   const handleRetryPayment = async () => {
     setIsProcessingPayment(true)
     try {
@@ -282,7 +247,7 @@ function MembershipContent() {
   return (
     <View className="flex-1 bg-background">
       <CustomHeader />
-      <ScrollView className="flex-1 px-4">
+      <ScrollView className="flex-1 px-4 mb-4">
         <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Membership</Text>
         </View>
@@ -323,71 +288,6 @@ function MembershipContent() {
                   : "N/A"}{" "}
                 / month
               </Text>
-
-              <View>
-                {usersMembership?.isActive && usersMembership?.cancel && (
-                  <View className="flex flex-row items-center justify-between">
-                    <Text className="text-gray-500">
-                      Expires on: {formatShortDate(usersMembership.endDate)}
-                    </Text>
-
-                    {usersMembership?.isActive && usersMembership?.cancel && (
-                      <TouchableOpacity
-                        onPress={handleResumeMembership}
-                        disabled={isResuming}
-                        className="bg-primary px-2 py-1 rounded-lg items-center justify-center"
-                      >
-                        <Text
-                          className={`text-white ${isResuming ? "opacity-0" : ""}`}
-                        >
-                          Re-subscribe
-                        </Text>
-
-                        {isResuming && (
-                          <ActivityIndicator
-                            color="white"
-                            className="absolute"
-                          />
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
-                {usersMembership?.isActive && !usersMembership?.cancel && (
-                  <View className="flex flex-row items-center justify-between">
-                    <Text
-                      className={
-                        usersMembership.paymentStatus === "SUCCESS"
-                          ? "text-gray-500"
-                          : "text-red-500"
-                      }
-                    >
-                      {usersMembership.paymentStatus === "SUCCESS"
-                        ? `${"Renews on: " + formatShortDate(usersMembership.endDate)}`
-                        : "Payment Failed"}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        usersMembership.paymentStatus === "SUCCESS"
-                          ? setCancelMembership(true)
-                          : handleRetryPayment()
-                      }
-                      className={`${usersMembership.paymentStatus === "SUCCESS" ? "bg-red-500" : "bg-primary"} px-2 py-1 rounded-lg items-center justify-center`}
-                      disabled={isProcessingPayment}
-                    >
-                      {isProcessingPayment ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text className="text-white">
-                          {usersMembership.paymentStatus === "SUCCESS"
-                            ? "Cancel"
-                            : "Retry payment"}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
             </View>
             {usersMembership?.isActive && usersMembership?.cancel && (
               <Text className="pt-2">
@@ -408,44 +308,21 @@ function MembershipContent() {
           </View>
         </View>
 
-        {/* Payment Method */}
+        {/* Discount and Offer */}
         {usersMembership && usersMembership.isActive ? (
           <View>
-            <View className="flex flex-row">
-              <Text className="text-lg font-medium mb-2 px-1">
-                Current Membership Discount:{" "}
-                <Text
-                  className={`${
-                    usersMembership.totalMonths *
-                      usersMembership.plan.membershipDiscount >=
-                    usersMembership.plan.maxDiscount
-                      ? "text-primary"
-                      : ""
-                  }`}
-                >
-                  {Math.min(
-                    usersMembership.plan.maxDiscount,
-                    usersMembership.totalMonths *
-                      usersMembership.plan.membershipDiscount,
-                  )}
-                </Text>
-                %
-              </Text>
-              <View className="">
-                {usersMembership.totalMonths *
-                  usersMembership.plan.membershipDiscount >=
-                  usersMembership.plan.maxDiscount && <DancingStar />}
-              </View>
-            </View>
-
-            <Text className="text-xl font-medium mb-2 px-1">
-              Member Offers:
-            </Text>
-
-            <ShowOffers usersMembership={usersMembership} />
+            <MemberDiscountCard usersMembership={usersMembership} />
+            <MemberOffersPreview />
+            <ManageMembershipCard
+              usersMembership={usersMembership}
+              isProcessingPayment={isProcessingPayment}
+              onRetryPayment={handleRetryPayment}
+            />
           </View>
         ) : (
           <View>
+            {" "}
+            {/* Payment Method */}
             <View className="bg-white rounded-xl shadow-sm p-4">
               <View className="flex-row justify-between items-center mb-3">
                 <Text className="text-lg font-medium">Payment Method</Text>
@@ -532,7 +409,6 @@ function MembershipContent() {
                 </View>
               )}
             </View>
-
             <View className="p-4 my-4">
               <View className="flex-row items-center">
                 <Checkbox
@@ -570,7 +446,6 @@ function MembershipContent() {
                 </Text>
               )}
             </View>
-
             {/* Join Membership Button */}
             {!showAddCard && (
               <TouchableOpacity
@@ -587,7 +462,6 @@ function MembershipContent() {
                 )}
               </TouchableOpacity>
             )}
-
             {/* Stripe Information */}
             <View className="mt-6 mb-10">
               <View className="flex-row items-center justify-center mb-2">
@@ -604,14 +478,6 @@ function MembershipContent() {
           </View>
         )}
       </ScrollView>
-      {cancelMembership && (
-        <CancelMembershipModal
-          modalVisible={cancelMembership}
-          setModalVisible={setCancelMembership}
-          membershipDetails={membershipDetails}
-          onCancelled={refetchUsersMembership}
-        />
-      )}
     </View>
   )
 }

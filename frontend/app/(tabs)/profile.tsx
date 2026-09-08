@@ -162,6 +162,17 @@ export default function Profile() {
             title="Membership"
             onPress={() => navigateTo("/membership")}
           />
+          <ProfileMenuItem
+            icon={
+              <MaterialCommunityIcons
+                name="ticket-percent-outline"
+                size={24}
+                color="#6B7280"
+              />
+            }
+            title="Offers"
+            onPress={() => navigateTo("/offers")}
+          />
           {leaderboardDetails?.show && (
             <ProfileMenuItem
               icon={<Trophy size={24} color="#6B7280" />}

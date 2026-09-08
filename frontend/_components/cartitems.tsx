@@ -86,7 +86,7 @@ export function CartItems({
             <Text className="text-lg font-semibold ">
               {item.dessert.name}{" "}
               {item.offerId
-                ? "(Members Offer)"
+                ? "(Offer)"
                 : item.dessert.promo?.isActive
                   ? "(Promotion)"
                   : ""}
