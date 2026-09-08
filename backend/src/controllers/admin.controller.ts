@@ -23,6 +23,7 @@ import { Prisma } from "@prisma/client"
 import { DateTime } from "luxon"
 import { es } from "date-fns/locale"
 import { getErrorMessage } from "../utils/getError"
+import { invalidate, CACHE_KEYS } from "../lib/cache"
 const expo = new Expo()
 
 export const adminSignIn = async (req: Request, res: Response) => {
@@ -582,6 +583,10 @@ export const updateDaysOff = async (req: Request, res: Response) => {
           ]
         : []),
     ])
+    // The public /api/getDaysOff answer is now wrong; drop it rather than
+    // leaving customers on a stale trading calendar until the TTL lapses.
+    await invalidate(CACHE_KEYS.daysOff)
+
     const newDates = await db.daysOff.findMany({ select: { date: true } })
     const destructuredDates = newDates.map((day) => day.date)
     res.status(200).json({ newDates: destructuredDates })
@@ -782,6 +787,11 @@ export const updateDailySpecial = async () => {
         },
       },
     })
+
+    // The menu payload embeds each dessert's promo, so today's special is
+    // baked into the cached copy. Without this the new discount would not
+    // reach customers until the menu's TTL lapsed.
+    await invalidate(CACHE_KEYS.menu)
   } catch (error) {
     throw new Error(
       `Failed to update daily special: ${getErrorMessage(error)}`,

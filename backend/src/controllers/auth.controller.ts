@@ -506,11 +506,21 @@ export const getUserOrders = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
 
-    const { status } = req.body ?? {}
+    const { status, limit, cursor } = req.body ?? {}
     if (!Object.values(Status).includes(status)) {
       res.status(400).json({ message: "Invalid status" })
       return
     }
+
+    /*
+     * Optional, and omitted means "all of them" — the shape older builds
+     * already on people's phones expect. Picked-up orders accumulate for the
+     * life of an account, so the history screen asks for a page at a time
+     * rather than downloading and parsing every order a regular customer has
+     * ever placed.
+     */
+    const take =
+      typeof limit === "number" && limit > 0 ? Math.min(limit, 100) : undefined
     if (!userId) {
       res.status(401).json({ message: "Unauthenticated" })
       return
@@ -530,6 +540,10 @@ export const getUserOrders = async (req: Request, res: Response) => {
           orderBy: {
             createdAt: "desc", // ✅ Sorts by newest first
           },
+          // One past the page so the caller learns whether more exist without
+          // a second count query.
+          ...(take ? { take: take + 1 } : {}),
+          ...(cursor ? { skip: 1, cursor: { id: cursor as string } } : {}),
           include: {
             desserts: {
               include: {
@@ -559,7 +573,14 @@ export const getUserOrders = async (req: Request, res: Response) => {
         },
       },
     })
-    res.status(200).json({ orders: orders?.appOrders })
+    const page = orders?.appOrders ?? []
+    const hasMore = take !== undefined && page.length > take
+    const items = hasMore ? page.slice(0, take) : page
+
+    res.status(200).json({
+      orders: items,
+      nextCursor: hasMore ? items[items.length - 1]?.id : null,
+    })
     return
   } catch (error) {
     res.status(500).json({ message: error })
