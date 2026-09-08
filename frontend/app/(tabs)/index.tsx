@@ -11,7 +11,7 @@ import {
 import PageHeader from "@/_components/pageheader"
 import Carousel from "react-native-reanimated-carousel"
 import { useSharedValue } from "react-native-reanimated"
-import { SplashScreen, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
 import { FontAwesome } from "@expo/vector-icons"
 import { getHomepageCards, showOfferForClient } from "@/services/api"
 import BouncingLoader from "@/_components/loader"

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import {
   AppState,
   type AppStateStatus,
 } from "react-native"
-import { useFocusEffect, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
+import * as Crypto from "expo-crypto"
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
@@ -22,6 +23,7 @@ import {
   getSavedCards,
   createPaymentIntent,
   checkPaymentStatus,
+  DuplicateOrderError,
 } from "@/services/stripe-api"
 import { useCartStore } from "@/store/cart"
 import DateTimePicker, {
@@ -34,7 +36,7 @@ import {
   getEstimatedPickUpTime,
 } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
-import { isOutsideBusinessHours } from "@/lib/businessHours"
+import { isDayOff, isOutsideBusinessHours } from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
 import {
   getLastOrderTime,
@@ -48,6 +50,7 @@ import {
   formatDayMonthTime,
   formatShortDate,
   formatTime,
+  formatWeekdayDate,
   roundToNearest5,
 } from "@/lib/formatters"
 import { addNZMonths, NZ_TIMEZONE, withNZTimeOfDay } from "@/lib/nzTime"
@@ -65,7 +68,7 @@ const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
-  const { token, authLoading, dataLoading, usersMembership, storeHours } =
+  const { token, authLoading, dataLoading, usersMembership, tradingCalendar } =
     useAuth()
   const { data: restaurantStatus, loading: loadingRestaurantStatus } = useFetch(
     () => getRestaurantStatus(),
@@ -81,6 +84,13 @@ function CheckoutContent() {
   const [isCheckingStatus, setIsCheckingStatus] = useState(false)
   const appState = useRef(AppState.currentState)
   const [showEatInError, setShowEatInError] = useState(false)
+  const eatInErrorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (eatInErrorTimeout.current) clearTimeout(eatInErrorTimeout.current)
+    },
+    [],
+  )
   const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [creatingOrderLoading, setCreatingOrderLoading] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -108,10 +118,9 @@ function CheckoutContent() {
   const pickupNowRef = useRef(pickupNow)
   pickupNowRef.current = pickupNow
 
-  // const nextValidTime = useMemo(
-  //   () => getNextValidPickupTime(new Date(), getTotalItems(), storeHours),
-  //   [pickupDate]
-  // )
+  const [estimatedReadyTime, setEstimatedReadyTime] = useState<Date | null>(
+    null,
+  )
   const [nextValidTime, setNextValidTime] = useState<Date | null>(null)
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [showDoneButton, setShowDoneButton] = useState(false)
@@ -119,7 +128,7 @@ function CheckoutContent() {
   const [showTime, setShowTime] = useState(false)
   const { closeTime } = getOpenCloseTime(
     eatIn ? eatInDate : pickupDate,
-    storeHours,
+    tradingCalendar,
   )
 
   // Eat-in has to be ordered further ahead of closing than a pickup does.
@@ -151,18 +160,41 @@ function CheckoutContent() {
   }, [token])
 
   useEffect(() => {
-    // storeHours starts as AuthProvider's fallback and is replaced once the
-    // real hours load, so the first valid pickup time has to be recomputed
-    // rather than settled on mount against the placeholder.
+    // The trading calendar starts as AuthProvider's fallback hours with no
+    // days off, and is replaced once the real ones load, so the first valid
+    // pickup time has to be recomputed rather than settled on mount against
+    // the placeholder.
     let cancelled = false
 
     const init = async () => {
       try {
+        // Fetched here rather than inside the helper so a failure can be
+        // absorbed: nextValidTime is null only when the week holds no trading
+        // hours at all, never because one request did not come back. Falling
+        // back to now still leaves the slot bounded by the store's hours, and
+        // the refresh interval below picks up the real estimate on its next
+        // pass.
+        const earliestReadyTime = await getEstimatedPickUpTime(
+          totalItems,
+        ).catch((error) => {
+          console.error("Failed to fetch the estimated pickup time", error)
+          return new Date()
+        })
+        // Functional form so the effect never has to read the current value:
+        // that read was a stale closure, and listing it as a dependency would
+        // restart the lookup every time the estimate moved. Returning `prev`
+        // unchanged keeps the identity stable, so nothing re-renders.
+        setEstimatedReadyTime((prev) =>
+          prev?.getTime() === earliestReadyTime.getTime()
+            ? prev
+            : earliestReadyTime,
+        )
+
         const next = await getNextValidPickupTime(
           new Date(),
           totalItems,
-          storeHours,
-          { lastOrderOffsetMinutes },
+          tradingCalendar,
+          { earliestReadyTime, lastOrderOffsetMinutes },
         )
         if (cancelled) return
 
@@ -170,7 +202,8 @@ function CheckoutContent() {
         // Only steer the chosen time while it is still derived ("as soon as
         // possible"). A time the customer chose themselves must not be moved.
         if (pickupNowRef.current) {
-          eatIn ? setEatInDate(next) : setPickupDate(next)
+          if (eatIn) setEatInDate(next)
+          else setPickupDate(next)
         }
       } catch (error) {
         console.error("Failed to work out the next valid pickup time", error)
@@ -183,8 +216,9 @@ function CheckoutContent() {
       cancelled = true
     }
     // Depends on eatIn: switching mode changes the cut-off, which can move the
-    // soonest bookable slot to the next trading day.
-  }, [storeHours, eatIn, lastOrderOffsetMinutes])
+    // soonest bookable slot to the next trading day. On totalItems because a
+    // larger cart takes the kitchen longer, which can do the same.
+  }, [tradingCalendar, eatIn, lastOrderOffsetMinutes, totalItems])
 
   useEffect(() => {
     let cancelled = false
@@ -196,16 +230,20 @@ function CheckoutContent() {
 
       try {
         const now = new Date()
-        const estimatedPickupTime = await getEstimatedPickUpTime(totalItems)
-
+        const earliestReadyTime = await getEstimatedPickUpTime(totalItems)
+        setEstimatedReadyTime((prev) =>
+          prev?.getTime() === earliestReadyTime.getTime()
+            ? prev
+            : earliestReadyTime,
+        )
         // Hand the estimate over rather than letting this refetch it: the two
         // calls hit the same endpoint with the same argument.
         const nextValidPickupTime = await getNextValidPickupTime(
           now,
           totalItems,
-          storeHours,
+          tradingCalendar,
           {
-            earliestReadyTime: estimatedPickupTime,
+            earliestReadyTime: earliestReadyTime,
             lastOrderOffsetMinutes,
           },
         )
@@ -213,16 +251,13 @@ function CheckoutContent() {
 
         setNextValidTime(nextValidPickupTime)
 
-        setPickupDate((prev) => {
-          if (
-            estimatedPickupTime &&
-            prev &&
-            estimatedPickupTime.getTime() > prev.getTime()
-          ) {
-            return nextValidPickupTime
-          }
-          return prev
-        })
+        // Only drag a chosen time forward when the kitchen can no longer make
+        // it by then.
+        setPickupDate((prev) =>
+          prev && earliestReadyTime.getTime() > prev.getTime()
+            ? nextValidPickupTime
+            : prev,
+        )
       } catch (error) {
         console.error("Failed to refresh the pickup time", error)
       }
@@ -232,18 +267,25 @@ function CheckoutContent() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [totalItems, storeHours, lastOrderOffsetMinutes])
+  }, [totalItems, tradingCalendar, lastOrderOffsetMinutes])
+
+  // Assigned on every render, just below the handler's definition.
+  const handleAppStateChangeRef = useRef<(state: AppStateStatus) => void>(
+    () => {},
+  )
 
   useEffect(() => {
-    const subscription = AppState.addEventListener(
-      "change",
-      handleAppStateChange,
+    // Called through a ref so the listener is attached once and still runs the
+    // latest closure. Re-subscribing whenever the payment intent changed was
+    // only ever a way of keeping that closure fresh.
+    const subscription = AppState.addEventListener("change", (next) =>
+      handleAppStateChangeRef.current(next),
     )
 
     return () => {
       subscription.remove()
     }
-  }, [paymentIntentId, orderInProgress])
+  }, [])
 
   const handlePaymentSheet = async () => {
     setLoadingPaymentSheet(true)
@@ -271,6 +313,46 @@ function CheckoutContent() {
 
     appState.current = nextAppState
   }
+
+  handleAppStateChangeRef.current = handleAppStateChange
+
+  /**
+   * Blocks the checkout on the customer's answer, so the charge waits for it.
+   * Deliberately not cancellable: dismissing it without choosing would fall
+   * through to a second charge, which is the whole thing being prevented.
+   *
+   * The local cart is left alone either way — it is only evidence that a
+   * response went missing, not proof, and throwing away someone's order to
+   * act on a guess is worse than asking them again next time.
+   */
+  const confirmRepeatOrder = (error: DuplicateOrderError) =>
+    new Promise<boolean>((resolve) => {
+      const placedAt = new Date(error.existingOrder.createdAt).getTime()
+      const minutes = Math.max(1, Math.round((Date.now() - placedAt) / 60000))
+
+      Alert.alert(
+        "You may have already ordered this",
+        `Order #${error.existingOrder.tempOrderId} for the same items was placed ${minutes} minute${
+          minutes === 1 ? "" : "s"
+        } ago. Charge your card again for another one?`,
+        [
+          {
+            text: "View my orders",
+            style: "cancel",
+            onPress: () => {
+              resolve(false)
+              router.replace("/orders")
+            },
+          },
+          {
+            text: "Order again",
+            style: "destructive",
+            onPress: () => resolve(true),
+          },
+        ],
+        { cancelable: false },
+      )
+    })
 
   const verifyPaymentStatus = async (intentId: string) => {
     if (isCheckingStatus) return
@@ -435,22 +517,42 @@ function CheckoutContent() {
       return
     }
 
-    const { openTime, closeTime, dayName } = getOpenCloseTime(date, storeHours)
-
-    if (!openTime || !closeTime) {
-      Alert.alert("Sorry, we are closed on that day...")
-    } else {
+    // Named by date, not weekday. A day off is a one-off closure, so "we are
+    // open 12:00 PM to 10:00 PM on a Tuesday" would be actively misleading —
+    // the store keeps those hours on a Tuesday, just not on this one.
+    if (isDayOff(date, tradingCalendar.daysOff)) {
       Alert.alert(
-        "Sorry, we are closed at that time",
-        `Please choose a time during store hours. We are open ${formatTime(
-          openTime,
-        )} to ${formatTime(closeTime)} on a ${dayName}.`,
+        "We're closed that day",
+        `We are closed on ${formatWeekdayDate(date)}. Please choose another day.`,
       )
+      return
     }
+
+    const { openTime, closeTime, dayName } = getOpenCloseTime(
+      date,
+      tradingCalendar,
+    )
+
+    // No hours for that weekday at all, so quoting hours is impossible anyway.
+    if (!openTime || !closeTime) {
+      Alert.alert(
+        "We're closed that day",
+        `We are not open on ${formatWeekdayDate(date)}. Please choose another day.`,
+      )
+      return
+    }
+
+    Alert.alert(
+      "Sorry, we are closed at that time",
+      `Please choose a time during store hours. We are open ${formatTime(
+        openTime,
+      )} to ${formatTime(closeTime)} on a ${dayName}.`,
+    )
   }
 
   const setChosenDate = (date: Date) => {
-    eatIn ? setEatInDate(date) : setPickupDate(date)
+    if (eatIn) setEatInDate(date)
+    else setPickupDate(date)
   }
 
   type PickOutcome =
@@ -467,8 +569,11 @@ function CheckoutContent() {
     const validTime = await getNextValidPickupTime(
       picked,
       getTotalItems(),
-      storeHours,
-      { lastOrderOffsetMinutes },
+      tradingCalendar,
+      {
+        earliestReadyTime: estimatedReadyTime ?? undefined,
+        lastOrderOffsetMinutes,
+      },
     )
 
     if (!validTime) {
@@ -553,7 +658,11 @@ function CheckoutContent() {
   }
 
   const calculateGST = () => {
-    return (getTotalCost() * 0.15) / 100 // 15% tax rate
+    // Extracted from the total, not added to it. New Zealand prices include
+    // GST, so the 15% rate applies to the ex-GST amount: $23.00 inclusive
+    // holds $3.00 of GST, because $20.00 x 1.15 = $23.00. Taking 15% of the
+    // inclusive price gave $3.45 and overstated the line by 15%.
+    return (getTotalCost() * 3) / 23 / 100
   }
 
   const calculateTotal = () => {
@@ -574,14 +683,34 @@ function CheckoutContent() {
 
     const totalAmount = Math.round(getTotalCost())
 
-    const notOpenYet = pickupNow
-      ? isOutsideBusinessHours(nextValidTime, storeHours)
+    // Resolved once and reused for both the guards and the order itself, so
+    // what gets validated is exactly what gets sent.
+    const requestedPickUpTime = pickupNow
+      ? nextValidTime
       : eatIn
-        ? isOutsideBusinessHours(eatInDate ?? nextValidTime, storeHours)
-        : isOutsideBusinessHours(pickupDate ?? nextValidTime, storeHours)
-    if (notOpenYet && pickupNow) {
+        ? (eatInDate ?? nextValidTime)
+        : (pickupDate ?? nextValidTime)
+
+    // A day off closes the store outright, so it is worth its own message —
+    // "we are closed at that time" would read as though another time that day
+    // would do.
+    if (isDayOff(requestedPickUpTime, tradingCalendar.daysOff)) {
       Alert.alert(
-        "We're closed or are not open yet. Please pick a suitable pick up time.",
+        "We're closed that day",
+        "We are not open on your selected date. Please choose another day.",
+      )
+      return
+    }
+
+    // Checked whether or not the customer picked the time by hand. This was
+    // gated on `pickupNow`, so for a hand-picked slot the answer was worked out
+    // and then thrown away: a day off added while the screen was open, or a
+    // slot that fell out of hours as the evening wore on, went through.
+    if (isOutsideBusinessHours(requestedPickUpTime, tradingCalendar)) {
+      Alert.alert(
+        pickupNow
+          ? "We're closed or are not open yet. Please pick a suitable pick up time."
+          : "We're closed at that time. Please pick a suitable pick up time.",
       )
       return
     }
@@ -596,12 +725,12 @@ function CheckoutContent() {
     try {
       // Create order object
 
+      // One key for this checkout attempt, minted before the card is charged
+      // so every send of this order carries the same one. A later attempt
+      // gets a fresh key, because that is a genuinely new order.
+      const orderIdempotencyKey = Crypto.randomUUID()
+
       const paymentMethodId = totalAmount > 0 ? selectedCardId : null
-      const pickUpTime = pickupNow
-        ? nextValidTime
-        : eatIn
-          ? eatInDate
-          : pickupDate
 
       let paymentIntentId: string | null = null
 
@@ -612,11 +741,28 @@ function CheckoutContent() {
         }
 
         // Get payment intent client secret from your server
-        const { clientSecret, paymentIntentId: id } = await createPaymentIntent(
-          totalAmount,
-          "nzd",
-          selectedCardId,
-        )
+        let intent
+        try {
+          intent = await createPaymentIntent(totalAmount, "nzd", selectedCardId, {
+            pickUpTime: requestedPickUpTime,
+            eatIn,
+          })
+        } catch (error) {
+          // The server spotted an identical order placed moments ago — most
+          // likely this one, with its response lost on the way back. Asking
+          // is the last chance to avoid charging the same card twice for it.
+          if (!(error instanceof DuplicateOrderError)) throw error
+
+          if (!(await confirmRepeatOrder(error))) return
+
+          intent = await createPaymentIntent(totalAmount, "nzd", selectedCardId, {
+            pickUpTime: requestedPickUpTime,
+            eatIn,
+            confirmDuplicate: true,
+          })
+        }
+
+        const { clientSecret, paymentIntentId: id } = intent
 
         paymentIntentId = id
         // Track it in state too, so handleAppStateChange can recover the payment
@@ -658,16 +804,18 @@ function CheckoutContent() {
           ? createOrder(
               paymentMethodId,
               pickupNow,
-              pickUpTime ?? nextValidTime,
+              requestedPickUpTime,
               eatIn,
               paymentIntentId,
+              orderIdempotencyKey,
             )
           : createOrder(
               null,
               pickupNow,
-              pickUpTime ?? nextValidTime,
+              requestedPickUpTime,
               eatIn,
               null,
+              orderIdempotencyKey,
             )
 
       // Delay showing loading UI
@@ -742,7 +890,14 @@ function CheckoutContent() {
       !restaurantStatus?.unavailableUntil
     ) {
       setShowEatInError(true)
-      setTimeout(() => setShowEatInError(false), 3000) // hide after 3s
+      // Tracked so leaving the screen mid-countdown cannot fire a setState on
+      // an unmounted component, and so repeated taps restart the 3s rather
+      // than stacking timers that each clear the message.
+      if (eatInErrorTimeout.current) clearTimeout(eatInErrorTimeout.current)
+      eatInErrorTimeout.current = setTimeout(
+        () => setShowEatInError(false),
+        3000,
+      )
       return
     } else if (
       !restaurantStatus?.dineInAvailability &&
@@ -789,7 +944,9 @@ function CheckoutContent() {
   // reachable via restaurantStatus.unavailableUntil.
   const lastOrderTime = useMemo(
     () =>
-      closeTime ? getLastOrderTime(closeTime, lastOrderOffsetMinutes) : undefined,
+      closeTime
+        ? getLastOrderTime(closeTime, lastOrderOffsetMinutes)
+        : undefined,
     [closeTime, lastOrderOffsetMinutes],
   )
 

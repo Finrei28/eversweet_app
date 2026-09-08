@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications"
 import * as Device from "expo-device"
 import { Alert, Linking, Platform } from "react-native"
 import { getToken } from "./authToken"
+import { apiRequest } from "./apiClient"
 import * as SecureStore from "expo-secure-store"
 import { getUsersMembership } from "./stripe-api"
 import { getErrorMessage } from "../utils/getError"
@@ -21,7 +22,8 @@ Notifications.setNotificationHandler({
  * Register for push notifications and return the token
  */
 
-const url = process.env.EXPO_PUBLIC_URL!
+const NEEDS_SIGN_IN =
+  "Please sign in to receive notifications about your orders"
 
 export async function registerForPushNotificationsAsync() {
   let token
@@ -88,25 +90,12 @@ export async function registerForPushNotificationsAsync() {
  */
 export async function savePushToken(pushToken: string) {
   try {
-    const authToken = await getToken()
-    if (!authToken) {
-      throw new Error(
-        "Please sign in to receive notifications about your orders",
-      )
-    }
-
-    const response = await fetch(`${url}/api/notification/pushToken`, {
+    await apiRequest("/api/notification/pushToken", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ pushToken }),
+      body: { pushToken },
+      authMessage: NEEDS_SIGN_IN,
+      errorMessage: "Failed to save push token",
     })
-
-    if (!response.ok) {
-      throw new Error("Failed to save push token")
-    }
 
     return true
   } catch (error) {
@@ -117,24 +106,11 @@ export async function savePushToken(pushToken: string) {
 
 export async function removePushToken() {
   try {
-    const authToken = await getToken()
-    if (!authToken) {
-      throw new Error(
-        "Please sign in to receive notifications about your orders",
-      )
-    }
-
-    const response = await fetch(`${url}/api/notification/removePushToken`, {
+    await apiRequest("/api/notification/removePushToken", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
+      authMessage: NEEDS_SIGN_IN,
+      errorMessage: "Failed to remove push token",
     })
-
-    if (!response.ok) {
-      throw new Error("Failed to remove push token")
-    }
 
     return true
   } catch (error) {
@@ -145,31 +121,17 @@ export async function removePushToken() {
 
 export async function getPushToken(): Promise<string | null> {
   try {
-    const authToken = await getToken()
-    if (!authToken) {
-      throw new Error(
-        "Please sign in to receive notifications about your orders",
-      )
-    }
+    const data = await apiRequest<{ pushToken?: string | null }>(
+      "/api/notification/getPushToken",
+      { authMessage: NEEDS_SIGN_IN },
+    )
 
-    const response = await fetch(`${url}/api/notification/getPushToken`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-    })
-
-    if (!response.ok) {
-      return null
-    }
-
-    const data = await response.json()
-
-    return data.pushToken
+    return data.pushToken ?? null
   } catch (error) {
+    // A device with no token stored yet is the normal case on a fresh install,
+    // and syncPushToken only needs to know it differs from the current one.
     console.error("Error getting push token:", error)
-    throw new Error("Failed to get push token")
+    return null
   }
 }
 

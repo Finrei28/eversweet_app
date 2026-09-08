@@ -5,22 +5,22 @@ import {
   TouchableOpacity,
   ScrollView,
   PanResponder,
-  Pressable,
   Animated,
   Dimensions,
   ActivityIndicator,
 } from "react-native"
 import Modal from "react-native-modal"
-import { CartItem, Dessert } from "../utils/types"
+import { CartItem, Dessert, Customisations } from "../utils/types"
 import { useCartStore } from "@/store/cart"
 import { useEffect, useState, useRef } from "react"
-import { SafeAreaView } from "react-native-safe-area-context"
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import BouncingLoader from "@/_components/loader"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useFetch from "@/services/use_fetch"
 import { getAvailableCustomisations } from "@/services/api"
-import { Customisations } from "../utils/types"
 import { formatCurrency } from "@/lib/formatters"
 import { useAuth } from "@/store/authProvider"
 import {
@@ -76,7 +76,6 @@ export default function CustomModal({
   const addItem = useCartStore((state) => state.addItem)
   const {
     data: availableCustomisations,
-    error,
     loading: availableCustomisationsLoading,
   } = useFetch(() => getAvailableCustomisations(selectedDessert.id))
   const modalIdRef = useRef(Date.now())

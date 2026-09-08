@@ -5,10 +5,9 @@ import { formatCurrency, formatDate, getCollectionTime } from "@/lib/formatters"
 import { getUserOrders } from "@/services/api"
 import useFetch from "@/services/use_fetch"
 import { useAuth } from "@/store/authProvider"
-import { Order } from "@/utils/types"
 import { Feather } from "@expo/vector-icons"
 import { useFocusEffect, useRouter } from "expo-router"
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import {
   Image,
   Platform,
@@ -58,7 +57,7 @@ export default function Orders() {
 
     try {
       return getCollectionTime(new Date(pickupTime))
-    } catch (e) {
+    } catch {
       return pickupTime
     }
   }

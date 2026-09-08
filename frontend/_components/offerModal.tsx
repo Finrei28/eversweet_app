@@ -1,15 +1,13 @@
-import { Dessert, DessertCategory, Offer } from "@/utils/types"
+import { Dessert, Offer } from "@/utils/types"
 import React, { useState } from "react"
 import {
   View,
   Text,
   TouchableOpacity,
   Modal,
-  FlatList,
   Image,
   ScrollView,
 } from "react-native"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { formatCurrency } from "@/lib/formatters"
 import CustomModal from "./modal"
 

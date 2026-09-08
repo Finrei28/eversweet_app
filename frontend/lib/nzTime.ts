@@ -1,9 +1,4 @@
-import {
-  format,
-  formatInTimeZone,
-  fromZonedTime,
-  toZonedTime,
-} from "date-fns-tz"
+import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz"
 
 /**
  * The store trades in one place, so opening hours are always New Zealand wall
@@ -13,14 +8,21 @@ import {
  */
 export const NZ_TIMEZONE = "Pacific/Auckland"
 
-/** The weekday name at `date` as it is in New Zealand, e.g. "Monday". */
+/**
+ * The weekday name at `date` as it is in New Zealand, e.g. "Monday".
+ *
+ * `formatInTimeZone`, not `format` with a `timeZone` option: that option only
+ * feeds the timezone tokens (z/X/O/x) and parsing, so every other token was
+ * still rendered off the device clock. A phone set outside New Zealand read
+ * the wrong weekday, and with it the wrong day's trading hours.
+ */
 export function getNZDayName(date: Date): string {
-  return format(date, "EEEE", { timeZone: NZ_TIMEZONE })
+  return formatInTimeZone(date, NZ_TIMEZONE, "EEEE")
 }
 
 /** The calendar date at `date` as it is in New Zealand, as "yyyy-MM-dd". */
 export function getNZCalendarDay(date: Date): string {
-  return format(date, "yyyy-MM-dd", { timeZone: NZ_TIMEZONE })
+  return formatInTimeZone(date, NZ_TIMEZONE, "yyyy-MM-dd")
 }
 
 /** How many minutes past New Zealand midnight `date` falls. */

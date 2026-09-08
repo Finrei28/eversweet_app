@@ -2,7 +2,6 @@ import {
   View,
   Text,
   FlatList,
-  Image,
   TouchableOpacity,
   ScrollView,
   Platform,
@@ -17,10 +16,8 @@ import ViewCart from "@/_components/viewCart"
 import { fetchCategoriesWithDesserts } from "@/services/api"
 import useFetch from "@/services/use_fetch"
 import CustomModal from "@/_components/modal"
-import Toast from "react-native-toast-message"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
-import { formatCurrency } from "@/lib/formatters"
 import { DessertCard } from "@/_components/dessertCard"
 
 export default function Menu() {

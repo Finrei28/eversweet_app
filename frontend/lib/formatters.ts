@@ -65,6 +65,10 @@ export const formatTime = (date: Date) => formatNZ(date, "h:mm a")
 /** Day, month and time, e.g. "3/9 2:30 PM". */
 export const formatDayMonthTime = (date: Date) => formatNZ(date, "d/M h:mm a")
 
+/** Weekday and date, e.g. "Tuesday 15 September". Names a specific day, for
+ * messages where the weekday alone would be ambiguous or misleading. */
+export const formatWeekdayDate = (date: Date) => formatNZ(date, "EEEE d MMMM")
+
 /** Date stamp for support messages, e.g. "03/09/2026". */
 export const formatDayStamp = (date: Date) => formatNZ(date, "dd/MM/yyyy")
 

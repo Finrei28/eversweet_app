@@ -2,15 +2,14 @@ import {
   View,
   Text,
   FlatList,
-  Image,
   TouchableOpacity,
   ScrollView,
   Platform,
 } from "react-native"
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import PageHeader from "@/_components/pageheader"
 import { Dessert, DessertCategory } from "@/utils/types"
-import { useFocusEffect, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
 import BouncingLoader from "@/_components/loader"
 import { useCartStore } from "@/store/cart"
 import ViewCart from "@/_components/viewCart"

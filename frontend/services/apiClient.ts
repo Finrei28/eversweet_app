@@ -3,6 +3,19 @@ import { getToken } from "./authToken"
 
 export const API_URL = process.env.EXPO_PUBLIC_URL!
 
+/**
+ * Called when the server refuses a token the app actually sent. AuthProvider
+ * registers it so a session that expires mid-use is cleared, instead of leaving
+ * the app looking signed in while every request is rejected. Only the expiry at
+ * startup was checked before, so a token that lapsed while the app was open
+ * produced "please sign in" errors on every action and no way to recover.
+ */
+let onUnauthorized: (() => void) | null = null
+
+export const setUnauthorizedHandler = (handler: (() => void) | null) => {
+  onUnauthorized = handler
+}
+
 export type ApiRequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "DELETE"
   /** Serialised as JSON. Omit for requests that send nothing. */
@@ -18,6 +31,12 @@ export type ApiRequestOptions = {
   fallback?: string
   /** Replaces the response body's message entirely for any failed request. */
   errorMessage?: string
+  /**
+   * Marks the request as safe to repeat. The server records the first
+   * response under this key and replays it for any retry carrying the same
+   * one, so a dropped connection can't turn one order into two.
+   */
+  idempotencyKey?: string
 }
 
 /**
@@ -28,10 +47,14 @@ export type ApiRequestOptions = {
  */
 export async function apiFetch(
   path: string,
-  { method = "GET", body, authMessage }: ApiRequestOptions = {},
+  { method = "GET", body, authMessage, idempotencyKey }: ApiRequestOptions = {},
 ): Promise<{ res: Response; data: any }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+  }
+
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey
   }
 
   if (authMessage !== undefined) {
@@ -67,6 +90,14 @@ export async function apiRequest<T>(
   const { res, data } = await apiFetch(path, options)
 
   if (!res.ok) {
+    // Only for endpoints marked authenticated: apiFetch throws before sending
+    // when one of those has no token at all, so a 401 reaching here means a
+    // token was sent and rejected. A 401 from a public endpoint (a failed sign
+    // in) says nothing about the stored session and must not clear it.
+    if (res.status === 401 && options.authMessage !== undefined) {
+      onUnauthorized?.()
+    }
+
     const message =
       statusMessages?.[res.status] ??
       errorMessage ??
