@@ -15,6 +15,7 @@ import EmailSender from "../lib/emailSender"
 import { getErrorMessage } from "../utils/getError"
 import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
 import { calculateCartPrice } from "../lib/cartPricing"
+import { redeemableAudiences } from "../lib/offerAudience"
 
 //Helper function
 /**
@@ -884,24 +885,37 @@ export const createOrder = async (req: Request, res: Response) => {
             await incrementLoyaltyPoints(userId, earnablePoints, tx)
           }
 
-          // unlock membership offer if there is any
-          if (membership && membership.isActive) {
+          // Unlock any requirement-gated offer this order qualifies for.
+          //
+          // No longer members-only: an offer open to everyone can carry
+          // requirements too, and without this it would be advertised and
+          // then refused, because redeeming one needs an AVAILABLE
+          // redemption and this is the only thing that creates one.
+          {
+            // Newness is judged as of *before* this order. The order row
+            // already exists inside this transaction, so counting plainly
+            // would make every customer non-new by the time we get here and
+            // no NEW_USERS offer could ever unlock.
+            const priorOrders = await tx.order.count({
+              where: { appUserId: userId, id: { not: order.id } },
+            })
+
+            const viewer = {
+              isActiveMember:
+                !!membership &&
+                membership.isActive &&
+                membership.paymentStatus === "SUCCESS",
+              isNewCustomer: priorOrders === 0,
+            }
+
             const lockedOffers = await tx.offer.findMany({
               where: {
-                AND: [
-                  {
-                    redemptions: {
-                      none: {
-                        membershipId: membership?.id,
-                      },
-                    },
-                  },
-                  {
-                    requirements: {
-                      some: {}, // ensures at least 1 requirement exists
-                    },
-                  },
-                ],
+                isActive: true,
+                audience: { in: redeemableAudiences(viewer) },
+                redemptions: { none: { userId } },
+                requirements: {
+                  some: {}, // ensures at least 1 requirement exists
+                },
               },
               include: {
                 requirements: true,
@@ -932,17 +946,19 @@ export const createOrder = async (req: Request, res: Response) => {
                 return false
               })
             })
-            // unlock eligible offers for members
-            for (const offer of eligibleOffers) {
-              await tx.offerRedemption.create({
-                data: {
-                  offerId: offer.id,
-                  membershipId: membership?.id,
-                  unlockedAt: new Date(),
-                  status: "AVAILABLE",
-                },
-              })
-            }
+
+            // createMany over a loop of creates: a unique-constraint collision
+            // here would throw inside the order transaction and roll back an
+            // order the customer has already paid for.
+            await tx.offerRedemption.createMany({
+              data: eligibleOffers.map((offer) => ({
+                offerId: offer.id,
+                userId,
+                unlockedAt: new Date(),
+                status: "AVAILABLE" as const,
+              })),
+              skipDuplicates: true,
+            })
           }
         }
 
@@ -1088,10 +1104,20 @@ export const showOffers = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const membership = await db.membership.findUnique({ where: { userId } })
-    if (!membership) {
-      res.status(403).json({ message: "Not a member" })
-      return
+    // No membership gate any more. Everyone gets the full active list; the
+    // members-only ones come back flagged so the app can render them locked
+    // with a join prompt rather than hiding them, which is the upsell.
+    const [membership, priorOrders] = await Promise.all([
+      db.membership.findUnique({ where: { userId } }),
+      db.order.count({ where: { appUserId: userId } }),
+    ])
+
+    const viewer = {
+      isActiveMember:
+        !!membership &&
+        membership.isActive &&
+        membership.paymentStatus === "SUCCESS",
+      isNewCustomer: priorOrders === 0,
     }
 
     const offers = await db.offer.findMany({
@@ -1130,7 +1156,7 @@ export const showOffers = async (req: Request, res: Response) => {
         },
         requirements: true,
         redemptions: {
-          where: { membershipId: membership.id },
+          where: { userId },
         },
       },
     })
@@ -1155,7 +1181,10 @@ export const showOffers = async (req: Request, res: Response) => {
         : null,
     }))
 
-    res.status(200).json({ offers: serializedOffers })
+    // `viewer` travels with the list because the app cannot work out
+    // isNewCustomer on its own — it has no order count — and both flags need
+    // to agree with what the cart guard will decide.
+    res.status(200).json({ offers: serializedOffers, viewer })
     return
   } catch (error) {
     res.status(500).json({ message: error })

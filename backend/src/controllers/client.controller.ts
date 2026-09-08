@@ -315,7 +315,11 @@ export const getHomepageCards = (req: Request, res: Response) => {
 
 export const showOfferForClient = async (req: Request, res: Response) => {
   try {
+    // isActive was missing here, so the public home carousel was advertising
+    // deactivated offers. `audience` rides along as a scalar so the carousel
+    // can vary its call to action.
     const offers = await db.offer.findMany({
+      where: { isActive: true },
       include: {
         dessert: { select: { imagePath: true } },
         category: { select: { desserts: { select: { imagePath: true } } } },
