@@ -8,7 +8,6 @@ import { quoteMinutes } from "../lib/orderTiming"
 import { getPrepTimes } from "../lib/prepTimes"
 import { loyaltyRates } from "../lib/loyaltyRates"
 import { announcements } from "../lib/announcements"
-import { homepageCards } from "../lib/homePageContent"
 import { privacyPolicy } from "../legal/privacy-policy"
 import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
@@ -305,11 +304,6 @@ export const getLeaderboardDetails = async (req: Request, res: Response) => {
 
 export const getAnnouncements = (req: Request, res: Response) => {
   res.status(200).json(announcements)
-  return
-}
-
-export const getHomepageCards = (req: Request, res: Response) => {
-  res.status(200).json(homepageCards)
   return
 }
 

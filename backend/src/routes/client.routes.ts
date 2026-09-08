@@ -10,7 +10,6 @@ import {
   getLoyaltyRates,
   getLeaderboardDetails,
   getAnnouncements,
-  getHomepageCards,
   showOfferForClient,
   getPrivacyPolicy,
   getTermAndConditions,
@@ -59,7 +58,6 @@ router.get("/restaurantStatus", restaurantStatus)
 router.get("/getLoyaltyRates", getLoyaltyRates)
 router.get("/getLeaderboardDetails", getLeaderboardDetails)
 router.get("/getAnnouncements", getAnnouncements)
-router.get("/getHomepageCards", getHomepageCards)
 router.get("/showOfferForClient", showOfferForClient)
 router.get("/getPrivacyPolicy", getPrivacyPolicy)
 router.get("/getTermAndConditions", getTermAndConditions)
