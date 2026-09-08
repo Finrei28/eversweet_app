@@ -12,15 +12,16 @@ import PageHeader from "@/_components/pageheader"
 import Carousel from "react-native-reanimated-carousel"
 import { useSharedValue } from "react-native-reanimated"
 import { useRouter } from "expo-router"
-import { FontAwesome } from "@expo/vector-icons"
-import { getHomepageCards, showOfferForClient } from "@/services/api"
+import { FontAwesome, Feather } from "@expo/vector-icons"
+import { fetchCategoriesWithDesserts, showOfferForClient } from "@/services/api"
 import BouncingLoader from "@/_components/loader"
-import { HomePageContent, offerForClient } from "@/utils/types"
+import { Menu, offerForClient } from "@/utils/types"
 import {
   GestureHandlerRootView,
   PanGesture,
 } from "react-native-gesture-handler"
 import DancingStar from "@/_components/dancingStar"
+import AudienceBadge from "@/_components/audienceBadge"
 import { useAuth } from "@/store/authProvider"
 
 // This is needed for the order history screen to properly import FontAwesome
@@ -29,10 +30,8 @@ export { FontAwesome }
 export default function Index() {
   const router = useRouter()
   const [offers, setOffers] = useState<offerForClient[]>([])
-  const [homePageContents, setHomePageContents] = useState<HomePageContent[]>(
-    [],
-  )
-  const { token, usersMembership, authLoading, dataLoading } = useAuth()
+  const [categories, setCategories] = useState<Menu>([])
+  const { token, authLoading, dataLoading } = useAuth()
   const progressValue = useSharedValue(0)
   const [activeIndex, setActiveIndex] = useState(0)
   const screen = Dimensions.get("window")
@@ -42,12 +41,12 @@ export default function Index() {
     async function loadContents() {
       try {
         setLoading(true)
-        const [homePageData, offerData] = await Promise.all([
-          getHomepageCards(),
+        const [categoryData, offerData] = await Promise.all([
+          fetchCategoriesWithDesserts(),
           showOfferForClient(),
         ])
         setOffers(offerData)
-        setHomePageContents(homePageData)
+        setCategories(categoryData)
       } catch (error) {
         console.error("Error loading home content", error)
       } finally {
@@ -115,6 +114,11 @@ export default function Index() {
                       }}
                     >
                       <View className="flex-1 justify-between">
+                        {item.audience !== "EVERYONE" && (
+                          <View className="items-center mb-1">
+                            <AudienceBadge audience={item.audience} />
+                          </View>
+                        )}
                         <Text className="text-primary font-bold text-2xl text-center mt-2">
                           {item.name}
                         </Text>
@@ -141,16 +145,19 @@ export default function Index() {
 
                         <TouchableOpacity
                           onPress={() =>
-                            router.push(`${token ? "/membership" : "/signin"}`)
+                            router.push(
+                              token
+                                ? { pathname: "/offers" }
+                                : {
+                                    pathname: "/signin",
+                                    params: { redirectTo: "/offers" },
+                                  },
+                            )
                           }
                           className="bg-primary rounded-lg p-3 items-center mt-4 mx-20"
                         >
                           <Text className="text-white font-bold">
-                            {usersMembership?.isActive
-                              ? "Show More"
-                              : token
-                                ? "Get Membership"
-                                : "Sign In to View"}
+                            {token ? "View Offer" : "Sign In to View"}
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -189,51 +196,60 @@ export default function Index() {
           >
             Our Dessert Series
           </Text>
-          {homePageContents?.map((category, index) => {
-            return (
-              <View
-                key={index}
-                className="flex justify-center bg-white mx-10 py-5 my-4 gap-5 rounded-2xl shadow-sm"
-              >
-                <Text className="text-primary font-bold text-2xl text-center">
-                  {category.title}
-                </Text>
-                <Image
-                  source={{ uri: category.image }}
-                  className="w-full bg-white h-80 mx-auto object-cover rounded-lg mt-2"
-                  resizeMode="contain"
-                  alt={category.title}
-                  accessibilityLabel={category.title}
-                  accessibilityHint={`This is an image of ${category.title}`}
-                  accessibilityRole="image"
-                  accessibilityState={{ selected: true }}
-                  accessibilityLabelledBy="category-image"
-                />
-                <TouchableOpacity
-                  onPress={() => {
-                    // Handle button press
-                    router.replace(`/menu?categoryParam=${category.category}`)
-                  }}
-                  accessibilityLabel={`View more for ${category.title}`}
-                  accessibilityHint={`Press to view more about ${category.title}`}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: false }}
-                  accessibilityLabelledBy="view-more-button"
-                  className="bg-primary rounded-lg p-3 items-center w-1/2 mt-4 mx-auto"
-                  // style={{
-                  //   backgroundColor: "#007BFF", // Replace with your desired button color
-                  //   padding: 10,
-                  //   borderRadius: 5,
-                  //   alignItems: "center",
-                  // }}
+
+          {categories.length === 0 ? (
+            <View className="bg-white rounded-xl shadow-sm p-6 items-center mx-10 mb-6">
+              <Feather name="coffee" size={48} color="#D1D5DB" />
+              <Text className="mt-2 text-gray-500 text-center">
+                No dessert series available right now. Check back soon!
+              </Text>
+            </View>
+          ) : (
+            categories.map((category) => {
+              const uri = category.desserts[0]?.imagePath
+
+              return (
+                <View
+                  key={category.id}
+                  className="flex justify-center bg-white mx-10 py-5 my-4 gap-5 rounded-2xl shadow-sm"
                 >
-                  <Text style={{ color: "#FFFFFF", fontWeight: "bold" }}>
-                    View More
+                  <Text className="text-primary font-bold text-2xl text-center">
+                    {category.name}
                   </Text>
-                </TouchableOpacity>
-              </View>
-            )
-          })}
+                  {uri && (
+                    <Image
+                      source={{ uri }}
+                      className="w-full bg-white h-80 mx-auto object-cover rounded-lg mt-2"
+                      resizeMode="contain"
+                      alt={category.name}
+                      accessibilityLabel={category.name}
+                      accessibilityHint={`This is an image of ${category.name}`}
+                      accessibilityRole="image"
+                      accessibilityState={{ selected: true }}
+                      accessibilityLabelledBy="category-image"
+                    />
+                  )}
+                  <TouchableOpacity
+                    onPress={() => {
+                      router.replace(
+                        `/menu?categoryParam=${encodeURIComponent(category.name)}`,
+                      )
+                    }}
+                    accessibilityLabel={`View menu for ${category.name}`}
+                    accessibilityHint={`Press to view the ${category.name} menu`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: false }}
+                    accessibilityLabelledBy="view-more-button"
+                    className="bg-primary rounded-lg p-3 items-center w-1/2 mt-4 mx-auto"
+                  >
+                    <Text style={{ color: "#FFFFFF", fontWeight: "bold" }}>
+                      View Menu
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )
+            })
+          )}
         </GestureHandlerRootView>
       </ScrollView>
     </View>

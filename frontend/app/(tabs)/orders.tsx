@@ -331,7 +331,7 @@ export default function Orders() {
                             <View className="flex-1">
                               <Text className="font-medium">
                                 {item.dessert.name}{" "}
-                                {item.offerId && `(Members Offer)`}
+                                {item.offerId && `(Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
                                 <Text
@@ -513,7 +513,7 @@ export default function Orders() {
                             <View className="flex-1">
                               <Text className="font-medium">
                                 {item.dessert.name}{" "}
-                                {item.offerId && `(Members Offer)`}
+                                {item.offerId && `(Offer)`}
                               </Text>
                               {item.customisations.map((customisation) => (
                                 <Text

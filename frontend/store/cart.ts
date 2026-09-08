@@ -173,20 +173,13 @@ export const useCartStore = create<CartState>((set, get) => ({
         set({ items: [...get().items, newCartItem] })
       }
 
-      if (item?.offerId && !usersMembership?.isActive) {
-        Toast.show({
-          type: "error",
-          text1: "Join our membership to redeem this awesome offer!",
-          position: "bottom",
-          visibilityTime: 5000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      }
+      // There used to be a "join our membership" error toast here, fired on a
+      // *successful* add whenever the user was not an active member. It was
+      // already unreachable for the case it described — the server 403s that
+      // add, so the catch below reports it — and now that offers can be open
+      // to everyone it would scold a non-member for using one they are
+      // entitled to. The server's own refusal message is the single source of
+      // truth for why an offer was turned down.
       if (item?.loyaltyPointsUsed) {
         useLoyaltyStore.getState().fetchPoints()
         Toast.show({
