@@ -475,4 +475,52 @@ describeIfDb("cart write paths", () => {
     expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
   })
 
+  /**
+   * Adding and removing used to take Loyalty and Cart in opposite orders, so
+   * two of them overlapping deadlocked and Postgres killed one with 40P01.
+   *
+   * Be honest about what this test is: against a local database the
+   * transactions finish in single-digit milliseconds, so the window barely
+   * exists and this would not reliably reproduce the deadlock even with the
+   * old ordering. It reproduced readily in production, where every statement
+   * costs most of a second. What it does check every run is the arithmetic
+   * under concurrency - that a refund and a debit landing together leave the
+   * balance right - and it would catch a gross ordering regression some of
+   * the time.
+   */
+  it("survives an add and a remove racing on the same reward", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    await db.loyalty.create({ data: { userId: user.id, points: 1000 } })
+
+    const body = {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    }
+
+    const first = await addItem(user.id, body)
+    expect(first.status).toBe(201)
+
+    const [added, removed] = await Promise.all([
+      addItem(user.id, body),
+      request(app)
+        .delete(`/api/cart/removeItemFromCart/${first.body.cartItem.id}`)
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`),
+    ])
+
+    expect(added.status).toBe(201)
+    expect(removed.status).toBe(200)
+
+    // 1000 spend 500 spend 500 refund 500.
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+    const cart = await db.cart.findUnique({
+      where: { userId: user.id },
+      include: { cartItems: true },
+    })
+
+    expect(loyalty?.points).toBe(500)
+    expect(cart?.cartItems).toHaveLength(1)
+  })
+
 })

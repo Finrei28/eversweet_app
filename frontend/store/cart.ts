@@ -471,75 +471,82 @@ export const useCartStore = create<CartState>((set, get) => ({
       error: null, // Clear error on successful removal
     })
     set({ cartOperations: get().cartOperations + 1 })
-    try {
-      await removeItemFromCart(id)
-      set({ cartOperations: get().cartOperations - 1 })
 
-      if (item?.loyaltyPointsUsed) {
-        await useLoyaltyStore.getState().fetchPoints()
+    // Queued with the adds. A remove and an add in flight together take the
+    // same rows in opposite orders on the server and used to deadlock each
+    // other; the line has already gone from the list here, so waiting a turn
+    // costs the customer nothing they can see.
+    return enqueueCartWrite(async () => {
+      try {
+        await removeItemFromCart(id)
+        set({ cartOperations: get().cartOperations - 1 })
 
-        Toast.show({
-          type: "success",
-          text1: `Item removed from cart`,
-          text2: `${item.loyaltyPointsUsed} points refunded`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
+        if (item?.loyaltyPointsUsed) {
+          await useLoyaltyStore.getState().fetchPoints()
+
+          Toast.show({
+            type: "success",
+            text1: `Item removed from cart`,
+            text2: `${item.loyaltyPointsUsed} points refunded`,
+            position: "bottom",
+            visibilityTime: 3000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        } else {
+          Toast.show({
+            type: "success",
+            text1: `Item removed from cart`,
+            position: "bottom",
+            visibilityTime: 2000,
+            autoHide: true,
+            bottomOffset: 90,
+          })
+        }
+      } catch (error) {
+        console.error("Failed to remove item from cart", error)
+        set({
+          items: previousItems,
+          error: "Failed to remove item",
         })
-      } else {
-        Toast.show({
-          type: "success",
-          text1: `Item removed from cart`,
-          position: "bottom",
-          visibilityTime: 2000,
-          autoHide: true,
-          bottomOffset: 90,
-        })
+        set({ cartOperations: get().cartOperations - 1 })
+        if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
+          await useLoyaltyStore.getState().fetchPoints()
+          console.error("Failed to restore points", error)
+          Toast.show({
+            type: "error",
+            text1: `Failed to restore loyalty points (${item.loyaltyPointsUsed})`,
+            text2: "Please contact eversweet@eversweet.co.nz",
+            position: "bottom",
+            visibilityTime: 0,
+            autoHide: false,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        } else {
+          Toast.show({
+            type: "error",
+            text1: "Failed to remove item from cart",
+            text2: `${getErrorMessage(error, "An unknown error occurred")}`,
+            position: "bottom",
+            visibilityTime: 3000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        }
       }
-    } catch (error) {
-      console.error("Failed to remove item from cart", error)
-      set({
-        items: previousItems,
-        error: "Failed to remove item",
-      })
-      set({ cartOperations: get().cartOperations - 1 })
-      if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
-        await useLoyaltyStore.getState().fetchPoints()
-        console.error("Failed to restore points", error)
-        Toast.show({
-          type: "error",
-          text1: `Failed to restore loyalty points (${item.loyaltyPointsUsed})`,
-          text2: "Please contact eversweet@eversweet.co.nz",
-          position: "bottom",
-          visibilityTime: 0,
-          autoHide: false,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      } else {
-        Toast.show({
-          type: "error",
-          text1: "Failed to remove item from cart",
-          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      }
-    }
+    })
   },
   clearCart: async () => {
     const previousItems = get().items
@@ -547,18 +554,49 @@ export const useCartStore = create<CartState>((set, get) => ({
       return item.loyaltyPointsUsed ? total + item.loyaltyPointsUsed : total
     }, 0)
 
-    try {
-      set({ items: [], error: null })
-      await clearCart()
-      if (totalLoyaltyPointsUsed > 0) {
-        useLoyaltyStore.getState().fetchPoints()
+    // Same queue as the adds and removes: clearing takes the same rows.
+    set({ items: [], error: null })
 
+    return enqueueCartWrite(async () => {
+      try {
+        await clearCart()
+        if (totalLoyaltyPointsUsed > 0) {
+          useLoyaltyStore.getState().fetchPoints()
+
+          Toast.show({
+            type: "success",
+            text1: `Cart has been cleared`,
+            text2: `${totalLoyaltyPointsUsed} points refunded`,
+            position: "bottom",
+            visibilityTime: 3000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        } else {
+          Toast.show({
+            type: "success",
+            text1: `Cart has been cleared`,
+            position: "bottom",
+            visibilityTime: 3000,
+            autoHide: true,
+            bottomOffset: 90,
+          })
+        }
+      } catch (error) {
+        console.error("Failed to clear cart", error)
+        // The list was emptied optimistically; the server still holds these
+        // items, so put them back instead of showing an empty cart.
+        set({ items: previousItems, error: "Failed to clear cart" })
         Toast.show({
-          type: "success",
-          text1: `Cart has been cleared`,
-          text2: `${totalLoyaltyPointsUsed} points refunded`,
+          type: "error",
+          text1: "Failed to clear cart",
+          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
           position: "bottom",
-          visibilityTime: 3000,
+          visibilityTime: 5000,
           autoHide: true,
           bottomOffset: 90,
           props: {
@@ -566,35 +604,8 @@ export const useCartStore = create<CartState>((set, get) => ({
             text2NumberOfLines: 0, // allow wrapping
           },
         })
-      } else {
-        Toast.show({
-          type: "success",
-          text1: `Cart has been cleared`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-        })
       }
-    } catch (error) {
-      console.error("Failed to clear cart", error)
-      // The list was emptied optimistically; the server still holds these
-      // items, so put them back instead of showing an empty cart.
-      set({ items: previousItems, error: "Failed to clear cart" })
-      Toast.show({
-        type: "error",
-        text1: "Failed to clear cart",
-        text2: `${getErrorMessage(error, "An unknown error occurred")}`,
-        position: "bottom",
-        visibilityTime: 5000,
-        autoHide: true,
-        bottomOffset: 90,
-        props: {
-          text1NumberOfLines: 0,
-          text2NumberOfLines: 0, // allow wrapping
-        },
-      })
-    }
+    })
   },
   processOrder: async () => {
     set({ items: [], error: null })

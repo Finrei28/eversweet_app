@@ -38,22 +38,52 @@ import {
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
 
 /**
- * Two adds racing to create the same customer's first cart both take upsert's
- * create branch, and one loses the unique index on Cart.userId with P2002.
- * The cart exists by then, so running the same work again takes the update
- * branch. Retried once, and only for that conflict.
+ * The order every cart transaction takes its row locks in:
  *
- * A transaction that failed this way committed nothing, so re-running it does
- * not double up an offer redemption or a points debit.
+ *   OfferRedemption  ->  Loyalty  ->  Cart
+ *
+ * Postgres deadlocks when two transactions want the same rows in opposite
+ * orders, and that is what adding and removing used to do. An add debited
+ * Loyalty and then wrote Cart; a remove wrote Cart and then refunded Loyalty.
+ * Tapping the two quickly enough to overlap left each holding the row the
+ * other was waiting on, and Postgres killed one with 40P01.
+ *
+ * The rule is only that everything agrees, not what the order is. This is the
+ * order addItemToCart already followed, so it is the one that spread.
+ *
+ * Anything touching more than one of these tables in a transaction has to
+ * follow it. Nothing enforces that but this comment and the tests.
+ */
+
+/** Postgres's deadlock code, which Prisma surfaces without mapping. */
+const isDeadlock = (error: unknown) =>
+  error instanceof Error && error.message.includes("40P01")
+
+const isCartUniqueConflict = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === "P2002"
+
+/**
+ * Runs `work`, retrying once for the two conflicts that are a normal part of
+ * concurrent cart writes rather than a fault.
+ *
+ * P2002: two adds racing to create the same customer's first cart both take
+ * upsert's create branch, and one loses the unique index on Cart.userId. The
+ * cart exists by then, so the retry takes the update branch.
+ *
+ * 40P01: a deadlock. Consistent lock ordering makes these rare rather than
+ * impossible - Postgres can still pick a victim when index or tuple locks
+ * collide - and the loser is rolled back whole, so retrying is the correct
+ * response rather than a way of hiding it.
+ *
+ * Either way the failed transaction committed nothing, so re-running it cannot
+ * double up an offer redemption or a points debit.
  */
 const retryOnCartConflict = async <T>(work: () => Promise<T>): Promise<T> => {
   try {
     return await work()
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (isCartUniqueConflict(error) || isDeadlock(error)) {
       return work()
     }
 
@@ -761,38 +791,44 @@ export const clearCart = async (req: Request, res: Response) => {
       return sum + (item.loyaltyPointsUsed ?? 0)
     }, 0)
 
-    await db.$transaction(async (tx) => {
-      if (totalPointsToRefund > 0) {
-        await tx.loyalty.update({
-          where: { userId },
-          data: {
-            points: { increment: totalPointsToRefund },
-            records: {
-              create: { change: totalPointsToRefund, reason: "REFUND" },
+    await retryOnCartConflict(() =>
+      db.$transaction(async (tx) => {
+        // Redemptions, then points, then the cart - the lock order at the top
+        // of this file. The first two used to be the other way round, which
+        // put clearing a cart at odds with adding to one.
+        //
+        // Clearing the cart hands back every held redemption. The per-item
+        // membership lookup this used to do was both an N+1 and, via `break`,
+        // a way to skip the refund for every item after the first miss.
+        for (const item of cart.cartItems) {
+          if (!item.offerId) continue
+          await tx.offerRedemption.updateMany({
+            where: {
+              offerId: item.offerId,
+              userId,
+              used: { gt: 0 },
             },
-          },
-        })
-      }
+            data: {
+              used: { decrement: 1 },
+            },
+          })
+        }
 
-      // Clearing the cart hands back every held redemption. The per-item
-      // membership lookup this used to do was both an N+1 and, via `break`,
-      // a way to skip the refund for every item after the first miss.
-      for (const item of cart.cartItems) {
-        if (!item.offerId) continue
-        await tx.offerRedemption.updateMany({
-          where: {
-            offerId: item.offerId,
-            userId,
-            used: { gt: 0 },
-          },
-          data: {
-            used: { decrement: 1 },
-          },
-        })
-      }
+        if (totalPointsToRefund > 0) {
+          await tx.loyalty.update({
+            where: { userId },
+            data: {
+              points: { increment: totalPointsToRefund },
+              records: {
+                create: { change: totalPointsToRefund, reason: "REFUND" },
+              },
+            },
+          })
+        }
 
-      await tx.cart.delete({ where: { userId } })
-    }, TRANSACTION_OPTIONS)
+        await tx.cart.delete({ where: { userId } })
+      }, TRANSACTION_OPTIONS),
+    )
 
     res.status(200).json({ success: true, message: "Cart cleared" })
     return
@@ -833,78 +869,81 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       return
     }
 
-    await db.$transaction(async (tx) => {
-      // This used to 403 with "No membership record found" when the user had
-      // no membership, which left a non-member's open-offer item stuck in
-      // their cart until it expired — they could add it but never remove it.
-      if (cartItem.offerId) {
-        await tx.offerRedemption.updateMany({
-          where: {
-            offerId: cartItem.offerId,
-            userId,
-            used: { gt: 0 },
-          },
-          data: {
-            used: { decrement: 1 },
-          },
-        })
-      }
-
-      const updatedCart = await tx.cart.update({
-        where: { userId },
-        data: {
-          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-          totalLoyaltyPointsUsed: {
-            decrement: cartItem.loyaltyPointsUsed ?? 0,
-          },
-          totalPriceInCents: {
-            decrement: cartItem.itemPriceInCents,
-          },
-          cartItems: {
-            delete: {
-              id: cartItem.id,
+    await retryOnCartConflict(() =>
+      db.$transaction(async (tx) => {
+        // This used to 403 with "No membership record found" when the user had
+        // no membership, which left a non-member's open-offer item stuck in
+        // their cart until it expired — they could add it but never remove it.
+        if (cartItem.offerId) {
+          await tx.offerRedemption.updateMany({
+            where: {
+              offerId: cartItem.offerId,
+              userId,
+              used: { gt: 0 },
             },
-          },
-        },
-        select: {
-          id: true,
-          cartItems: {
-            select: {
-              id: true,
+            data: {
+              used: { decrement: 1 },
             },
-          },
-        },
-      })
+          })
+        }
 
-      // restore loyalty points if any were used
+        // Refunded before the cart is touched, to keep the lock order above.
+        // This ran after the cart update until it began deadlocking against
+        // adds, which take these same two rows the other way round.
+        if (cartItem.loyaltyPointsUsed) {
+          await tx.loyalty.update({
+            where: { userId },
+            data: {
+              points: {
+                increment: cartItem.loyaltyPointsUsed,
+              },
+              records: {
+                create: {
+                  change: cartItem.loyaltyPointsUsed,
+                  reason: "REFUND",
+                },
+              },
+            },
+          })
+        }
 
-      if (cartItem.loyaltyPointsUsed) {
-        await tx.loyalty.update({
+        const updatedCart = await tx.cart.update({
           where: { userId },
           data: {
-            points: {
-              increment: cartItem.loyaltyPointsUsed,
+            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+            totalLoyaltyPointsUsed: {
+              decrement: cartItem.loyaltyPointsUsed ?? 0,
             },
-            records: {
-              create: {
-                change: cartItem.loyaltyPointsUsed,
-                reason: "REFUND",
+            totalPriceInCents: {
+              decrement: cartItem.itemPriceInCents,
+            },
+            cartItems: {
+              delete: {
+                id: cartItem.id,
+              },
+            },
+          },
+          select: {
+            id: true,
+            cartItems: {
+              select: {
+                id: true,
               },
             },
           },
         })
-      }
 
-      // delete cart if empty
+        // delete cart if empty
 
-      if (updatedCart.cartItems.length === 0) {
-        await tx.cart.delete({
-          where: { id: updatedCart.id },
-        })
-      }
+        if (updatedCart.cartItems.length === 0) {
+          await tx.cart.delete({
+            where: { id: updatedCart.id },
+          })
+        }
 
-      return cartItem.id
-    }, TRANSACTION_OPTIONS)
+        return cartItem.id
+      }, TRANSACTION_OPTIONS),
+    )
 
     res.status(200).json({ success: true, id: cartItem.id })
     return
