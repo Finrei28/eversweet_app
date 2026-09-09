@@ -228,4 +228,178 @@ describeIfDb("cart write paths", () => {
     expect(cart?.totalPriceInCents).toBe(2000)
   })
 
+  // What a line costs, and what it costs in points, are the database's answer
+  // and not the customer's. The request still carries both because older
+  // installed apps send them; they are simply not believed.
+  it("prices the item from the dessert, not from the request", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body.cartItem.itemPriceInCents).toBe(1200)
+
+    const cart = await db.cart.findUnique({ where: { userId: user.id } })
+
+    expect(cart?.totalPriceInCents).toBe(1200)
+  })
+
+  it("refuses a reward claimed at the wrong number of points", async () => {
+    const user = await makeUser()
+    // priceInLoyaltyPoints defaults to 500.
+    const dessert = await makeDessert(1200)
+    await db.loyalty.create({ data: { userId: user.id, points: 5000 } })
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 1,
+    })
+
+    expect(res.status).toBe(400)
+
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+
+    expect(loyalty?.points).toBe(5000)
+    expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
+  })
+
+  it("will not change the quantity of a reward line", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    await db.loyalty.create({ data: { userId: user.id, points: 500 } })
+
+    const added = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    })
+
+    expect(added.status).toBe(201)
+
+    const res = await request(app)
+      .patch(SET_QUANTITY)
+      .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+      .send({ id: added.body.cartItem.id, quantity: 10 })
+
+    expect(res.status).toBe(400)
+
+    // The bug this closes: ten desserts for one 500-point redemption, because
+    // nothing on the quantity path debits anything.
+    const item = await db.cartItem.findUnique({
+      where: { id: added.body.cartItem.id },
+    })
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+
+    expect(item?.quantity).toBe(1)
+    expect(loyalty?.points).toBe(0)
+  })
+
+  it("debits again for a second redemption of the same reward", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    await db.loyalty.create({ data: { userId: user.id, points: 1000 } })
+
+    const body = {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    }
+
+    expect((await addItem(user.id, body)).status).toBe(201)
+    expect((await addItem(user.id, body)).status).toBe(201)
+
+    const cart = await db.cart.findUnique({
+      where: { userId: user.id },
+      include: { cartItems: true },
+    })
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+
+    // Two lines and two debits, rather than one line at quantity two.
+    expect(cart?.cartItems).toHaveLength(2)
+    expect(loyalty?.points).toBe(0)
+
+    // A third is refused rather than given away.
+    expect((await addItem(user.id, body)).status).toBe(400)
+  })
+
+  it("discounts a customisation on its real price, not the claimed one", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const plan = await db.membershipPlan.create({
+      data: {
+        name: "Sweet Club",
+        stripePriceId: `price_${Date.now()}`,
+        membershipDiscount: 5,
+        maxDiscount: 25,
+      },
+    })
+    await db.membership.create({
+      data: {
+        userId: user.id,
+        planId: plan.id,
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        isActive: true,
+        paymentStatus: "SUCCESS",
+        totalMonths: 5,
+      },
+    })
+    const topping = await db.ingredient.create({
+      data: { name: "Pearls", chineseName: "珍珠", priceInCents: 100 },
+    })
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      customisations: [
+        {
+          id: topping.id,
+          name: "Pearls",
+          chineseName: "珍珠",
+          quantity: 1,
+          // The lie. checkout subtracts the stored discount from the real
+          // price, so believing this bought $125 off the rest of the order.
+          priceInCents: 50000,
+          discountedAmountInCents: 0,
+        },
+      ],
+    })
+
+    expect(res.status).toBe(201)
+
+    const stored = await db.customisationInCartItem.findFirst({
+      where: { cartItemId: res.body.cartItem.id },
+    })
+
+    // 25% of the database's 100c, not of the 50000c that was claimed.
+    expect(stored?.discountedAmountInCents).toBe(25)
+  })
+
+  it("refuses a customisation that does not exist", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      customisations: [
+        {
+          id: "not-a-real-customisation",
+          name: "Free Everything",
+          chineseName: "免费",
+          quantity: 1,
+          priceInCents: 0,
+          discountedAmountInCents: 0,
+        },
+      ],
+    })
+
+    expect(res.status).toBe(400)
+    expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
+  })
+
 })
