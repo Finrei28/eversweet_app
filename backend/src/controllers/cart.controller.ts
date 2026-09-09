@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
@@ -124,7 +125,10 @@ export const addItemToCart = async (req: Request, res: Response) => {
 
     const cartItem = parsedBody.data
 
-    const [dessert, membership] = await Promise.all([
+    // The offer row joins this wave instead of following it. It does not
+    // depend on the dessert or the membership; only the audience checks below
+    // do, and those are local once all three have landed.
+    const [dessert, membership, offer] = await Promise.all([
       db.dessert.findUnique({
         where: { id: cartItem.dessertId },
         include: {
@@ -140,6 +144,12 @@ export const addItemToCart = async (req: Request, res: Response) => {
         where: { userId },
         include: { plan: true },
       }),
+      cartItem.offerId
+        ? db.offer.findUnique({
+            where: { id: cartItem.offerId },
+            include: { dessert: true },
+          })
+        : Promise.resolve(null),
     ])
 
     if (!dessert) {
@@ -147,20 +157,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       return
     }
 
-    // check offer
-    //
-    // The offer is loaded here rather than in the pricing branch below because
-    // the guard now turns on `audience` — it cannot decide anything without
-    // the row. The pricing branch reuses it, so this is one query, not two.
-    let offer: Prisma.OfferGetPayload<{ include: { dessert: true } }> | null =
-      null
-
     if (cartItem.offerId) {
-      offer = await db.offer.findUnique({
-        where: { id: cartItem.offerId },
-        include: { dessert: true },
-      })
-
       if (!offer) {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
@@ -284,142 +281,122 @@ export const addItemToCart = async (req: Request, res: Response) => {
     //   }
     // })
 
-    const rawCartItem = await db.$transaction(async (tx) => {
-      const existingCart = await tx.cart.findUnique({
+    const cartExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000)
+    const netPriceInCents = Math.round(
+      itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
+    )
+    const pointsSpent = cartItem.loyaltyPointsUsed ?? 0
+
+    // Supplied rather than left to the database, so the row just written can be
+    // read back by id in the same statement. The alternative — asking for the
+    // newest item in the cart — is wrong the moment a customer adds two things
+    // at once.
+    const newCartItemId = randomUUID()
+
+    // Creating the cart and adding to an existing one differ only in whether
+    // the totals are set or incremented, which is exactly what upsert says.
+    // This replaces a findUnique, a branch, an update and a create — four
+    // round trips plus the transaction's own BEGIN and COMMIT — with one
+    // statement that Prisma still applies atomically.
+    const writeCartItem = async (client: Prisma.TransactionClient) => {
+      const cart = await client.cart.upsert({
         where: { userId },
+        create: {
+          user: { connect: { id: userId } },
+          expiresAt: cartExpiresAt,
+          totalLoyaltyPointsUsed: pointsSpent,
+          totalPriceInCents: netPriceInCents,
+          cartItems: { create: { id: newCartItemId, ...cartItemData } },
+        },
+        update: {
+          expiresAt: cartExpiresAt, // extend expiry
+          totalLoyaltyPointsUsed: { increment: pointsSpent },
+          totalPriceInCents: { increment: netPriceInCents },
+          cartItems: { create: { id: newCartItemId, ...cartItemData } },
+        },
         select: {
-          id: true,
+          cartItems: {
+            where: { id: newCartItemId },
+            include: {
+              dessert: {
+                select: {
+                  id: true,
+                  name: true,
+                  chineseName: true,
+                  description: true,
+                  priceInCents: true,
+                  priceInLoyaltyPoints: true,
+                  imagePath: true,
+                  ingredients: { include: { ingredient: true } },
+                  promo: true,
+                },
+              },
+              customisations: { include: { customisation: true } },
+            },
+          },
         },
       })
-      // redeem offer
-      //
-      // Not conditional on a membership any more. It used to be, harmlessly,
-      // because only a member could reach this line — but an open offer held
-      // by a non-member would then be priced without ever writing a
-      // redemption, so `used` would never increment and `limit` would never
-      // be enforced.
-      if (cartItem.offerId) {
-        await redeemOfferForUser(userId, cartItem.offerId, tx)
-      }
 
-      // If user used loyalty points, deduct from their account
-      if (cartItem.loyaltyPointsUsed) {
-        const existing = await tx.loyalty.findUnique({
-          where: { userId },
-          select: { points: true },
-        })
+      return cart.cartItems[0]
+    }
 
-        if (!existing) throw new Error("User loyalty record not found")
-        if (existing.points < cartItem.loyaltyPointsUsed) {
-          throw new Error("INSUFFICIENT_LOYALTY_POINTS")
-        }
-        await tx.loyalty.update({
-          where: { userId },
-          data: {
-            points: {
-              decrement: cartItem.loyaltyPointsUsed,
-            },
-            records: {
-              create: {
-                change: -cartItem.loyaltyPointsUsed,
-                reason: "REWARDS",
-              },
-            },
-          },
-        })
-      }
+    // Redeeming an offer and spending loyalty points have to succeed or fail
+    // with the cart write, so those adds keep an interactive transaction. A
+    // plain add has no such side effect and does not need one — which is the
+    // common case, and the one the customer waits on.
+    const needsAtomicSideEffects = Boolean(
+      cartItem.offerId || cartItem.loyaltyPointsUsed,
+    )
 
-      if (!existingCart) {
-        // create a new cart if no cart
+    const rawCartItem = needsAtomicSideEffects
+      ? await db.$transaction(async (tx) => {
+          // redeem offer
+          //
+          // Not conditional on a membership any more. It used to be, harmlessly,
+          // because only a member could reach this line — but an open offer held
+          // by a non-member would then be priced without ever writing a
+          // redemption, so `used` would never increment and `limit` would never
+          // be enforced.
+          if (cartItem.offerId) {
+            await redeemOfferForUser(userId, cartItem.offerId, tx)
+          }
 
-        const cart = await tx.cart.create({
-          data: {
-            user: { connect: { id: userId } },
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours from now
-            totalLoyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? 0,
-            totalPriceInCents: Math.round(
-              itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
-            ),
-            cartItems: {
-              create: cartItemData,
-            },
-          },
-          select: {
-            id: true,
-            cartItems: {
-              include: {
-                dessert: {
-                  select: {
-                    id: true,
-                    name: true,
-                    chineseName: true,
-                    description: true,
-                    priceInCents: true,
-                    priceInLoyaltyPoints: true,
-                    imagePath: true,
-                    ingredients: { include: { ingredient: true } },
-                    promo: true,
+          // If user used loyalty points, deduct from their account
+          if (cartItem.loyaltyPointsUsed) {
+            const existing = await tx.loyalty.findUnique({
+              where: { userId },
+              select: { points: true },
+            })
+
+            if (!existing) throw new Error("User loyalty record not found")
+            if (existing.points < cartItem.loyaltyPointsUsed) {
+              throw new Error("INSUFFICIENT_LOYALTY_POINTS")
+            }
+            await tx.loyalty.update({
+              where: { userId },
+              data: {
+                points: {
+                  decrement: cartItem.loyaltyPointsUsed,
+                },
+                records: {
+                  create: {
+                    change: -cartItem.loyaltyPointsUsed,
+                    reason: "REWARDS",
                   },
                 },
-                customisations: { include: { customisation: true } },
               },
-            },
-          },
+            })
+          }
+
+          return writeCartItem(tx)
         })
-        return cart.cartItems[0]
-      } else {
-        // if existing cart then update cart an create cart item
+      : await writeCartItem(db)
 
-        // update cart info
+    if (!rawCartItem) {
+      res.status(500).json({ success: false, message: "Could not add to cart" })
+      return
+    }
 
-        const cart = await tx.cart.update({
-          where: { userId },
-          data: {
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-            totalLoyaltyPointsUsed: {
-              increment: cartItem.loyaltyPointsUsed ?? 0,
-            },
-            totalPriceInCents: {
-              increment: Math.round(
-                itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
-              ),
-            },
-          },
-          select: {
-            id: true,
-          },
-        })
-
-        // create cart item
-
-        return await tx.cartItem.create({
-          data: {
-            cart: {
-              connect: {
-                id: cart.id,
-              },
-            },
-            ...cartItemData,
-          },
-          include: {
-            dessert: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                description: true,
-                priceInCents: true,
-                priceInLoyaltyPoints: true,
-                imagePath: true,
-                ingredients: { include: { ingredient: true } },
-                promo: true,
-              },
-            },
-            customisations: { include: { customisation: true } },
-          },
-        })
-      }
-    })
 
     const formattedCartItem = {
       ...rawCartItem,
@@ -460,60 +437,66 @@ export const getCartItems = async (req: Request, res: Response) => {
       return
     }
 
-    const cart = await db.cart.findUnique({
-      where: { userId },
-      select: {
-        id: true,
-        expiresAt: true,
-        cartItems: {
-          select: {
-            id: true,
-            offerId: true,
-            loyaltyPointsUsed: true,
-            // Needed below to tell a members-only item (which dies with a
-            // lapsed membership) from one anybody may hold.
-            offer: { select: { audience: true } },
+    // Independent lookups, so they go together. Run in series this pair cost
+    // two full database round trips on a request the app makes at every launch.
+    const [cart, membership] = await Promise.all([
+      db.cart.findUnique({
+        where: { userId },
+        select: {
+          id: true,
+          expiresAt: true,
+          cartItems: {
+            select: {
+              id: true,
+              offerId: true,
+              loyaltyPointsUsed: true,
+              // Needed below to tell a members-only item (which dies with a
+              // lapsed membership) from one anybody may hold.
+              offer: { select: { audience: true } },
+            },
           },
         },
-      },
-    })
-
-    const membership = await db.membership.findUnique({ where: { userId } })
+      }),
+      db.membership.findUnique({ where: { userId } }),
+    ])
 
     if (cart && cart.expiresAt && cart.expiresAt < new Date()) {
       const totalPointsToRefund = cart.cartItems.reduce((sum, item) => {
         return sum + (item.loyaltyPointsUsed ?? 0)
       }, 0)
 
-      if (totalPointsToRefund > 0) {
-        await db.loyalty.update({
-          where: { userId },
-          data: {
-            points: { increment: totalPointsToRefund },
-            records: {
-              create: { change: totalPointsToRefund, reason: "REFUND" },
-            },
-          },
-        })
-      }
-
       // An expired cart hands every held redemption back, whoever holds it.
       // The membership lookup this used to need is gone with the re-key — as
       // is the `break`, which abandoned the refund for every later item once
       // one lookup came up empty.
-      for (const item of cart.cartItems) {
-        if (!item.offerId) continue
-        await db.offerRedemption.updateMany({
-          where: {
-            offerId: item.offerId,
-            userId,
-            used: { gt: 0 },
-          },
-          data: {
-            used: { decrement: 1 },
-          },
-        })
-      }
+      //
+      // The refund and the releases touch different tables and none depends on
+      // another's result, so they are issued together. Awaited one at a time
+      // this was a round trip per offer item before the cart could be deleted.
+      await Promise.all([
+        ...(totalPointsToRefund > 0
+          ? [
+              db.loyalty.update({
+                where: { userId },
+                data: {
+                  points: { increment: totalPointsToRefund },
+                  records: {
+                    create: { change: totalPointsToRefund, reason: "REFUND" },
+                  },
+                },
+              }),
+            ]
+          : []),
+        ...cart.cartItems
+          .filter((item) => item.offerId)
+          .map((item) =>
+            db.offerRedemption.updateMany({
+              where: { offerId: item.offerId!, userId, used: { gt: 0 } },
+              data: { used: { decrement: 1 } },
+            }),
+          ),
+      ])
+
       await db.cart.delete({ where: { id: cart.id } })
       res.status(200).json({ success: true, message: "Cart expired" })
       return
@@ -531,22 +514,20 @@ export const getCartItems = async (req: Request, res: Response) => {
       )
 
       if (memberOnlyItems.length > 0) {
-        for (const item of memberOnlyItems) {
-          await db.offerRedemption.updateMany({
-            where: {
-              offerId: item.offerId!,
-              userId,
-              used: { gt: 0 },
-            },
-            data: {
-              used: { decrement: 1 },
-            },
-          })
-        }
-
-        const deletedItems = await db.cartItem.deleteMany({
-          where: { id: { in: memberOnlyItems.map((item) => item.id) } },
-        })
+        // Releases and the delete hit different tables, so they go together.
+        const [, deletedItems] = await Promise.all([
+          Promise.all(
+            memberOnlyItems.map((item) =>
+              db.offerRedemption.updateMany({
+                where: { offerId: item.offerId!, userId, used: { gt: 0 } },
+                data: { used: { decrement: 1 } },
+              }),
+            ),
+          ),
+          db.cartItem.deleteMany({
+            where: { id: { in: memberOnlyItems.map((item) => item.id) } },
+          }),
+        ])
 
         if (deletedItems.count > 0) {
           warning =
@@ -1131,61 +1112,55 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       (cartItem.itemPriceInCents + customisationPrice) * cartItem.quantity
     const priceDifference = newtotalCartItemPrice - oldTtotalItemPrice
 
-    const updatedCartItem = await db.$transaction(async (tx) => {
-      await tx.cart.update({
-        where: { userId },
-        data: {
-          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-          totalLoyaltyPointsUsed: {
-            increment: cartItem?.loyaltyPointsUsed ?? 0,
+    // One statement. This used to open a transaction, update the cart — whose
+    // nested cartItems update already applied the new quantity — and then
+    // update that same row a second time purely to read it back with its
+    // relations. Four round trips, on the button customers press most, against
+    // a database where each one costs the better part of a second.
+    const updatedCart = await db.cart.update({
+      where: { userId },
+      data: {
+        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
+        totalLoyaltyPointsUsed: {
+          increment: cartItem?.loyaltyPointsUsed ?? 0,
+        },
+        totalPriceInCents: { increment: priceDifference ?? 0 },
+        cartItems: {
+          update: {
+            where: { id },
+            data: { quantity },
           },
-          totalPriceInCents: { increment: priceDifference ?? 0 },
-          cartItems: {
-            update: {
-              where: { id },
-              data: {
-                quantity: quantity,
+        },
+      },
+      select: {
+        cartItems: {
+          where: { id },
+          include: {
+            dessert: {
+              select: {
+                id: true,
+                name: true,
+                chineseName: true,
+                description: true,
+                priceInCents: true,
+                priceInLoyaltyPoints: true,
+                imagePath: true,
+                ingredients: { include: { ingredient: true } },
+                promo: true,
               },
             },
+            customisations: { include: { customisation: true } },
           },
         },
-        select: { id: true },
-      })
-
-      return await tx.cartItem.update({
-        where: { id: cartItem.id },
-        data: {
-          quantity,
-        },
-        include: {
-          dessert: {
-            select: {
-              id: true,
-              name: true,
-              chineseName: true,
-              description: true,
-              priceInCents: true,
-              priceInLoyaltyPoints: true,
-              imagePath: true,
-              ingredients: { include: { ingredient: true } },
-              promo: true,
-            },
-          },
-          customisations: { include: { customisation: true } },
-        },
-      })
-
-      // if (cartItem.dessert.category.name === "Mochi Series") {
-      //   await CheckMochiPromotion(
-      //     cartItem.cartId,
-      //     cartItem.dessertId,
-      //     cartItem.dessert.priceInCents,
-      //     cartItem.itemPriceInCents,
-      //     cartItemCustomisation ?? [],
-      //     tx,
-      //   )
-      // }
+      },
     })
+
+    const updatedCartItem = updatedCart.cartItems[0]
+
+    if (!updatedCartItem) {
+      res.status(404).json({ message: "Cart item not found" })
+      return
+    }
 
     const formattedCartItem = {
       ...updatedCartItem,

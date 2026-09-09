@@ -15,6 +15,7 @@ import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { getErrorMessage } from "../utils/getError"
 import { cached, CACHE_KEYS } from "../lib/cache"
+import { forgetSession } from "../lib/sessionCache"
 
 /*
  * Where an admin endpoint exists to make one of these wrong it calls
@@ -29,6 +30,8 @@ const OFFERS_TTL_SECONDS = 120
 const DAYS_OFF_TTL_SECONDS = 300
 const LEADERBOARD_TTL_SECONDS = 300
 const CUSTOMISATIONS_TTL_SECONDS = 300
+/** Short: the kitchen flips this to pause dine-in and expects it to take effect. */
+const RESTAURANT_STATUS_TTL_SECONDS = 30
 
 export const getMenu = async (req: Request, res: Response) => {
   try {
@@ -290,6 +293,16 @@ export const resetPassword = async (req: Request, res: Response) => {
       })
       return
     }
+
+    // authenticateToken can serve its password-change check from Redis for
+    // up to a minute, so clear this user's entry. Without it a reset would
+    // leave the JWTs it is meant to revoke working until that entry lapsed.
+    const resetUser = await db.user.findUnique({
+      where: { email: normalisedEmail },
+      select: { id: true },
+    })
+
+    if (resetUser) await forgetSession(resetUser.id)
     res
       .status(200)
       .json({ success: true, message: "Password reset successfully" })
@@ -309,16 +322,30 @@ export const getStoreInfo = (req: Request, res: Response) => {
 }
 
 export const restaurantStatus = async (req: Request, res: Response) => {
-  const restaurant = await db.restaurantStatus.findFirst()
-  if (!restaurant) {
+  // One row, read on every launch and polled while ordering. Tiny, and the
+  // two writes that can change it both invalidate this key, so the TTL is
+  // only a backstop.
+  const status = await cached(
+    CACHE_KEYS.restaurantStatus,
+    RESTAURANT_STATUS_TTL_SECONDS,
+    async () => {
+      const restaurant = await db.restaurantStatus.findFirst()
+      if (!restaurant) return null
+
+      return {
+        dineInAvailability: restaurant.dineInAvailability,
+        unavailableUntil: restaurant.unavailableUntil,
+      }
+    },
+  )
+
+  if (!status) {
     res.status(404).json({ message: "Could not find selected store" })
     return
   }
-  const restaurantStatus = {
-    dineInAvailability: restaurant.dineInAvailability,
-    unavailableUntil: restaurant.unavailableUntil,
-  }
-  res.status(200).json({ restaurantStatus })
+
+  res.set("Cache-Control", "public, max-age=15")
+  res.status(200).json({ restaurantStatus: status })
   return
 }
 

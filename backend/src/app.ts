@@ -10,6 +10,7 @@ import adminRoutes from "./routes/admin.routes"
 import internalRoutes from "./routes/internal.routes"
 import { stripeWebhook } from "./controllers/stripe.controller"
 import { getIo } from "./lib/socket"
+import { requestTiming } from "./middleware/requestTiming"
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
 
@@ -60,6 +61,9 @@ app.post(
 app.use(cors(corsOptions))
 app.use(express.json())
 app.set("trust proxy", 1) // Crucial for accurate IP tracking behind proxies
+
+// Before the routes, so every query a request makes is counted against it.
+app.use(requestTiming)
 
 app.use((req, res, next) => {
   const io = getIo()
