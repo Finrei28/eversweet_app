@@ -63,6 +63,90 @@ const retryOnCartConflict = async <T>(work: () => Promise<T>): Promise<T> => {
 }
 
 
+/**
+ * What the customer asked for, priced by the database rather than by them.
+ *
+ * The request carries a name and a price for every customisation, and both
+ * used to be believed. The price set the membership discount stored against
+ * the line, and `calculateCartPrice` subtracts that stored discount from the
+ * real price at checkout — so claiming a $50 topping bought a $50 discount off
+ * the rest of the order. The name decides the mochi-bowl adjustment further
+ * down, which is worth $2 to anyone willing to rename a topping.
+ *
+ * Ids are the only part of the request worth trusting, because the database
+ * can check them.
+ */
+type RequestedCustomisation = { id: string; quantity: number }
+type ResolvedCustomisation = {
+  id: string
+  name: string
+  priceInCents: number
+  quantity: number
+}
+
+const loadCustomisations = (requested: RequestedCustomisation[]) =>
+  requested.length > 0
+    ? db.ingredient.findMany({
+        where: { id: { in: requested.map((c) => c.id) } },
+        select: { id: true, name: true, priceInCents: true },
+      })
+    : Promise.resolve([])
+
+/**
+ * Returns null when the request names a customisation that does not exist,
+ * which is a bad request rather than something to price around.
+ */
+const resolveCustomisations = (
+  requested: RequestedCustomisation[],
+  rows: { id: string; name: string; priceInCents: number }[],
+): ResolvedCustomisation[] | null => {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const resolved: ResolvedCustomisation[] = []
+
+  for (const c of requested) {
+    const row = byId.get(c.id)
+    if (!row) return null
+
+    resolved.push({
+      id: row.id,
+      name: row.name,
+      priceInCents: row.priceInCents,
+      quantity: c.quantity,
+    })
+  }
+
+  return resolved
+}
+
+/**
+ * A mochi bowl with both the glutinous balls and the mochi taken out costs $2
+ * less. Decided on the database's names, never the request's.
+ */
+const mochiAdjustmentInCents = (
+  customisations: ResolvedCustomisation[],
+  categoryName: string,
+) => {
+  if (categoryName !== "Mochi Series") return 0
+
+  const removed = (name: string) =>
+    customisations.some((c) => c.name === name && c.quantity === 0)
+
+  return removed("Glutinous Balls") && removed("Mochi") ? 200 : 0
+}
+
+/**
+ * The membership discount on the customisations of one line, priced from the
+ * database rows.
+ */
+const customisationDiscount = (
+  customisation: ResolvedCustomisation,
+  membership: Membership,
+  maxMembershipDiscount: number,
+) =>
+  membership?.isActive && customisation.quantity > 0
+    ? customisation.priceInCents * (maxMembershipDiscount / 100)
+    : 0
+
 function calculateBestDiscount(
   cartItem: CartItem | AddCartItem,
   membership: Membership,
@@ -164,7 +248,11 @@ export const addItemToCart = async (req: Request, res: Response) => {
     // The offer row joins this wave instead of following it. It does not
     // depend on the dessert or the membership; only the audience checks below
     // do, and those are local once all three have landed.
-    const [dessert, membership, offer] = await Promise.all([
+    //
+    // The customisations come too. What they cost and what they are called
+    // both decide money below, and neither may be taken from the request —
+    // see `resolveCustomisations`. Same wave, so no extra round trip.
+    const [dessert, membership, offer, customisationRows] = await Promise.all([
       db.dessert.findUnique({
         where: { id: cartItem.dessertId },
         include: {
@@ -186,10 +274,21 @@ export const addItemToCart = async (req: Request, res: Response) => {
             include: { dessert: true },
           })
         : Promise.resolve(null),
+      loadCustomisations(cartItem.customisations),
     ])
 
     if (!dessert) {
       res.status(404).json({ message: "Dessert not found" })
+      return
+    }
+
+    const customisations = resolveCustomisations(
+      cartItem.customisations,
+      customisationRows,
+    )
+
+    if (!customisations) {
+      res.status(400).json({ message: "Unknown customisation" })
       return
     }
 
@@ -215,20 +314,29 @@ export const addItemToCart = async (req: Request, res: Response) => {
       }
     }
 
-    const wantsNoGlutinous = cartItem.customisations.some(
-      (c) => c.name === "Glutinous Balls" && c.quantity === 0,
-    )
-    const wantsNoMochi = cartItem.customisations.some(
-      (c) => c.name === "Mochi" && c.quantity === 0,
-    )
+    // A redemption is signalled by the points being present, and what it costs
+    // is the dessert's price in points — not a figure the customer sends.
+    // Sending 1 for a 500-point reward used to buy it for 1.
+    const pointsRequested = cartItem.loyaltyPointsUsed ?? 0
+    const isRedemption = pointsRequested > 0
 
-    let isMochiBowl = dessert?.category.name === "Mochi Series"
+    if (isRedemption && pointsRequested !== dessert.priceInLoyaltyPoints) {
+      res
+        .status(400)
+        .json({ message: "That reward costs a different number of points" })
+      return
+    }
 
-    const noMochi = isMochiBowl && wantsNoGlutinous && wantsNoMochi
+    // The list price comes from the dessert row rather than the request. The
+    // app only ever sent `dessert.priceInCents` back to us, so nothing
+    // legitimate changes — but `itemPriceInCents: 0` no longer buys a $12
+    // dessert for nothing.
+    const listPriceInCents = isRedemption ? 0 : dessert.priceInCents
 
     const itemPriceInCentsBeforeDiscount = Math.max(
       0,
-      cartItem.itemPriceInCents - (noMochi ? 200 : 0),
+      listPriceInCents -
+        mochiAdjustmentInCents(customisations, dessert.category.name),
     )
 
     // discount logic
@@ -276,21 +384,21 @@ export const addItemToCart = async (req: Request, res: Response) => {
       },
       quantity: cartItem.quantity,
       itemPriceInCents: itemPriceInCentsBeforeDiscount, // get price from order item
-      loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
+      loyaltyPointsUsed: isRedemption ? dessert.priceInLoyaltyPoints : null,
       discountedAmountInCents: Math.round(finalDiscountedAmount),
       customisations: {
-        create: cartItem.customisations.map((cartItemCustomisation) => {
+        create: customisations.map((cartItemCustomisation) => {
           return {
             customisation: {
               connect: {
                 id: cartItemCustomisation.id, // Ensure customisation exists before connecting
               },
             },
-            discountedAmountInCents:
-              membership?.isActive && cartItemCustomisation.quantity > 0
-                ? cartItemCustomisation.priceInCents *
-                  (maxMembershipDiscount / 100)
-                : 0,
+            discountedAmountInCents: customisationDiscount(
+              cartItemCustomisation,
+              membership,
+              maxMembershipDiscount,
+            ),
 
             quantity: cartItemCustomisation.quantity,
           }
@@ -321,7 +429,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
     const netPriceInCents = Math.round(
       itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
     )
-    const pointsSpent = cartItem.loyaltyPointsUsed ?? 0
+    const pointsSpent = isRedemption ? dessert.priceInLoyaltyPoints : 0
 
     // Supplied rather than left to the database, so the row just written can be
     // read back by id in the same statement. The alternative — asking for the
@@ -380,9 +488,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
     // with the cart write, so those adds keep an interactive transaction. A
     // plain add has no such side effect and does not need one — which is the
     // common case, and the one the customer waits on.
-    const needsAtomicSideEffects = Boolean(
-      cartItem.offerId || cartItem.loyaltyPointsUsed,
-    )
+    const needsAtomicSideEffects = Boolean(cartItem.offerId || isRedemption)
 
     const rawCartItem = needsAtomicSideEffects
       ? await retryOnCartConflict(() =>
@@ -399,25 +505,25 @@ export const addItemToCart = async (req: Request, res: Response) => {
             }
 
             // If user used loyalty points, deduct from their account
-            if (cartItem.loyaltyPointsUsed) {
+            if (isRedemption) {
               const existing = await tx.loyalty.findUnique({
                 where: { userId },
                 select: { points: true },
               })
 
               if (!existing) throw new Error("User loyalty record not found")
-              if (existing.points < cartItem.loyaltyPointsUsed) {
+              if (existing.points < pointsSpent) {
                 throw new Error("INSUFFICIENT_LOYALTY_POINTS")
               }
               await tx.loyalty.update({
                 where: { userId },
                 data: {
                   points: {
-                    decrement: cartItem.loyaltyPointsUsed,
+                    decrement: pointsSpent,
                   },
                   records: {
                     create: {
-                      change: -cartItem.loyaltyPointsUsed,
+                      change: -pointsSpent,
                       reason: "REWARDS",
                     },
                   },
@@ -820,29 +926,37 @@ export const updateCartItem = async (req: Request, res: Response) => {
 
     const cartItem = parsedBody.data
 
-    const [dessert, existingCartItem, membership] = await Promise.all([
-      db.dessert.findUnique({
-        where: { id: cartItem.dessertId },
-        include: { promo: true, category: true },
-      }),
-      db.cartItem.findUnique({
-        where: { id: cartItem.id },
-        select: {
-          itemPriceInCents: true,
-          loyaltyPointsUsed: true,
-          quantity: true,
-          customisations: {
-            include: {
-              customisation: true,
+    const [dessert, existingCartItem, membership, customisationRows] =
+      await Promise.all([
+        db.dessert.findUnique({
+          where: { id: cartItem.dessertId },
+          include: { promo: true, category: true },
+        }),
+        db.cartItem.findUnique({
+          where: { id: cartItem.id },
+          select: {
+            itemPriceInCents: true,
+            loyaltyPointsUsed: true,
+            quantity: true,
+            // The offer this line actually holds. Pricing used to read the
+            // offer id out of the request, which never gets written to the
+            // row - so quoting a generous offer's id while editing a plain
+            // item applied that offer's discount without ever holding a
+            // redemption against it.
+            offerId: true,
+            customisations: {
+              include: {
+                customisation: true,
+              },
             },
           },
-        },
-      }),
-      db.membership.findUnique({
-        where: { userId },
-        include: { plan: true },
-      }),
-    ])
+        }),
+        db.membership.findUnique({
+          where: { userId },
+          include: { plan: true },
+        }),
+        loadCustomisations(cartItem.customisations),
+      ])
 
     if (!dessert) {
       res.status(404).json({ message: "Dessert not found" })
@@ -854,53 +968,54 @@ export const updateCartItem = async (req: Request, res: Response) => {
       return
     }
 
-    const wantsNoGlutinous = cartItem.customisations.some(
-      (c) => c.name === "Glutinous Balls" && c.quantity === 0, // user does not want balls
-    )
-    const wantsNoMochi = cartItem.customisations.some(
-      // user does not want mochi
-      (c) => c.name === "Mochi" && c.quantity === 0,
+    const customisations = resolveCustomisations(
+      cartItem.customisations,
+      customisationRows,
     )
 
-    const existingCartHasNoBalls = existingCartItem.customisations.some(
-      (c) => c.customisation.name === "Glutinous Balls" && c.quantity === 0,
-    ) // existing mochi has no balls
-    const existingCartHasNoMochi = existingCartItem.customisations.some(
-      (c) => c.customisation.name === "Mochi" && c.quantity === 0,
-    ) // existing mochi has no mochi
-
-    let isMochiBowl = false
-
-    if (wantsNoGlutinous && wantsNoMochi) {
-      if (dessert?.category.name === "Mochi Series") {
-        isMochiBowl = true
-      }
+    if (!customisations) {
+      res.status(400).json({ message: "Unknown customisation" })
+      return
     }
 
-    const removeMochi =
-      isMochiBowl &&
-      wantsNoGlutinous &&
-      wantsNoMochi &&
-      !existingCartHasNoBalls &&
-      !existingCartHasNoMochi
-    const addBackMochi =
-      isMochiBowl &&
-      existingCartHasNoBalls &&
-      existingCartHasNoMochi &&
-      !wantsNoGlutinous &&
-      !wantsNoMochi // If existing cart has mochi and balls removed but new cart doesn't then user is trying to add it back
+    // Whether a line was paid for in points is fixed when it is created,
+    // because that is the only moment anything is debited. Letting an edit
+    // introduce or drop the points would grant or destroy a redemption for
+    // nothing. The app always resends the line's existing value, so no edit a
+    // customer can actually make is refused here.
+    const storedPoints = existingCartItem.loyaltyPointsUsed ?? 0
 
-    const itemPriceInCentsBeforeDiscount = addBackMochi
-      ? cartItem.itemPriceInCents + 200 // If user is trying to add mochi back, charge them $2
-      : removeMochi
-        ? Math.max(0, cartItem.itemPriceInCents - 200) // If user is removing mochi, minus $2
-        : cartItem.itemPriceInCents // else normal price
+    if ((cartItem.loyaltyPointsUsed ?? 0) !== storedPoints) {
+      res.status(400).json({
+        message: "Remove the item and add it again to change how it is paid for",
+      })
+      return
+    }
+
+    // Priced from the dessert and from the database's own customisation names.
+    // The add-back/remove bookkeeping the old code did is gone with the price
+    // it was adjusting: there is nothing to correct when the figure is worked
+    // out from scratch on every edit.
+    const isRedemption = storedPoints > 0
+    const listPriceInCents = isRedemption ? 0 : dessert.priceInCents
+
+    const itemPriceInCentsBeforeDiscount = Math.max(
+      0,
+      listPriceInCents -
+        mochiAdjustmentInCents(customisations, dessert.category.name),
+    )
+
+    const maxMembershipDiscount = Math.min(
+      membership?.plan.maxDiscount ?? 0,
+      (membership?.totalMonths ?? 1) *
+        (membership?.plan.membershipDiscount ?? 0),
+    )
 
     let finalDiscountedAmount = 0
 
-    if (cartItem.offerId) {
+    if (existingCartItem.offerId) {
       const offer = await db.offer.findUnique({
-        where: { id: cartItem.offerId },
+        where: { id: existingCartItem.offerId },
         include: { dessert: true },
       })
       if (!offer) {
@@ -950,12 +1065,16 @@ export const updateCartItem = async (req: Request, res: Response) => {
       )
     }
 
-    const newCustomisationPrice = cartItem.customisations.reduce(
+    const newCustomisationPrice = customisations.reduce(
       (sum, customisation) =>
         sum +
         (customisation.quantity > 0
           ? (customisation.priceInCents -
-              customisation.discountedAmountInCents) *
+              customisationDiscount(
+                customisation,
+                membership,
+                maxMembershipDiscount,
+              )) *
             customisation.quantity
           : 0),
       0,
@@ -980,44 +1099,33 @@ export const updateCartItem = async (req: Request, res: Response) => {
 
     const priceDifference = newtotalCartItemPrice - oldtotalCartItemPrice
 
-    const loyaltyPointsDifference =
-      (cartItem.loyaltyPointsUsed ?? 0) -
-      (existingCartItem?.loyaltyPointsUsed ?? 0)
-
     await db.cart.update({
       where: { userId },
       data: {
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
         totalPriceInCents: { increment: priceDifference },
-        totalLoyaltyPointsUsed: { increment: loyaltyPointsDifference },
         cartItems: {
           update: {
             where: { id: cartItem.id },
             data: {
               itemPriceInCents: itemPriceInCentsBeforeDiscount, // get price from order item
               discountedAmountInCents: Math.round(finalDiscountedAmount),
-              loyaltyPointsUsed: cartItem.loyaltyPointsUsed ?? null,
+              // Unchanged by construction - the guard above refuses an edit
+              // that would move it - but written explicitly so the row cannot
+              // drift from what was actually debited.
+              loyaltyPointsUsed: existingCartItem.loyaltyPointsUsed,
               // quantity: cartItem.quantity,
               customisations: {
                 deleteMany: {},
-                create: cartItem.customisations.map((customisation) => {
-                  const maxMembershipDiscount = Math.min(
-                    membership?.plan.maxDiscount ?? 0,
-                    (membership?.totalMonths ?? 1) *
-                      (membership?.plan.membershipDiscount ?? 0),
-                  )
-
-                  return {
-                    customisation: { connect: { id: customisation.id } },
-                    discountedAmountInCents:
-                      membership?.isActive && customisation.quantity > 0
-                        ? customisation.priceInCents *
-                          (maxMembershipDiscount / 100)
-                        : 0,
-
-                    quantity: customisation.quantity,
-                  }
-                }),
+                create: customisations.map((customisation) => ({
+                  customisation: { connect: { id: customisation.id } },
+                  discountedAmountInCents: customisationDiscount(
+                    customisation,
+                    membership,
+                    maxMembershipDiscount,
+                  ),
+                  quantity: customisation.quantity,
+                })),
               },
             },
           },
@@ -1127,8 +1235,25 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       return
     }
 
+    // An offer holds a redemption, and a reward has already been paid for in
+    // points. Both are recorded once, when the line is created, so multiplying
+    // the line here would multiply the item without multiplying what it cost.
+    //
+    // This is how rewards were being given away: adding a reward already in the
+    // cart merged into the existing line and came through here, and nothing on
+    // this path debits points — `addItemToCart` is the only thing that does. A
+    // second reward is a second add, which debits again.
     if (cartItem.offerId) {
-      res.status(404).json({ message: "Cannot change offer quantity" })
+      res
+        .status(400)
+        .json({ message: "Cannot change the quantity of an offer item" })
+      return
+    }
+
+    if (cartItem.loyaltyPointsUsed) {
+      res
+        .status(400)
+        .json({ message: "Cannot change the quantity of a reward item" })
       return
     }
 
@@ -1158,9 +1283,9 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       where: { userId },
       data: {
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-        totalLoyaltyPointsUsed: {
-          increment: cartItem?.loyaltyPointsUsed ?? 0,
-        },
+        // No points term. This used to re-add the line's points on every
+        // quantity change, including a decrement, which drifted the column.
+        // The guard above means a line reaching here never has any.
         totalPriceInCents: { increment: priceDifference ?? 0 },
         cartItems: {
           update: {
