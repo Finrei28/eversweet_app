@@ -519,14 +519,16 @@ export default function CustomModal({
                 <View {...panResponder.panHandlers}>
                   <TouchableOpacity
                     disabled={buttonLoading}
-                    onPress={async () => {
+                    onPress={() => {
                       const currentModalId = modalIdRef.current
                       setButtonLoading(true)
                       addTodessertModalTracker(currentModalId)
-                      try {
-                        if (state === "edit" && cartItem) {
-                          await editItem({
-                            id: cartItem?.id,
+
+                      const isEdit = state === "edit" && !!cartItem
+
+                      const submit = isEdit
+                        ? editItem({
+                            id: cartItem!.id,
                             dessert: selectedDessert,
                             quantity: 1,
                             loyaltyPointsUsed:
@@ -536,8 +538,7 @@ export default function CustomModal({
                             offerId: offerId ? offerId : null,
                             discountedAmountInCents: 0,
                           })
-                        } else {
-                          await addItem(
+                        : addItem(
                             {
                               dessert: selectedDessert,
                               quantity: 1,
@@ -549,8 +550,20 @@ export default function CustomModal({
                             },
                             usersMembership,
                           )
-                        }
-                      } finally {
+
+                      // A plain add lands in the cart locally the moment it is
+                      // requested, so there is nothing here worth waiting for —
+                      // and waiting was the whole of the four to five seconds
+                      // this button used to take. Redemptions still hold the
+                      // modal, because the server can refuse them and the
+                      // customer needs to see that before it closes.
+                      if (!isEdit && type !== "points" && !offerId) {
+                        void submit
+                        closeWithAnimation()
+                        return
+                      }
+
+                      void submit.finally(() => {
                         const modalExists = useCartStore
                           .getState()
                           .dessertModalTracker.includes(modalIdRef.current)
@@ -558,7 +571,7 @@ export default function CustomModal({
                         if (modalExists) {
                           closeWithAnimation()
                         }
-                      }
+                      })
                     }}
                     className="bg-primary p-3 mt-3 items-center rounded-lg"
                   >

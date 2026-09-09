@@ -22,6 +22,7 @@ import isEqual from "lodash/isEqual"
 import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
+  calculateMembershipDiscount,
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
 import { fetchLoyaltyRates } from "@/services/queries"
@@ -71,6 +72,55 @@ const netUnitPriceInCents = (item: CartItem) =>
         : 0),
     0,
   )
+
+/**
+ * Marks a line that exists in the cart on this device but not yet on the
+ * server. Nothing may be sent to the server about it until the add that
+ * created it comes back with a real id.
+ */
+const PENDING_ID_PREFIX = "pending:"
+
+let pendingSequence = 0
+const nextPendingId = () => `${PENDING_ID_PREFIX}${++pendingSequence}`
+
+export const isPendingCartItem = (id: string) => id.startsWith(PENDING_ID_PREFIX)
+
+const showAddedToast = (item: AddCartItem) => {
+  Toast.show({
+    type: "success",
+    text1: `${item.dessert.name} added to cart`,
+    position: "bottom",
+    visibilityTime: 3000,
+    autoHide: true,
+    bottomOffset: 90,
+    props: {
+      text1NumberOfLines: 0,
+      text2NumberOfLines: 0, // allow wrapping
+    },
+  })
+}
+
+/**
+ * Mirrors the server's calculateBestDiscount — the better of the membership
+ * and promo discounts — closely enough that the cart total does not visibly
+ * jump between the optimistic line appearing and the server's row replacing
+ * it. The server remains the authority; this figure lives for about a second.
+ */
+const estimateDiscountInCents = (
+  item: AddCartItem,
+  usersMembership?: UsersMembership | null,
+) => {
+  const membershipDiscount = calculateMembershipDiscount(
+    item.itemPriceInCents,
+    usersMembership ?? null,
+  )
+  const promoDiscount = Math.max(
+    0,
+    item.dessert.priceInCents - calculatePriceAfterPromo(item.dessert),
+  )
+
+  return Math.max(membershipDiscount, promoDiscount)
+}
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
@@ -146,19 +196,45 @@ export const useCartStore = create<CartState>((set, get) => ({
       )
     })
 
-    // if (existing) {
-    //   set({
-    //     items: get().items.map((i) =>
-    //       i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-    //     ),
-    //     cartOperations: get().cartOperations + 1,
-    //   })
-    // } else {
-    //   set({
-    //     items: [...get().items, { ...item, id: tempId }],
-    //     cartOperations: get().cartOperations + 1,
-    //   })
-    // }
+    // Shown before the server has agreed to it — but only for a plain add.
+    //
+    // An offer redemption or a loyalty-point spend is refusable: a usage limit
+    // reached, not enough points. Putting those in the cart first means taking
+    // them back in front of the customer, and they are also the adds where the
+    // server's answer carries information. Adding a dessert has no such
+    // outcome, and it is the case people actually sit and wait through: a
+    // round trip to this app's database is several seconds.
+    const isPlainAdd = !item.offerId && !item.loyaltyPointsUsed
+    const previousItems = get().items
+    let optimisticId: string | null = null
+
+    if (isPlainAdd) {
+      if (existing) {
+        set({
+          items: previousItems.map((i) =>
+            i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i,
+          ),
+        })
+      } else {
+        optimisticId = nextPendingId()
+        set({
+          items: [
+            ...previousItems,
+            {
+              ...item,
+              id: optimisticId,
+              discountedAmountInCents: estimateDiscountInCents(
+                item,
+                usersMembership,
+              ),
+            },
+          ],
+        })
+      }
+
+      showAddedToast(item)
+    }
+
     try {
       if (existing) {
         const updatedCartItem = await updateCartItemQuantity(
@@ -172,7 +248,15 @@ export const useCartStore = create<CartState>((set, get) => ({
         })
       } else {
         const newCartItem = await addItemToCart(item)
-        set({ items: [...get().items, newCartItem] })
+        set({
+          items: optimisticId
+            ? // Swap the placeholder for the server's row, which carries the
+              // real id, price and discount.
+              get().items.map((i) =>
+                i.id === optimisticId ? newCartItem : i,
+              )
+            : [...get().items, newCartItem],
+        })
       }
 
       // There used to be a "join our membership" error toast here, fired on a
@@ -197,21 +281,16 @@ export const useCartStore = create<CartState>((set, get) => ({
             text2NumberOfLines: 0, // allow wrapping
           },
         })
-      } else {
-        Toast.show({
-          type: "success",
-          text1: `${item.dessert.name} added to cart`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
+      } else if (!isPlainAdd) {
+        // The optimistic path already said so the moment the customer tapped.
+        showAddedToast(item)
       }
     } catch (error) {
+      // Put the cart back as it was: the line above never reached the server.
+      if (isPlainAdd) {
+        set({ items: previousItems })
+      }
+
       if (item?.loyaltyPointsUsed) {
         console.error("Failed to order with loyalty points", error)
         Toast.show({
@@ -245,6 +324,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     }
   },
+
   editItem: async (item) => {
     try {
       const { cartItem } = await updateCartItem(item)
@@ -277,6 +357,11 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   removeItem: async (id) => {
+    // Still in flight. The add that created this line has not come back
+    // with a real id yet, so there is nothing the server would recognise
+    // to delete — and the pending row is about to be replaced anyway.
+    if (isPendingCartItem(id)) return
+
     const previousItems = get().items
     const item = get().items.find((i) => i.id === id)
     set({
@@ -427,6 +512,10 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   incrementItem: async (id) => {
+    // Inert until the line lands, so the count cannot drift from the row
+    // the server is about to send back.
+    if (isPendingCartItem(id)) return
+
     set({
       items: get().items.map((i) =>
         i.id === id ? { ...i, quantity: i.quantity + 1 } : i,
@@ -434,6 +523,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   decrementItem: async (id) => {
+    // See incrementItem.
+    if (isPendingCartItem(id)) return
+
     set({
       items: get().items.map((i) =>
         // Floored at one: removing the last one is `removeItem`, and only the
@@ -444,6 +536,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   updateCartItemQuantity: async (id, quantity) => {
+    // See removeItem: a pending line has no server-side id to update.
+    if (isPendingCartItem(id)) return
+
     // A counter rather than Date.now(): two taps inside the same millisecond
     // produced identical ids, so neither response counted as stale.
     const requestId = (get().lastRequestId ?? 0) + 1
