@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client"
 import { recordQuery } from "../middleware/requestTiming"
 
 const createPrismaClient = () => {
+  const sqlTiming = process.env.SQL_TIMING === "1"
+
   const base = new PrismaClient({
     log: [
       { emit: "event", level: "query" },
@@ -25,8 +27,6 @@ const createPrismaClient = () => {
    * statement or its parameters, so this is safe to turn on in production for
    * as long as it takes to read a few requests.
    */
-  const sqlTiming = process.env.SQL_TIMING === "1"
-
   base.$on("query", (event) => {
     if (process.env.NODE_ENV === "development") {
       console.log(`prisma ${event.duration}ms ${event.query}`)
@@ -58,13 +58,24 @@ const createPrismaClient = () => {
   const timed = base.$extends({
     query: {
       $allModels: {
-        async $allOperations({ args, query }) {
+        async $allOperations({ model, operation, args, query }) {
           const startedAt = performance.now()
 
           try {
             return await query(args)
           } finally {
-            recordQuery(performance.now() - startedAt)
+            const elapsed = performance.now() - startedAt
+            recordQuery(elapsed)
+
+            // Logged from here rather than only from the `query` event,
+            // because this is the path already proven to run - `db=` in the
+            // request log comes from it. The event handler may or may not
+            // fire on an extended client and nothing here depends on it.
+            if (sqlTiming) {
+              console.log(
+                `op ${model}.${operation} ${Math.round(elapsed)}ms`,
+              )
+            }
           }
         },
       },

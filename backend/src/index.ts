@@ -15,6 +15,7 @@ import {
   updateDailySpecial,
 } from "./controllers/admin.controller"
 import { calculateMonthlyWinner } from "./controllers/client.controller"
+import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -77,4 +78,9 @@ process.on("SIGINT", shutdown)
 
 server.listen(PORT, () => {
   console.log(`Server + Socket.IO running on ${PORT}`)
+
+  // Opt-in, and only ever a handful of `SELECT 1`s. See dbLatencyProbe.
+  if (process.env.SQL_TIMING === "1") {
+    void probeDatabaseLatency()
+  }
 })
