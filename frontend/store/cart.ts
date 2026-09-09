@@ -83,12 +83,38 @@ let cartWrites: Promise<unknown> = Promise.resolve()
 /**
  * Resolves when everything queued so far has settled.
  *
- * Checkout waits on this before reading the cart back from the server. The
- * quantity buttons apply their change locally and sync it after a debounce, so
- * without this the customer can reach checkout while their last tap is still
- * in the air, and be charged for the quantity they had before it.
+ * Checkout waits on this before reading the cart back from the server, so a
+ * write still in the air cannot be overwritten by a cart the server has not
+ * finished being told about.
  */
 export const whenCartWritesSettle = () => cartWrites
+
+/**
+ * Quantity taps are applied locally and sent after a 500ms debounce, and in
+ * that window there is nothing queued for `whenCartWritesSettle` to wait on -
+ * the tap exists only as a pending timer inside a cart row.
+ *
+ * The cart screen used to cover that by disabling its own checkout button
+ * until the sync came back, which meant a dead button for the debounce plus a
+ * four to five second round trip. Letting checkout force the pending syncs out
+ * instead keeps the button live: the wait moves onto the checkout screen,
+ * where it is a spinner that says what it is doing.
+ */
+const pendingQuantitySyncs = new Set<() => void>()
+
+export const registerPendingQuantitySync = (flush: () => void) => {
+  pendingQuantitySyncs.add(flush)
+
+  return () => {
+    pendingQuantitySyncs.delete(flush)
+  }
+}
+
+export const flushPendingQuantitySyncs = () => {
+  // Copied first: flushing sends the write, and the row may deregister while
+  // this is iterating. Flushing a debounce with nothing pending is a no-op.
+  for (const flush of [...pendingQuantitySyncs]) flush()
+}
 
 const countWrite = (delta: number) =>
   useCartStore.setState((state) => ({
@@ -117,6 +143,30 @@ const enqueueCartWrite = <T>(work: () => Promise<T>): Promise<T> => {
   )
 
   return next
+}
+
+/**
+ * Applies a points movement the server has already made, and reconciles after.
+ *
+ * The balance used to be left to fetchPoints alone, which is a second round
+ * trip: the toast said "500 points has been used" and the counter above it
+ * only agreed a second or two later, which reads as a glitch rather than a
+ * wait. The amount is not a guess - the server debits exactly what the reward
+ * costs and refunds exactly what was stored on the line - so this shows the
+ * same number at the moment it becomes true.
+ *
+ * Only ever called once the write has come back. Applying a movement before
+ * the server agrees is the mistake this codebase already made once.
+ *
+ * The fetch behind it is not awaited: it corrects the balance if the server
+ * moved it for some other reason, and a stale answer cannot overwrite a newer
+ * local movement because the store discards a fetch that has been superseded.
+ */
+const settlePoints = (delta: number) => {
+  const loyalty = useLoyaltyStore.getState()
+
+  loyalty.addPoints(delta)
+  void loyalty.fetchPoints()
 }
 
 const showAddedToast = (item: AddCartItem) => {
@@ -252,6 +302,12 @@ export const useCartStore = create<CartState>((set, get) => ({
           set({ items: [...get().items, newCartItem] })
         }
 
+        if (item.loyaltyPointsUsed) {
+          // Applied before the toast, so the counter and the message that
+          // explains it land together.
+          settlePoints(-item.loyaltyPointsUsed)
+        }
+
         // There used to be a "join our membership" error toast here, fired on a
         // *successful* add whenever the user was not an active member. It was
         // already unreachable for the case it described — the server 403s that
@@ -260,12 +316,6 @@ export const useCartStore = create<CartState>((set, get) => ({
         // entitled to. The server's own refusal message is the single source of
         // truth for why an offer was turned down.
         showAddedToast(item)
-
-        if (item.loyaltyPointsUsed) {
-          // Awaited: the balance on screen is only ever the server's answer
-          // now, and the customer is looking at it.
-          await useLoyaltyStore.getState().fetchPoints()
-        }
       } catch (error) {
         // Nothing was applied, so there is nothing to undo.
         if (item?.loyaltyPointsUsed) {
@@ -350,7 +400,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         await removeItemFromCart(id)
 
         if (item?.loyaltyPointsUsed) {
-          await useLoyaltyStore.getState().fetchPoints()
+          settlePoints(item.loyaltyPointsUsed)
 
           Toast.show({
             type: "success",
@@ -428,7 +478,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       try {
         await clearCart()
         if (totalLoyaltyPointsUsed > 0) {
-          useLoyaltyStore.getState().fetchPoints()
+          settlePoints(totalLoyaltyPointsUsed)
 
           Toast.show({
             type: "success",

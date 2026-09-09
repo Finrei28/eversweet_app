@@ -1,5 +1,5 @@
 import { formatCurrency } from "@/lib/formatters"
-import { useCartStore } from "@/store/cart"
+import { registerPendingQuantitySync, useCartStore } from "@/store/cart"
 import { CartItem } from "@/utils/types"
 import debounce from "lodash/debounce"
 import { useEffect, useMemo, useState } from "react"
@@ -11,7 +11,6 @@ type CartItemProps = {
   setSelectedCartItem: React.Dispatch<React.SetStateAction<CartItem | null>>
   setType: React.Dispatch<React.SetStateAction<"points" | "cents">>
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
-  setDebounceActive: React.Dispatch<React.SetStateAction<boolean>>
   setOfferId: React.Dispatch<React.SetStateAction<string | null>>
 }
 
@@ -20,7 +19,6 @@ export function CartItems({
   setSelectedCartItem,
   setType,
   setModalVisible,
-  setDebounceActive,
   setOfferId,
 }: CartItemProps) {
   const removeItem = useCartStore((state) => state.removeItem)
@@ -33,32 +31,31 @@ export function CartItems({
   const syncQuantity = useMemo(
     () =>
       debounce((quantity: number) => {
-        updateCartItemQuantity(item.id, quantity).then(() => {
-          setDebounceActive(false)
-        })
+        updateCartItemQuantity(item.id, quantity)
       }, 500),
     [item.id],
   )
 
-  // Flushed, not cancelled. Cancelling threw away the customer's last tap:
-  // pressing + and going straight to checkout unmounted this row inside the
-  // debounce window, so the change never reached the server and checkout
-  // charged the old quantity.
+  // Registered so checkout can force this out early, and flushed rather than
+  // cancelled on the way out. Cancelling threw away the customer's last tap:
+  // pressing + and leaving inside the debounce window meant the change never
+  // reached the server and checkout charged the old quantity.
   useEffect(() => {
+    const deregister = registerPendingQuantitySync(() => syncQuantity.flush())
+
     return () => {
       syncQuantity.flush()
+      deregister()
     }
   }, [syncQuantity])
 
   const handleIncrement = () => {
-    setDebounceActive(true)
     const nextQty = item.quantity + 1
     incrementItem(item.id)
     syncQuantity(nextQty)
   }
 
   const handleDecrement = () => {
-    setDebounceActive(true)
     const nextQty = item.quantity - 1
     decrementItem(item.id)
     syncQuantity(nextQty)
