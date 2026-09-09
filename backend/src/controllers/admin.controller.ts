@@ -518,6 +518,7 @@ export const updateRestaurantStatus = async (req: Request, res: Response) => {
     await db.restaurantStatus.updateMany({
       data,
     })
+    await invalidate(CACHE_KEYS.restaurantStatus)
     res.status(200).json({ message: "Restaurant status updated successfully" })
     return
   } catch (error) {
@@ -609,6 +610,7 @@ export const checkRestaurantStatus = async () => {
       dineInAvailability: true,
     },
   })
+  await invalidate(CACHE_KEYS.restaurantStatus)
 }
 
 /**

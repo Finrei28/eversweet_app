@@ -7,9 +7,27 @@ import { getErrorMessage } from "../utils/getError"
  * falls open to the database, so a cache that is slow, full or down costs a
  * little latency and nothing else.
  */
-const CACHE_TIMEOUT_MS = 300
+/**
+ * A read is on the critical path but it is also the whole point: give up on it
+ * too early and the request pays the timeout *and* the database query it was
+ * meant to avoid.
+ *
+ * 300ms was too tight. The menu is ~36KB, and fetching it from Redis takes
+ * longer than that from the API host, so the largest and most expensive cached
+ * value was the one entry that never came back in time — every request timed
+ * out, queried Postgres, and rewrote the key it had just failed to read.
+ * Round-trip time to Redis is ~30ms, so anything approaching this bound means
+ * Redis is genuinely unwell, which is what falling open is for.
+ */
+const READ_TIMEOUT_MS = 1500
 
-const bounded = <T>(work: Promise<T>): Promise<T | null> => {
+/** Nothing waits on a write, so it stays short. */
+const WRITE_TIMEOUT_MS = 300
+
+export const bounded = <T>(
+  work: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> => {
   const attempt = work.then(
     (value) => value,
     (error) => {
@@ -19,7 +37,7 @@ const bounded = <T>(work: Promise<T>): Promise<T | null> => {
   )
 
   const timeout = new Promise<null>((resolve) => {
-    setTimeout(() => resolve(null), CACHE_TIMEOUT_MS).unref()
+    setTimeout(() => resolve(null), timeoutMs).unref()
   })
 
   return Promise.race([attempt, timeout])
@@ -36,6 +54,7 @@ export const CACHE_KEYS = {
   clientOffers: "offers:client",
   daysOff: "days-off",
   leaderboardDetails: "leaderboard-details",
+  restaurantStatus: "restaurant-status",
   customisations: (dessertId: string) => `customisations:${dessertId}`,
 } as const
 
@@ -53,7 +72,7 @@ export async function cached<T>(
   produce: () => Promise<T>,
 ): Promise<T> {
   const key = cacheKey(name)
-  const hit = await bounded(redis.get(key))
+  const hit = await bounded(redis.get(key), READ_TIMEOUT_MS)
 
   if (hit) {
     try {
@@ -68,7 +87,10 @@ export async function cached<T>(
 
   // Not awaited: the customer should not wait on the write, and a failed one
   // only means the next request recomputes.
-  void bounded(redis.set(key, JSON.stringify(value), "EX", ttlSeconds))
+  void bounded(
+    redis.set(key, JSON.stringify(value), "EX", ttlSeconds),
+    WRITE_TIMEOUT_MS,
+  )
 
   return value
 }
@@ -77,5 +99,5 @@ export async function cached<T>(
 export async function invalidate(...names: string[]) {
   if (names.length === 0) return
 
-  await bounded(redis.del(...names.map(cacheKey)))
+  await bounded(redis.del(...names.map(cacheKey)), WRITE_TIMEOUT_MS)
 }
