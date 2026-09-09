@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { Request, Response } from "express"
-import { db } from "../lib/db"
+import { db, DbTransactionClient } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
-import { Prisma, PrismaClient } from "@prisma/client"
-import { DefaultArgs } from "@prisma/client/runtime/binary"
+import { Prisma } from "@prisma/client"
 import {
   CartItemCustomisation,
   Dessert,
@@ -177,10 +176,7 @@ function calculateBestDiscount(
 export const redeemOfferForUser = async (
   userId: string,
   offerId: string,
-  tx: Omit<
-    PrismaClient<Prisma.PrismaClientOptions, never, DefaultArgs>,
-    "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
-  >,
+  tx: DbTransactionClient,
 ) => {
   const offer = await tx.offer.findUnique({
     where: { id: offerId },
@@ -442,7 +438,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
     // This replaces a findUnique, a branch, an update and a create — four
     // round trips plus the transaction's own BEGIN and COMMIT — with one
     // statement that Prisma still applies atomically.
-    const writeCartItem = async (client: Prisma.TransactionClient) => {
+    const writeCartItem = async (client: DbTransactionClient) => {
       const cart = await client.cart.upsert({
         where: { userId },
         create: {

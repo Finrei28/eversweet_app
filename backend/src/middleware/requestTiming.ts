@@ -37,9 +37,14 @@ export function requestTiming(req: Request, res: Response, next: NextFunction) {
 
       if (timing.queries === 0 && totalMs < 500) return
 
+      // `up` is how long this process has been alive. A slow request a few
+      // seconds after boot is a cold start - a new container, a new Prisma
+      // engine and a first connection to establish - not a slow query, and the
+      // two are worth telling apart before optimising either.
       console.log(
         `${req.method} ${req.originalUrl} ${res.statusCode} ${totalMs}ms ` +
-          `db=${Math.round(timing.dbMs)}ms queries=${timing.queries}`,
+          `db=${Math.round(timing.dbMs)}ms queries=${timing.queries} ` +
+          `up=${Math.round(process.uptime())}s`,
       )
     })
 

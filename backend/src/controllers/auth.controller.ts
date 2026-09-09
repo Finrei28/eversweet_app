@@ -2,7 +2,7 @@ import { Request, Response } from "express"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import { Prisma } from "@prisma/client"
-import { db } from "../lib/db"
+import { db, DbTransactionClient } from "../lib/db"
 import { CreateOrderSchema } from "../utils/schema"
 import { z } from "zod"
 import VerifyEmail from "../email/verifyEmail"
@@ -25,7 +25,7 @@ import { redeemableAudiences } from "../lib/offerAudience"
 const incrementLoyaltyPoints = async (
   userId: string,
   points: number,
-  client: Prisma.TransactionClient = db,
+  client: DbTransactionClient = db,
 ) => {
   if (!userId) throw new Error("User not authenticated")
   if (!points) throw new Error("No points to add")
