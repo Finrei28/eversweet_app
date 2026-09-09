@@ -10,11 +10,34 @@ const createPrismaClient = () => {
     ],
   })
 
-  if (process.env.NODE_ENV === "development") {
-    base.$on("query", (event) => {
+  /**
+   * Statement-level timing, off unless asked for.
+   *
+   * `queries=` in the request log counts Prisma operations, not SQL round
+   * trips. A nested write is one operation that the engine runs as BEGIN, a
+   * few statements and COMMIT, and an interactive transaction's BEGIN and
+   * COMMIT are not model operations at all, so they are invisible to the
+   * extension below. That means a request reporting "three queries at 1.8s
+   * each" might be three slow round trips or fifteen quick ones - and those
+   * have opposite fixes, one in the network and one in the query count.
+   *
+   * `SQL_TIMING=1` answers it. Only the leading keyword is logged, never the
+   * statement or its parameters, so this is safe to turn on in production for
+   * as long as it takes to read a few requests.
+   */
+  const sqlTiming = process.env.SQL_TIMING === "1"
+
+  base.$on("query", (event) => {
+    if (process.env.NODE_ENV === "development") {
       console.log(`prisma ${event.duration}ms ${event.query}`)
-    })
-  }
+      return
+    }
+
+    if (sqlTiming) {
+      const verb = event.query.trimStart().split(/\s+/)[0]?.toUpperCase() ?? "?"
+      console.log(`sql ${verb} ${event.duration}ms`)
+    }
+  })
 
   /**
    * Timed by wrapping the call rather than by listening for the `query` event.
