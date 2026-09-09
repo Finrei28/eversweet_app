@@ -402,4 +402,77 @@ describeIfDb("cart write paths", () => {
     expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
   })
 
+  it("debits the points exactly once for one redemption", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    await db.loyalty.create({ data: { userId: user.id, points: 900 } })
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    })
+
+    expect(res.status).toBe(201)
+
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+    const records = await db.loyaltyRecord.count({
+      where: { loyalty: { userId: user.id } },
+    })
+
+    expect(loyalty?.points).toBe(400)
+    expect(records).toBe(1)
+  })
+
+  it("will not let two redemptions overdraw the balance", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    // Enough for exactly one 500-point reward.
+    await db.loyalty.create({ data: { userId: user.id, points: 500 } })
+
+    const body = {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    }
+
+    const [a, b] = await Promise.all([
+      addItem(user.id, body),
+      addItem(user.id, body),
+    ])
+
+    // Reading the balance and then writing it let both of these see 500 and
+    // both subtract it. One has to lose.
+    expect([a.status, b.status].sort()).toEqual([201, 400])
+
+    const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+    const cart = await db.cart.findUnique({
+      where: { userId: user.id },
+      include: { cartItems: true },
+    })
+    const records = await db.loyaltyRecord.count({
+      where: { loyalty: { userId: user.id } },
+    })
+
+    expect(loyalty?.points).toBe(0)
+    expect(cart?.cartItems).toHaveLength(1)
+    expect(records).toBe(1)
+  })
+
+  it("refuses a redemption from a customer with no loyalty record", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 0,
+      loyaltyPointsUsed: 500,
+    })
+
+    // No record means no points, which is the same answer as too few - and a
+    // 400 rather than the 500 this used to raise.
+    expect(res.status).toBe(400)
+    expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
+  })
+
 })
