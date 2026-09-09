@@ -272,13 +272,23 @@ export const useCartStore = create<CartState>((set, get) => ({
       try {
         // Re-read now that the write queued ahead of this one has landed: the
         // line to merge into may only just have become one the server knows.
+        //
+        // Only a plain add may merge. A redemption looks identical to the one
+        // already in the cart — same dessert, same points, same customisations
+        // — so it used to merge too, and a quantity update is the one cart
+        // write that does not redeem an offer or debit any points. That handed
+        // out free desserts: the line's quantity climbed while its cost did
+        // not, and a reward is stored at zero cents. Each redemption is its own
+        // add now, so each one pays.
         const current = get().items
-        const target = current.find(
-          (line) =>
-            line.id !== placeholderId &&
-            !isPendingCartItem(line.id) &&
-            isSameLine(line),
-        )
+        const target = isPlainAdd
+          ? current.find(
+              (line) =>
+                line.id !== placeholderId &&
+                !isPendingCartItem(line.id) &&
+                isSameLine(line),
+            )
+          : undefined
 
         if (target) {
           const placeholder = placeholderId
@@ -287,16 +297,10 @@ export const useCartStore = create<CartState>((set, get) => ({
 
           // An absolute quantity. Whatever this add has already contributed
           // to the line on screen is in target.quantity; what has not been
-          // applied locally still has to be added. A plain add that bumped
-          // the line directly contributes nothing more here, one holding a
-          // placeholder contributes the placeholder, and a redemption —
-          // which is never applied optimistically — contributes its own
-          // quantity.
-          const outstanding = isPlainAdd
-            ? (placeholder?.quantity ?? 0)
-            : item.quantity
-
-          const quantity = target.quantity + outstanding
+          // applied locally still has to be added — which is the placeholder
+          // when this add made one, and nothing when it bumped the line
+          // directly.
+          const quantity = target.quantity + (placeholder?.quantity ?? 0)
 
           const updatedCartItem = await updateCartItemQuantity(
             target.id,
