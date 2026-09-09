@@ -25,7 +25,7 @@ import {
   checkPaymentStatus,
   DuplicateOrderError,
 } from "@/services/stripe-api"
-import { useCartStore } from "@/store/cart"
+import { useCartStore, whenCartWritesSettle } from "@/store/cart"
 import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker"
@@ -160,6 +160,10 @@ function CheckoutContent() {
 
     const getNewItems = async () => {
       setLoading(true)
+      // Anything still in the air first. fetchCart replaces the list outright,
+      // so arriving here mid-write meant reading back a cart the server had
+      // not finished being told about.
+      await whenCartWritesSettle()
       await useCartStore.getState().fetchCart()
       setLoading(false)
     }

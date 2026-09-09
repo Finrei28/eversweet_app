@@ -12,7 +12,6 @@ import {
 import Modal from "react-native-modal"
 import { CartItem, Dessert, Customisations } from "../utils/types"
 import { useCartStore } from "@/store/cart"
-import { canAffordRedemption } from "@/store/points"
 import { useEffect, useMemo, useState, useRef } from "react"
 import {
   SafeAreaView,
@@ -539,41 +538,19 @@ export default function CustomModal({
                             offerId: offerId ? offerId : null,
                             discountedAmountInCents: 0,
                           })
-                        : addItem(
-                            {
-                              dessert: selectedDessert,
-                              quantity: 1,
-                              loyaltyPointsUsed:
-                                type === "points" ? points : null,
-                              customisations: customisations,
-                              itemPriceInCents: type === "points" ? 0 : price,
-                              offerId: offerId ? offerId : null,
-                            },
-                            usersMembership,
-                          )
+                        : addItem({
+                            dessert: selectedDessert,
+                            quantity: 1,
+                            loyaltyPointsUsed:
+                              type === "points" ? points : null,
+                            customisations: customisations,
+                            itemPriceInCents: type === "points" ? 0 : price,
+                            offerId: offerId ? offerId : null,
+                          })
 
-                      // A plain add lands in the cart locally the moment it
-                      // is requested, so there is nothing here worth waiting
-                      // for — and waiting was the whole of the four to five
-                      // seconds this button used to take.
-                      //
-                      // A redemption goes the same way when this device can see
-                      // the points are there. When it cannot, the modal keeps
-                      // its spinner and the customer reads the server's answer
-                      // before it closes. Offers always wait: their refusals
-                      // turn on a usage limit and an audience that only the
-                      // server knows.
-                      const closesImmediately =
-                        !isEdit &&
-                        !offerId &&
-                        (type !== "points" || canAffordRedemption(points))
-
-                      if (closesImmediately) {
-                        void submit
-                        closeWithAnimation()
-                        return
-                      }
-
+                      // The modal holds until the server answers. Closing it
+                      // early meant the cart could be interacted with, and
+                      // checked out, while the item in it was still a guess.
                       void submit.finally(() => {
                         const modalExists = useCartStore
                           .getState()
