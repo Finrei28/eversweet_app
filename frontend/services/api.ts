@@ -224,6 +224,30 @@ export async function getUserOrders(status: OrderStatus): Promise<Order[]> {
   return data.orders
 }
 
+/**
+ * A page of orders, newest first. `nextCursor` is null on the last page.
+ *
+ * Used by the history screen, where picked-up orders accumulate for the life of
+ * the account and fetching all of them grew slower every month.
+ */
+export async function getUserOrdersPage(
+  status: OrderStatus,
+  limit: number,
+  cursor?: string,
+): Promise<{ orders: Order[]; nextCursor: string | null }> {
+  const data = await apiRequest<{
+    orders: Order[]
+    nextCursor: string | null
+  }>("/api/auth/getUserOrders", {
+    method: "POST",
+    body: { status, limit, cursor },
+    authMessage: "Please sign in to view your orders",
+    statusMessages: { 404: DETAILS_NOT_FOUND },
+    fallback: SERVER_ERROR,
+  })
+  return { orders: data.orders, nextCursor: data.nextCursor ?? null }
+}
+
 export async function createOrder(
   paymentMethodId: string | null,
   pickupNow: boolean,

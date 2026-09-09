@@ -1,9 +1,10 @@
 import React from "react"
-import { View, Text, TouchableOpacity, Image } from "react-native"
+import { View, Text, TouchableOpacity } from "react-native"
 import { Feather } from "@expo/vector-icons"
 import { formatCurrency } from "@/lib/formatters"
 import { Offer } from "@/utils/types"
 import AudienceBadge from "./audienceBadge"
+import { CachedImage } from "@/_components/cachedImage"
 
 type OfferCardProps = {
   offer: Offer
@@ -22,7 +23,9 @@ const offerImage = (offer: Offer) =>
   offer.dessert?.imagePath ??
   offer.category?.desserts?.[0]?.imagePath
 
-export default function OfferCard({
+// Memoised: these are rendered as a list on the Offers page, which re-renders
+// whenever the modal opens or a redemption lands.
+const OfferCard = React.memo(function OfferCard({
   offer,
   locked,
   isRedeemable,
@@ -36,8 +39,8 @@ export default function OfferCard({
     <View className="bg-white rounded-xl shadow-sm p-4 flex-row items-center">
       <View className="w-16 h-16 mr-4">
         {uri && (
-          <Image
-            source={{ uri }}
+          <CachedImage
+            uri={uri}
             className={`w-16 h-16 rounded-lg ${locked ? "opacity-40" : ""}`}
             resizeMode="contain"
           />
@@ -137,4 +140,6 @@ export default function OfferCard({
       )}
     </View>
   )
-}
+})
+
+export default OfferCard

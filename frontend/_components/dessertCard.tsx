@@ -3,7 +3,8 @@ import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
 import React, { useMemo } from "react"
-import { View, Image, Text, TouchableOpacity } from "react-native"
+import { View, Text, TouchableOpacity } from "react-native"
+import { CachedImage } from "@/_components/cachedImage"
 
 type DessertCardProps = {
   dessert: Dessert
@@ -14,6 +15,12 @@ type DessertCardProps = {
   router: Router
   currency: "cents" | "points"
   loyaltyPoints?: number
+  /**
+   * Membership is still loading, so the discount can't be worked out yet.
+   * Shows a placeholder rather than the undiscounted price, which would flash
+   * a member the higher figure and then drop it a moment later.
+   */
+  membershipPending?: boolean
 }
 
 export const DessertCard = React.memo(
@@ -26,17 +33,19 @@ export const DessertCard = React.memo(
     router,
     currency = "cents",
     loyaltyPoints,
+    membershipPending = false,
   }: DessertCardProps) => {
     const dessertPriceInCentsAfterDiscount = useMemo(() => {
       return calculateBestDiscountedPrice(dessert, usersMembership)
     }, [dessert, usersMembership])
     return (
       <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 pb-5 p-1">
-        <Image
-          source={{ uri: dessert.imagePath }}
+        <CachedImage
+          uri={dessert.imagePath}
           className="relative rounded-lg w-full h-72"
           alt={dessert.name}
           resizeMode="cover"
+          recyclingKey={dessert.id}
         />
 
         <Text className="text-lg font-medium my-2 text-center">
@@ -55,11 +64,13 @@ export const DessertCard = React.memo(
           disabled={
             loyaltyPoints ? loyaltyPoints < dessert.priceInLoyaltyPoints : false
           }
-          className="bg-primary rounded-lg p-3 items-center w-1/2  mx-auto"
+          className={`${loyaltyPoints && loyaltyPoints < dessert.priceInLoyaltyPoints ? "bg-gray-300" : "bg-primary"} rounded-lg p-3 items-center w-1/2  mx-auto`}
         >
           {token ? (
             <View className="flex-col items-center justify-center">
-              {currency === "cents" ? (
+              {currency === "cents" && membershipPending ? (
+                <View className="h-6 w-16 rounded bg-white/40" />
+              ) : currency === "cents" ? (
                 <>
                   {usersMembership?.isActive || dessert.promo?.isActive ? (
                     <>

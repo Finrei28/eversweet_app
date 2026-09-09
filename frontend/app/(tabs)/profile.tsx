@@ -13,7 +13,6 @@ import {
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 import { getErrorMessage } from "@/utils/getError"
-import { Trophy } from "lucide-react-native"
 
 // Module scope: defining this inside Profile gives it a new component identity
 // on every render, which unmounts and remounts the whole menu each time.
@@ -175,7 +174,13 @@ export default function Profile() {
           />
           {leaderboardDetails?.show && (
             <ProfileMenuItem
-              icon={<Trophy size={24} color="#6B7280" />}
+              icon={
+                <MaterialCommunityIcons
+                  name="trophy"
+                  size={24}
+                  color="#6B7280"
+                />
+              }
               title="Leaderboard"
               onPress={() => navigateTo("/leaderboard")}
             />

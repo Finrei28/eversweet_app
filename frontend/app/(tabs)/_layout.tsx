@@ -36,6 +36,10 @@ export default function _layout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        // Tabs stay mounted once visited, so without this every one of them
+        // re-renders whenever shared state changes — auth in particular. Only
+        // the visible tab needs to.
+        freezeOnBlur: true,
         tabBarActiveTintColor: "#e6aa6b",
         tabBarInactiveTintColor: "#9CA3AF",
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },

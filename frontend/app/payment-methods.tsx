@@ -46,11 +46,18 @@ function PaymentMethodsContent() {
 
   // Fetch saved cards when component mounts
   useEffect(() => {
-    if (!token && !authLoading) {
+    // On the first render token is null and authLoading is true, so the
+    // original condition fell through to the else branch and fetched — then
+    // fetched again once auth resolved. Two round trips per screen open, each
+    // one a pair of requests. membership.tsx already guards this way.
+    if (authLoading) return
+
+    if (!token) {
       router.push("/signin")
-    } else {
-      fetchSavedCards()
+      return
     }
+
+    fetchSavedCards()
   }, [token, authLoading])
 
   const fetchSavedCards = async () => {

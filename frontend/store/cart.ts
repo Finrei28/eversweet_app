@@ -11,18 +11,21 @@ import {
   clearCart,
   updateCartItemQuantity,
   getCartItems,
-  getLoyaltyRates,
   removeItemFromCart,
   updateCartItem,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { useLoyaltyStore } from "./points"
-import { isEqual } from "lodash"
+// Deep import: lodash's package entry is one monolithic CommonJS file and
+// Metro does not tree-shake, so the named import pulled the whole library in.
+import isEqual from "lodash/isEqual"
 import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
+  calculateMembershipDiscount,
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
+import { fetchLoyaltyRates } from "@/services/queries"
 
 interface CartState {
   items: CartItem[]
@@ -69,6 +72,82 @@ const netUnitPriceInCents = (item: CartItem) =>
         : 0),
     0,
   )
+
+/**
+ * Marks a line that exists in the cart on this device but not yet on the
+ * server. Nothing may be sent to the server about it until the add that
+ * created it comes back with a real id.
+ */
+const PENDING_ID_PREFIX = "pending:"
+
+let pendingSequence = 0
+const nextPendingId = () => `${PENDING_ID_PREFIX}${++pendingSequence}`
+
+export const isPendingCartItem = (id: string) => id.startsWith(PENDING_ID_PREFIX)
+
+/**
+ * Cart writes leave one at a time.
+ *
+ * The optimistic line appears immediately either way, so serialising costs the
+ * customer nothing visible — but it means an add can never race another add.
+ * Two quick adds of the same dessert would otherwise both match a line the
+ * server has not acknowledged yet, and the second would send a placeholder id
+ * the server has never seen; two adds from a customer with no cart would race
+ * to create one. Queueing also lets each write re-read the cart when its turn
+ * comes, by which point the write before it has landed.
+ */
+let cartWrites: Promise<unknown> = Promise.resolve()
+
+const enqueueCartWrite = <T>(work: () => Promise<T>): Promise<T> => {
+  const next = cartWrites.then(work, work)
+
+  // The chain must not carry a rejection forward, or one failure would skip
+  // every write queued behind it.
+  cartWrites = next.then(
+    () => undefined,
+    () => undefined,
+  )
+
+  return next
+}
+
+
+const showAddedToast = (item: AddCartItem) => {
+  Toast.show({
+    type: "success",
+    text1: `${item.dessert.name} added to cart`,
+    position: "bottom",
+    visibilityTime: 3000,
+    autoHide: true,
+    bottomOffset: 90,
+    props: {
+      text1NumberOfLines: 0,
+      text2NumberOfLines: 0, // allow wrapping
+    },
+  })
+}
+
+/**
+ * Mirrors the server's calculateBestDiscount — the better of the membership
+ * and promo discounts — closely enough that the cart total does not visibly
+ * jump between the optimistic line appearing and the server's row replacing
+ * it. The server remains the authority; this figure lives for about a second.
+ */
+const estimateDiscountInCents = (
+  item: AddCartItem,
+  usersMembership?: UsersMembership | null,
+) => {
+  const membershipDiscount = calculateMembershipDiscount(
+    item.itemPriceInCents,
+    usersMembership ?? null,
+  )
+  const promoDiscount = Math.max(
+    0,
+    item.dessert.priceInCents - calculatePriceAfterPromo(item.dessert),
+  )
+
+  return Math.max(membershipDiscount, promoDiscount)
+}
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
@@ -134,115 +213,197 @@ export const useCartStore = create<CartState>((set, get) => ({
       )
     }
 
-    const existing = get().items.find((i) => {
-      return (
-        i.dessert.id === item.dessert.id &&
-        i.loyaltyPointsUsed === item.loyaltyPointsUsed &&
-        i.offerId === item.offerId &&
-        Math.round(i.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
-        areListsEqual(i.customisations, item.customisations)
-      )
-    })
+    const isSameLine = (line: CartItem) =>
+      line.dessert.id === item.dessert.id &&
+      line.loyaltyPointsUsed === item.loyaltyPointsUsed &&
+      line.offerId === item.offerId &&
+      Math.round(line.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
+      areListsEqual(line.customisations, item.customisations)
 
-    // if (existing) {
-    //   set({
-    //     items: get().items.map((i) =>
-    //       i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-    //     ),
-    //     cartOperations: get().cartOperations + 1,
-    //   })
-    // } else {
-    //   set({
-    //     items: [...get().items, { ...item, id: tempId }],
-    //     cartOperations: get().cartOperations + 1,
-    //   })
-    // }
-    try {
-      if (existing) {
-        const updatedCartItem = await updateCartItemQuantity(
-          existing.id,
-          existing.quantity + 1,
-        )
+    // Shown before the server has agreed to it — but only for a plain add.
+    //
+    // An offer redemption or a loyalty-point spend is refusable: a usage limit
+    // reached, not enough points. Putting those in the cart first means taking
+    // them back in front of the customer, and they are also the adds where the
+    // server's answer carries information. Adding a dessert has no such
+    // outcome, and it is the case people actually sit and wait through.
+    const isPlainAdd = !item.offerId && !item.loyaltyPointsUsed
+
+    // Only a line the server already knows about can be incremented — a
+    // pending one has no id worth sending. Matching one anyway is how two
+    // quick adds of the same dessert used to send a placeholder id and get a
+    // 404 back.
+    const confirmedMatch = get().items.find(
+      (line) => !isPendingCartItem(line.id) && isSameLine(line),
+    )
+
+    let placeholderId: string | null = null
+
+    if (isPlainAdd) {
+      if (confirmedMatch) {
         set({
-          items: get().items.map((i) =>
-            i.id === updatedCartItem.id ? updatedCartItem : i,
+          items: get().items.map((line) =>
+            line.id === confirmedMatch.id
+              ? { ...line, quantity: line.quantity + 1 }
+              : line,
           ),
         })
       } else {
-        const newCartItem = await addItemToCart(item)
-        set({ items: [...get().items, newCartItem] })
+        placeholderId = nextPendingId()
+        set({
+          items: [
+            ...get().items,
+            {
+              ...item,
+              id: placeholderId,
+              discountedAmountInCents: estimateDiscountInCents(
+                item,
+                usersMembership,
+              ),
+            },
+          ],
+        })
       }
 
-      // There used to be a "join our membership" error toast here, fired on a
-      // *successful* add whenever the user was not an active member. It was
-      // already unreachable for the case it described — the server 403s that
-      // add, so the catch below reports it — and now that offers can be open
-      // to everyone it would scold a non-member for using one they are
-      // entitled to. The server's own refusal message is the single source of
-      // truth for why an offer was turned down.
-      if (item?.loyaltyPointsUsed) {
-        useLoyaltyStore.getState().fetchPoints()
-        Toast.show({
-          type: "success",
-          text1: `${item.dessert.name} added to cart`,
-          text2: `${item.loyaltyPointsUsed} points has been used`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      } else {
-        Toast.show({
-          type: "success",
-          text1: `${item.dessert.name} added to cart`,
-          position: "bottom",
-          visibilityTime: 3000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      }
-    } catch (error) {
-      if (item?.loyaltyPointsUsed) {
-        console.error("Failed to order with loyalty points", error)
-        Toast.show({
-          type: "error",
-          text1: "Failed to order with loyalty points",
-          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
-          position: "bottom",
-          visibilityTime: 4000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      } else {
-        // console.error("Failed to add item to cart", error)
-        Toast.show({
-          type: "error",
-          text1: "Failed to add item to cart",
-          text2: `${getErrorMessage(error, "An unknown error occurred")}`,
-          position: "bottom",
-          visibilityTime: 4000,
-          autoHide: true,
-          bottomOffset: 90,
-          props: {
-            text1NumberOfLines: 0,
-            text2NumberOfLines: 0, // allow wrapping
-          },
-        })
-      }
+      showAddedToast(item)
     }
+
+    return enqueueCartWrite(async () => {
+      try {
+        // Re-read now that the write queued ahead of this one has landed: the
+        // line to merge into may only just have become one the server knows.
+        //
+        // Only a plain add may merge. A redemption looks identical to the one
+        // already in the cart — same dessert, same points, same customisations
+        // — so it used to merge too, and a quantity update is the one cart
+        // write that does not redeem an offer or debit any points. That handed
+        // out free desserts: the line's quantity climbed while its cost did
+        // not, and a reward is stored at zero cents. Each redemption is its own
+        // add now, so each one pays.
+        const current = get().items
+        const target = isPlainAdd
+          ? current.find(
+              (line) =>
+                line.id !== placeholderId &&
+                !isPendingCartItem(line.id) &&
+                isSameLine(line),
+            )
+          : undefined
+
+        if (target) {
+          const placeholder = placeholderId
+            ? current.find((line) => line.id === placeholderId)
+            : undefined
+
+          // An absolute quantity. Whatever this add has already contributed
+          // to the line on screen is in target.quantity; what has not been
+          // applied locally still has to be added — which is the placeholder
+          // when this add made one, and nothing when it bumped the line
+          // directly.
+          const quantity = target.quantity + (placeholder?.quantity ?? 0)
+
+          const updatedCartItem = await updateCartItemQuantity(
+            target.id,
+            quantity,
+          )
+
+          set({
+            items: get()
+              .items.filter((line) => line.id !== placeholderId)
+              .map((line) =>
+                line.id === updatedCartItem.id ? updatedCartItem : line,
+              ),
+          })
+        } else {
+          const newCartItem = await addItemToCart(item)
+
+          set({
+            items: placeholderId
+              ? // Swap the placeholder for the server's row, which carries the
+                // real id, price and discount.
+                get().items.map((line) =>
+                  line.id === placeholderId ? newCartItem : line,
+                )
+              : [...get().items, newCartItem],
+          })
+        }
+
+        // There used to be a "join our membership" error toast here, fired on a
+        // *successful* add whenever the user was not an active member. It was
+        // already unreachable for the case it described — the server 403s that
+        // add, so the catch below reports it — and now that offers can be open
+        // to everyone it would scold a non-member for using one they are
+        // entitled to. The server's own refusal message is the single source of
+        // truth for why an offer was turned down.
+        if (item?.loyaltyPointsUsed) {
+          useLoyaltyStore.getState().fetchPoints()
+          Toast.show({
+            type: "success",
+            text1: `${item.dessert.name} added to cart`,
+            text2: `${item.loyaltyPointsUsed} points has been used`,
+            position: "bottom",
+            visibilityTime: 3000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        } else if (!isPlainAdd) {
+          // The optimistic path already said so the moment the customer tapped.
+          showAddedToast(item)
+        }
+      } catch (error) {
+        // Undo this add and nothing else. Restoring a snapshot of the whole
+        // cart would discard any add that was applied while this one was in
+        // flight.
+        if (isPlainAdd) {
+          set({
+            items: placeholderId
+              ? get().items.filter((line) => line.id !== placeholderId)
+              : get().items.map((line) =>
+                  line.id === confirmedMatch?.id
+                    ? { ...line, quantity: Math.max(1, line.quantity - 1) }
+                    : line,
+                ),
+          })
+        }
+
+        if (item?.loyaltyPointsUsed) {
+          console.error("Failed to order with loyalty points", error)
+          Toast.show({
+            type: "error",
+            text1: "Failed to order with loyalty points",
+            text2: `${getErrorMessage(error, "An unknown error occurred")}`,
+            position: "bottom",
+            visibilityTime: 4000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        } else {
+          Toast.show({
+            type: "error",
+            text1: "Failed to add item to cart",
+            text2: `${getErrorMessage(error, "An unknown error occurred")}`,
+            position: "bottom",
+            visibilityTime: 4000,
+            autoHide: true,
+            bottomOffset: 90,
+            props: {
+              text1NumberOfLines: 0,
+              text2NumberOfLines: 0, // allow wrapping
+            },
+          })
+        }
+      }
+    })
   },
+
   editItem: async (item) => {
     try {
       const { cartItem } = await updateCartItem(item)
@@ -275,6 +436,11 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   removeItem: async (id) => {
+    // Still in flight. The add that created this line has not come back
+    // with a real id yet, so there is nothing the server would recognise
+    // to delete — and the pending row is about to be replaced anyway.
+    if (isPendingCartItem(id)) return
+
     const previousItems = get().items
     const item = get().items.find((i) => i.id === id)
     set({
@@ -425,6 +591,10 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   incrementItem: async (id) => {
+    // Inert until the line lands, so the count cannot drift from the row
+    // the server is about to send back.
+    if (isPendingCartItem(id)) return
+
     set({
       items: get().items.map((i) =>
         i.id === id ? { ...i, quantity: i.quantity + 1 } : i,
@@ -432,6 +602,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   decrementItem: async (id) => {
+    // See incrementItem.
+    if (isPendingCartItem(id)) return
+
     set({
       items: get().items.map((i) =>
         // Floored at one: removing the last one is `removeItem`, and only the
@@ -442,47 +615,58 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   updateCartItemQuantity: async (id, quantity) => {
+    // See removeItem: a pending line has no server-side id to update.
+    if (isPendingCartItem(id)) return
+
     // A counter rather than Date.now(): two taps inside the same millisecond
-    // produced identical ids, so neither response counted as stale.
+    // produced identical ids, so neither response counted as stale. Claimed
+    // before queueing, so the newest tap still wins even if an earlier one is
+    // still waiting its turn.
     const requestId = (get().lastRequestId ?? 0) + 1
     set({ lastRequestId: requestId })
-    try {
-      const updatedCartItem = await updateCartItemQuantity(id, quantity)
 
-      // ❗ Ignore stale responses
-      if (get().lastRequestId !== requestId) return
+    // Queued with the adds: an add merging into this same line also sends an
+    // absolute quantity, and the two must not overlap.
+    return enqueueCartWrite(async () => {
+      try {
+        const updatedCartItem = await updateCartItemQuantity(id, quantity)
 
-      set({
-        items: get().items.map((i) =>
-          i.id === updatedCartItem.id ? updatedCartItem : i,
-        ),
-      })
-    } catch (error) {
-      console.error("Failed to update cart item:", error)
+        // ❗ Ignore stale responses
+        if (get().lastRequestId !== requestId) return
 
-      if (get().lastRequestId !== requestId) return
+        set({
+          items: get().items.map((i) =>
+            i.id === updatedCartItem.id ? updatedCartItem : i,
+          ),
+        })
+      } catch (error) {
+        console.error("Failed to update cart item:", error)
 
-      // incrementItem/decrementItem already applied the new quantity locally,
-      // so the cart is now ahead of the server. Pull the server's copy back
-      // rather than letting the customer check out against a quantity that was
-      // never saved.
-      await get().fetchCart()
+        if (get().lastRequestId !== requestId) return
 
-      Toast.show({
-        type: "error",
-        text1: "Couldn't update the quantity",
-        text2: getErrorMessage(error, "Your cart has been refreshed."),
-        position: "bottom",
-        visibilityTime: 4000,
-        autoHide: true,
-        bottomOffset: 90,
-        props: {
-          text1NumberOfLines: 0,
-          text2NumberOfLines: 0, // allow wrapping
-        },
-      })
-    }
+        // incrementItem/decrementItem already applied the new quantity locally,
+        // so the cart is now ahead of the server. Pull the server's copy back
+        // rather than letting the customer check out against a quantity that was
+        // never saved.
+        await get().fetchCart()
+
+        Toast.show({
+          type: "error",
+          text1: "Couldn't update the quantity",
+          text2: getErrorMessage(error, "Your cart has been refreshed."),
+          position: "bottom",
+          visibilityTime: 4000,
+          autoHide: true,
+          bottomOffset: 90,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
+        })
+      }
+    })
   },
+
   setError: (error) => set({ error }), // Action to set error
   getTotalItems: () =>
     get().items.reduce((acc, item) => acc + item.quantity, 0),
@@ -492,7 +676,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       0,
     ),
   getEarnablePoints: async (usersMembership: UsersMembership | null) => {
-    const rates = await getLoyaltyRates()
+    // Cached: incrementing or decrementing an item re-runs this, and the
+    // uncached version put a request on the wire for every tap.
+    const rates = await fetchLoyaltyRates()
     return get().items.reduce(
       (acc, item) =>
         acc +

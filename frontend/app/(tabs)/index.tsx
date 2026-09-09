@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react"
+import { CachedImage } from "@/_components/cachedImage"
+import React from "react"
 import {
   Text,
   View,
-  Image,
   TouchableOpacity,
   ScrollView,
   Platform,
@@ -11,9 +11,10 @@ import {
 import PageHeader from "@/_components/pageheader"
 import Carousel from "react-native-reanimated-carousel"
 import { useSharedValue } from "react-native-reanimated"
+import { CarouselDot } from "@/_components/carouselDot"
 import { useRouter } from "expo-router"
 import { FontAwesome, Feather } from "@expo/vector-icons"
-import { fetchCategoriesWithDesserts, showOfferForClient } from "@/services/api"
+import { useClientOffersQuery, useMenuQuery } from "@/services/queries"
 import BouncingLoader from "@/_components/loader"
 import { Menu, offerForClient } from "@/utils/types"
 import {
@@ -29,34 +30,23 @@ export { FontAwesome }
 
 export default function Index() {
   const router = useRouter()
-  const [offers, setOffers] = useState<offerForClient[]>([])
-  const [categories, setCategories] = useState<Menu>([])
-  const { token, authLoading, dataLoading } = useAuth()
+  const { token, authLoading } = useAuth()
   const progressValue = useSharedValue(0)
-  const [activeIndex, setActiveIndex] = useState(0)
   const screen = Dimensions.get("window")
-  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    async function loadContents() {
-      try {
-        setLoading(true)
-        const [categoryData, offerData] = await Promise.all([
-          fetchCategoriesWithDesserts(),
-          showOfferForClient(),
-        ])
-        setOffers(offerData)
-        setCategories(categoryData)
-      } catch (error) {
-        console.error("Error loading home content", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadContents()
-  }, [])
+  // Both run in parallel, and the menu shares its cache with the menu and
+  // rewards tabs. Returning to this screen now paints from cache.
+  const { data: categoryData, isLoading: categoriesLoading } = useMenuQuery()
+  const { data: offerData, isLoading: offersLoading } = useClientOffersQuery()
 
-  if (loading || authLoading || dataLoading) {
+  const categories: Menu = categoryData ?? []
+  const offers: offerForClient[] = offerData ?? []
+  const loading = categoriesLoading || offersLoading
+
+  // Not gated on dataLoading: this screen reads only `token`, so waiting on the
+  // profile, membership and leaderboard requests held the homepage behind four
+  // calls whose results it never uses.
+  if (loading || authLoading) {
     return (
       <View className="flex-1 bg-background">
         <PageHeader />
@@ -95,10 +85,13 @@ export default function Index() {
                 autoPlay={false}
                 data={offers}
                 scrollAnimationDuration={400}
-                onProgressChange={(_, absoluteProgress) => {
-                  progressValue.value = absoluteProgress
-                  setActiveIndex(Math.round(absoluteProgress))
-                }}
+                // Handed the shared value itself, not a callback. The carousel
+                // wraps a callback in runOnJS, which crashes the UI thread
+                // outright when that callback is a worklet and costs a JS hop
+                // per frame when it is not. Assigning the shared value is the
+                // library's own supported path and stays entirely on the UI
+                // thread, which is what the dots below read.
+                onProgressChange={progressValue}
                 onConfigurePanGesture={(panGesture: PanGesture) => {
                   panGesture.activeOffsetX([-10, 10]).failOffsetY([-5, 5])
                 }}
@@ -131,16 +124,18 @@ export default function Index() {
                         </Text>
                       )} */}
 
-                        <Image
-                          source={{
-                            uri:
-                              item.image ??
-                              item.dessert?.imagePath ??
-                              item.category?.desserts?.[0]?.imagePath,
-                          }}
-                          className="h-60 rounded-lg mt-4"
+                        <CachedImage
+                          uri={
+                            item.image ??
+                            item.dessert?.imagePath ??
+                            item.category?.desserts?.[0]?.imagePath
+                          }
+                          // Explicit width: with height alone the layout had to
+                          // wait on the network to learn the intrinsic size.
+                          className="w-full h-60 rounded-lg mt-4"
                           resizeMode="contain"
                           alt={item.name}
+                          recyclingKey={item.id}
                         />
 
                         <TouchableOpacity
@@ -169,17 +164,11 @@ export default function Index() {
               {/* Dots indicator */}
               {offers.length > 1 && (
                 <View className="flex-row justify-center mt-2">
-                  {offers.map((_, i) => (
-                    <View
-                      key={i}
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 5,
-                        marginHorizontal: 4,
-                        backgroundColor:
-                          activeIndex === i ? "#F59E0B" : "#D1D5DB",
-                      }}
+                  {offers.map((offer, i) => (
+                    <CarouselDot
+                      key={offer.id}
+                      index={i}
+                      progress={progressValue}
                     />
                   ))}
                 </View>
@@ -217,16 +206,14 @@ export default function Index() {
                     {category.name}
                   </Text>
                   {uri && (
-                    <Image
-                      source={{ uri }}
-                      className="w-full bg-white h-80 mx-auto object-cover rounded-lg mt-2"
+                    <CachedImage
+                      uri={uri}
+                      className="w-full bg-white h-80 mx-auto rounded-lg mt-2"
                       resizeMode="contain"
                       alt={category.name}
                       accessibilityLabel={category.name}
                       accessibilityHint={`This is an image of ${category.name}`}
-                      accessibilityRole="image"
-                      accessibilityState={{ selected: true }}
-                      accessibilityLabelledBy="category-image"
+                      recyclingKey={category.id}
                     />
                   )}
                   <TouchableOpacity

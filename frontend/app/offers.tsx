@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useState } from "react"
+import React, { useCallback, useMemo, useState } from "react"
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import BouncingLoader from "@/_components/loader"
 import OfferCard from "@/_components/offerCard"
 import AudienceBadge from "@/_components/audienceBadge"
 import OfferModal from "@/_components/offerModal"
-import { showOffers } from "@/services/api"
+import { useOffersQuery } from "@/services/queries"
 import { useAuth } from "@/store/authProvider"
 import { Offer, Offers, OfferViewer } from "@/utils/types"
 import { getOfferState, groupOffers } from "@/lib/offerHelpers"
@@ -27,35 +27,36 @@ export default function OffersPage() {
   const router = useRouter()
   const { token, authLoading, dataLoading } = useAuth()
 
-  const [offers, setOffers] = useState<Offers>([])
-  const [viewer, setViewer] = useState<OfferViewer>(NO_PERKS)
-  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [offerModal, setOfferModal] = useState(false)
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null)
 
-  const getOffers = async () => {
-    try {
-      const result = await showOffers()
-      setOffers(result.offers ?? [])
-      setViewer(result.viewer ?? NO_PERKS)
-    } catch (error) {
-      // Without this the spinner never clears and the rejection goes unhandled.
-      console.error("Failed to load offers", error)
-      setOffers([])
-    } finally {
-      setLoading(false)
-    }
-  }
+  const {
+    data,
+    isLoading: loading,
+    refetch: getOffers,
+    isStale,
+  } = useOffersQuery({ enabled: !!token })
 
+  // Memoised so the fallbacks don't hand back a fresh array/object each render
+  // and defeat the grouping memo below.
+  const offers = useMemo<Offers>(() => data?.offers ?? [], [data])
+  const viewer = useMemo<OfferViewer>(() => data?.viewer ?? NO_PERKS, [data])
+
+  // Only when the cached copy has gone stale — this used to refetch the whole
+  // payload on every focus, including straight after the mount fetch.
   useFocusEffect(
     useCallback(() => {
-      if (!token) {
-        setLoading(false)
-        return
-      }
-      getOffers()
-    }, [token]),
+      if (!token || !isStale) return
+
+      void getOffers()
+    }, [token, isStale, getOffers]),
+  )
+
+  // Above the early returns below: hooks cannot run conditionally.
+  const { members, newCustomer, everyone } = useMemo(
+    () => groupOffers(offers, viewer),
+    [offers, viewer],
   )
 
   const handleRefresh = async () => {
@@ -64,10 +65,19 @@ export default function OffersPage() {
     setRefreshing(false)
   }
 
-  const handleRedeem = (offer: Offer) => {
+  // Stable identities, so the memoised cards are not invalidated on every
+  // render by a fresh closure per offer.
+  const goToMembership = useCallback(() => router.push("/membership"), [router])
+
+  const handleRedeem = useCallback((offer: Offer) => {
     setSelectedOffer(offer)
     setOfferModal(true)
-  }
+  }, [])
+
+  // OfferModal wants a plain thunk; refetch resolves with the query result.
+  const refetchOffers = useCallback(async () => {
+    await getOffers()
+  }, [getOffers])
 
   if (authLoading || dataLoading || loading) {
     return (
@@ -104,7 +114,6 @@ export default function OffersPage() {
     )
   }
 
-  const { members, newCustomer, everyone } = groupOffers(offers, viewer)
   const nothingToShow =
     members.length === 0 && newCustomer.length === 0 && everyone.length === 0
 
@@ -118,7 +127,7 @@ export default function OffersPage() {
         isRedeemable={state.isRedeemable}
         alreadyRedeemed={state.alreadyRedeemed}
         onRedeem={handleRedeem}
-        onUnlock={() => router.push("/membership")}
+        onUnlock={goToMembership}
       />
     )
   }
@@ -220,7 +229,7 @@ export default function OffersPage() {
           discountAmount={selectedOffer.discountAmount}
           offerModal={offerModal}
           setOfferModal={setOfferModal}
-          refetchOffers={getOffers}
+          refetchOffers={refetchOffers}
         />
       )}
     </View>

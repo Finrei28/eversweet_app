@@ -20,6 +20,8 @@ import { getAnnouncements } from "@/services/api"
 import AnnouncementsPopup from "@/_components/announcementModal"
 import { Announcements } from "@/utils/types"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { queryClient, subscribeAppStateFocus } from "@/services/queryClient"
 
 SplashScreen.preventAutoHideAsync()
 
@@ -44,32 +46,44 @@ export default function RootLayout() {
   const [announcements, setAnnouncements] = useState<Announcements>([])
   const [showAnnounceModal, setShowAnnounceModal] = useState(false)
   const router = useRouter()
-  const [mounted, setMounted] = useState(false)
+  // A ref, not state: this is only ever read inside a notification callback
+  // that fires long after mount, so flipping it never needs to render — and as
+  // a dependency below it was re-registering the notification listeners.
+  const mounted = useRef(false)
   const fetchPoints = useLoyaltyStore((state) => state.fetchPoints)
   const fetchCart = useCartStore((state) => state.fetchCart)
 
   useEffect(() => {
-    setMounted(true) // mark that the router layout is mounted
+    mounted.current = true // mark that the router layout is mounted
   }, [])
+
+  // React Native has no window focus event, so react-query needs AppState
+  // pointed at it or refetch-on-focus never fires.
+  useEffect(() => subscribeAppStateFocus(), [])
 
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [token, announcementList] = await Promise.all([
-          getToken(),
-          getAnnouncements().catch((error): Announcements => {
-            console.error("Failed to fetch announcements:", error)
-            return []
-          }),
-        ])
+        // One wave. The stored "last seen" date was previously read only after
+        // the announcements came back, which made it a second serial hop for a
+        // value that does not depend on them.
+        const [token, announcementList, lastSeenAnnouncement] =
+          await Promise.all([
+            getToken(),
+            getAnnouncements().catch((error): Announcements => {
+              console.error("Failed to fetch announcements:", error)
+              return []
+            }),
+            AsyncStorage.getItem("lastSeenAnnouncement").catch(
+              (error): string | null => {
+                console.error("Failed to read last seen announcement:", error)
+                return null
+              },
+            ),
+          ])
         setIsAuthenticated(!!token)
         setAnnouncements(announcementList)
         if (announcementList.length > 0) {
-          const lastSeenAnnouncement = await AsyncStorage.getItem(
-            // get last seen announcement
-            "lastSeenAnnouncement",
-          )
-
           const hasNewAnnouncements = announcementList.some(
             // check if there are any new announcements
             (announcement) =>
@@ -87,22 +101,16 @@ export default function RootLayout() {
               announcementList[0].updatedAt,
             )
 
-            await AsyncStorage.setItem(
+            // Nothing reads this back during startup, so awaiting a native
+            // write only held the splash screen up for longer.
+            void AsyncStorage.setItem(
               // store the newly seen announcement date
               "lastSeenAnnouncement",
               latestAnnouncementDate,
+            ).catch((error) =>
+              console.error("Failed to store last seen announcement:", error),
             )
           }
-        }
-
-        if (token) {
-          const showMembershipPopup = await hasMembershipPopupExpired()
-          if (showMembershipPopup) {
-            setModalVisible(true)
-          }
-          // Fetch loyalty points if user is authenticated
-          await Promise.all([fetchPoints(), fetchCart()]) // load fresh points on app start
-          // load cart items on app start
         }
       } catch (error) {
         console.error("Failed to load announcements", error)
@@ -113,6 +121,31 @@ export default function RootLayout() {
 
     fetchInitialData()
   }, [])
+
+  // Deliberately after the splash screen, not before it. The loyalty badge and
+  // the cart pill are not on the home screen's first paint, and the membership
+  // popup is a modal drawn over it — so none of this has to gate launch. These
+  // also used to run in series behind hasMembershipPopupExpired(), which is
+  // itself a network call.
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const loadPostLaunchData = async () => {
+      const [popupResult] = await Promise.allSettled([
+        hasMembershipPopupExpired(),
+        fetchPoints(),
+        fetchCart(),
+      ])
+
+      if (popupResult.status === "fulfilled" && popupResult.value) {
+        setModalVisible(true)
+      } else if (popupResult.status === "rejected") {
+        console.error("Failed to check membership popup:", popupResult.reason)
+      }
+    }
+
+    void loadPostLaunchData()
+  }, [isAuthenticated, fetchPoints, fetchCart])
 
   useEffect(() => {
     // listen when app state changes (when user switches apps)
@@ -150,7 +183,7 @@ export default function RootLayout() {
           const notification = response.notification
           handleNotification(notification, (path) => {
             // wait for router to mount before navigating
-            if (mounted) {
+            if (mounted.current) {
               router.replace(path as Parameters<typeof router.replace>[0])
             }
           })
@@ -163,37 +196,39 @@ export default function RootLayout() {
         notificationResponseListener.current?.remove()
       }
     }
-  }, [isAuthenticated, mounted])
+  }, [isAuthenticated])
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <StatusBar barStyle="dark-content" />
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <AuthProvider>
+            <StatusBar barStyle="dark-content" />
 
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              headerTintColor: "#e6aa6b",
-            }}
-          />
-          {modalVisible && (
-            <MembershipPopup
-              modalVisible={modalVisible}
-              setModalVisible={setModalVisible}
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                headerTintColor: "#e6aa6b",
+              }}
             />
-          )}
-          {showAnnounceModal && (
-            <AnnouncementsPopup
-              showAnnounceModal={showAnnounceModal}
-              setShowAnnounceModal={setShowAnnounceModal}
-              announcements={announcements}
-            />
-          )}
+            {modalVisible && (
+              <MembershipPopup
+                modalVisible={modalVisible}
+                setModalVisible={setModalVisible}
+              />
+            )}
+            {showAnnounceModal && (
+              <AnnouncementsPopup
+                showAnnounceModal={showAnnounceModal}
+                setShowAnnounceModal={setShowAnnounceModal}
+                announcements={announcements}
+              />
+            )}
 
-          <Toast config={toastConfig} />
-        </AuthProvider>
-      </SafeAreaProvider>
+            <Toast config={toastConfig} />
+          </AuthProvider>
+        </SafeAreaProvider>
+      </QueryClientProvider>
     </GestureHandlerRootView>
   )
 }

@@ -1,7 +1,7 @@
 import { formatCurrency } from "@/lib/formatters"
 import { useCartStore } from "@/store/cart"
 import { CartItem } from "@/utils/types"
-import { debounce } from "lodash"
+import debounce from "lodash/debounce"
 import { useEffect, useMemo, useState } from "react"
 import { View, Text, TouchableOpacity } from "react-native"
 import { Ionicons } from "@expo/vector-icons"

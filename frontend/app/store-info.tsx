@@ -11,12 +11,11 @@ import {
 import { Feather } from "@expo/vector-icons"
 import CustomHeader from "@/_components/custom-header"
 import { useAuth } from "@/store/authProvider"
-import useFetch from "@/services/use_fetch"
-import { getStoreInfo } from "@/services/api"
+import { useStoreInfoQuery } from "@/services/queries"
 import BouncingLoader from "@/_components/loader"
 
 export default function StoreInfo() {
-  const { data: storeInfo, loading } = useFetch(getStoreInfo)
+  const { data: storeInfo, isLoading: loading } = useStoreInfoQuery()
   const { storeHours } = useAuth()
 
   const openMaps = (address: string) => {

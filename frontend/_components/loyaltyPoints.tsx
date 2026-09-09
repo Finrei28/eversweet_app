@@ -1,13 +1,12 @@
-import { getUserLoyaltyPoints } from "@/services/api"
-import useFetch from "@/services/use_fetch"
+import { useLoyaltyPointsQuery } from "@/services/queries"
 import { ActivityIndicator, Text, View } from "react-native"
 
 export default function LoyaltyPoints() {
   const {
     data: loyaltyPoints,
     error,
-    loading,
-  } = useFetch(() => getUserLoyaltyPoints())
+    isLoading: loading,
+  } = useLoyaltyPointsQuery()
 
   // The fetch state was discarded before, so a request still in flight and one
   // that failed both rendered as an empty space beside "Points:", which reads

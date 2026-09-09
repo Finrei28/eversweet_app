@@ -18,7 +18,9 @@ import OTPInput from "@/_components/emailVerification"
 import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
 import { parsePhoneNumberFromString } from "libphonenumber-js"
-import validator from "validator"
+// Deep import: validator's entry re-exports ~100 modules, and only this one
+// is used.
+import isEmail from "validator/lib/isEmail"
 import { getErrorMessage } from "@/utils/getError"
 
 export default function SignUp() {
@@ -40,7 +42,7 @@ export default function SignUp() {
       Alert.alert("Error", "Please enter both email and password.")
       return
     }
-    if (!validator.isEmail(signupForm.email)) {
+    if (!isEmail(signupForm.email)) {
       Alert.alert("Error", "Please enter a valid email address.")
       return
     }
