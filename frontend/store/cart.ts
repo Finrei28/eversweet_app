@@ -15,7 +15,7 @@ import {
   updateCartItem,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
-import { useLoyaltyStore } from "./points"
+import { canAffordRedemption, useLoyaltyStore } from "./points"
 // Deep import: lodash's package entry is one monolithic CommonJS file and
 // Metro does not tree-shake, so the named import pulled the whole library in.
 import isEqual from "lodash/isEqual"
@@ -83,7 +83,8 @@ const PENDING_ID_PREFIX = "pending:"
 let pendingSequence = 0
 const nextPendingId = () => `${PENDING_ID_PREFIX}${++pendingSequence}`
 
-export const isPendingCartItem = (id: string) => id.startsWith(PENDING_ID_PREFIX)
+export const isPendingCartItem = (id: string) =>
+  id.startsWith(PENDING_ID_PREFIX)
 
 /**
  * Cart writes leave one at a time.
@@ -111,11 +112,15 @@ const enqueueCartWrite = <T>(work: () => Promise<T>): Promise<T> => {
   return next
 }
 
-
 const showAddedToast = (item: AddCartItem) => {
   Toast.show({
     type: "success",
     text1: `${item.dessert.name} added to cart`,
+    // Said at the same moment as the rest, so a redemption gets one message
+    // rather than a generic one now and the points one a round trip later.
+    text2: item.loyaltyPointsUsed
+      ? `${item.loyaltyPointsUsed} points has been used`
+      : undefined,
     position: "bottom",
     visibilityTime: 3000,
     autoHide: true,
@@ -220,14 +225,22 @@ export const useCartStore = create<CartState>((set, get) => ({
       Math.round(line.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
       areListsEqual(line.customisations, item.customisations)
 
-    // Shown before the server has agreed to it — but only for a plain add.
+    // Shown before the server has agreed to it.
     //
-    // An offer redemption or a loyalty-point spend is refusable: a usage limit
-    // reached, not enough points. Putting those in the cart first means taking
-    // them back in front of the customer, and they are also the adds where the
-    // server's answer carries information. Adding a dessert has no such
-    // outcome, and it is the case people actually sit and wait through.
+    // A plain add has no outcome worth waiting for. A redemption does - the
+    // server refuses it when the points are not there - but the app knows the
+    // balance, so it can answer that question itself and only wait when the
+    // answer might be no. That was the whole of the five to seven seconds a
+    // reward used to take.
+    //
+    // An offer still waits. Its refusals turn on a usage limit and an audience,
+    // neither of which this device can check.
     const isPlainAdd = !item.offerId && !item.loyaltyPointsUsed
+    const pointsCost = item.offerId ? 0 : (item.loyaltyPointsUsed ?? 0)
+    const isRedemption = pointsCost > 0
+
+    const appliedOptimistically =
+      isPlainAdd || (isRedemption && canAffordRedemption(pointsCost))
 
     // Only a line the server already knows about can be incremented — a
     // pending one has no id worth sending. Matching one anyway is how two
@@ -239,8 +252,11 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     let placeholderId: string | null = null
 
-    if (isPlainAdd) {
-      if (confirmedMatch) {
+    if (appliedOptimistically) {
+      // Only a plain add may merge into an existing line. A redemption is
+      // always its own line and its own request, because a quantity change
+      // redeems nothing and debits nothing.
+      if (isPlainAdd && confirmedMatch) {
         set({
           items: get().items.map((line) =>
             line.id === confirmedMatch.id
@@ -263,6 +279,12 @@ export const useCartStore = create<CartState>((set, get) => ({
             },
           ],
         })
+      }
+
+      // Spent here rather than when the server says so, or the counter would
+      // sit at its old value next to a reward already in the cart.
+      if (isRedemption) {
+        useLoyaltyStore.getState().addPoints(-pointsCost)
       }
 
       showAddedToast(item)
@@ -335,30 +357,24 @@ export const useCartStore = create<CartState>((set, get) => ({
         // to everyone it would scold a non-member for using one they are
         // entitled to. The server's own refusal message is the single source of
         // truth for why an offer was turned down.
-        if (item?.loyaltyPointsUsed) {
-          useLoyaltyStore.getState().fetchPoints()
-          Toast.show({
-            type: "success",
-            text1: `${item.dessert.name} added to cart`,
-            text2: `${item.loyaltyPointsUsed} points has been used`,
-            position: "bottom",
-            visibilityTime: 3000,
-            autoHide: true,
-            bottomOffset: 90,
-            props: {
-              text1NumberOfLines: 0,
-              text2NumberOfLines: 0, // allow wrapping
-            },
-          })
-        } else if (!isPlainAdd) {
-          // The optimistic path already said so the moment the customer tapped.
+        if (!appliedOptimistically) {
+          // Nothing has been said yet on this path, because nothing was
+          // applied until the server agreed.
           showAddedToast(item)
+        }
+
+        if (isRedemption) {
+          // Not awaited. The balance on screen was already adjusted when the
+          // reward went in, so this only reconciles it against the server -
+          // and awaiting it would put a second round trip in front of the
+          // customer on the very path this is meant to speed up.
+          void useLoyaltyStore.getState().fetchPoints()
         }
       } catch (error) {
         // Undo this add and nothing else. Restoring a snapshot of the whole
         // cart would discard any add that was applied while this one was in
         // flight.
-        if (isPlainAdd) {
+        if (appliedOptimistically) {
           set({
             items: placeholderId
               ? get().items.filter((line) => line.id !== placeholderId)
@@ -368,10 +384,17 @@ export const useCartStore = create<CartState>((set, get) => ({
                     : line,
                 ),
           })
+
+          // Hand the points straight back, so the counter is right even if the
+          // refetch below fails too.
+          if (isRedemption) {
+            useLoyaltyStore.getState().addPoints(pointsCost)
+          }
         }
 
         if (item?.loyaltyPointsUsed) {
           console.error("Failed to order with loyalty points", error)
+          await useLoyaltyStore.getState().fetchPoints()
           Toast.show({
             type: "error",
             text1: "Failed to order with loyalty points",
@@ -453,7 +476,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       set({ cartOperations: get().cartOperations - 1 })
 
       if (item?.loyaltyPointsUsed) {
-        useLoyaltyStore.getState().fetchPoints()
+        await useLoyaltyStore.getState().fetchPoints()
 
         Toast.show({
           type: "success",
@@ -486,7 +509,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       })
       set({ cartOperations: get().cartOperations - 1 })
       if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
-        useLoyaltyStore.getState().fetchPoints()
+        await useLoyaltyStore.getState().fetchPoints()
         console.error("Failed to restore points", error)
         Toast.show({
           type: "error",

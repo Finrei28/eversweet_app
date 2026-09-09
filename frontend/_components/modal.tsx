@@ -12,6 +12,7 @@ import {
 import Modal from "react-native-modal"
 import { CartItem, Dessert, Customisations } from "../utils/types"
 import { useCartStore } from "@/store/cart"
+import { canAffordRedemption } from "@/store/points"
 import { useEffect, useMemo, useState, useRef } from "react"
 import {
   SafeAreaView,
@@ -551,13 +552,23 @@ export default function CustomModal({
                             usersMembership,
                           )
 
-                      // A plain add lands in the cart locally the moment it is
-                      // requested, so there is nothing here worth waiting for —
-                      // and waiting was the whole of the four to five seconds
-                      // this button used to take. Redemptions still hold the
-                      // modal, because the server can refuse them and the
-                      // customer needs to see that before it closes.
-                      if (!isEdit && type !== "points" && !offerId) {
+                      // A plain add lands in the cart locally the moment it
+                      // is requested, so there is nothing here worth waiting
+                      // for — and waiting was the whole of the four to five
+                      // seconds this button used to take.
+                      //
+                      // A redemption goes the same way when this device can see
+                      // the points are there. When it cannot, the modal keeps
+                      // its spinner and the customer reads the server's answer
+                      // before it closes. Offers always wait: their refusals
+                      // turn on a usage limit and an audience that only the
+                      // server knows.
+                      const closesImmediately =
+                        !isEdit &&
+                        !offerId &&
+                        (type !== "points" || canAffordRedemption(points))
+
+                      if (closesImmediately) {
                         void submit
                         closeWithAnimation()
                         return
