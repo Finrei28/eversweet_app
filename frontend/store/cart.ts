@@ -15,14 +15,13 @@ import {
   updateCartItem,
 } from "@/services/api"
 import Toast from "react-native-toast-message"
-import { canAffordRedemption, useLoyaltyStore } from "./points"
+import { useLoyaltyStore } from "./points"
 // Deep import: lodash's package entry is one monolithic CommonJS file and
 // Metro does not tree-shake, so the named import pulled the whole library in.
 import isEqual from "lodash/isEqual"
 import {
   calculatePriceAfterMembershipDiscount,
   calculatePriceAfterPromo,
-  calculateMembershipDiscount,
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
 import { fetchLoyaltyRates } from "@/services/queries"
@@ -39,10 +38,7 @@ interface CartState {
   getTotalMembershipDiscount: (
     usersMembership: UsersMembership | null,
   ) => number
-  addItem: (
-    item: AddCartItem,
-    usersMembership?: UsersMembership | null,
-  ) => Promise<void>
+  addItem: (item: AddCartItem) => Promise<void>
   editItem: (item: CartItem) => Promise<void>
   removeItem: (id: string) => Promise<void>
   clearCart: () => Promise<void>
@@ -74,32 +70,38 @@ const netUnitPriceInCents = (item: CartItem) =>
   )
 
 /**
- * Marks a line that exists in the cart on this device but not yet on the
- * server. Nothing may be sent to the server about it until the add that
- * created it comes back with a real id.
- */
-const PENDING_ID_PREFIX = "pending:"
-
-let pendingSequence = 0
-const nextPendingId = () => `${PENDING_ID_PREFIX}${++pendingSequence}`
-
-export const isPendingCartItem = (id: string) =>
-  id.startsWith(PENDING_ID_PREFIX)
-
-/**
  * Cart writes leave one at a time.
  *
- * The optimistic line appears immediately either way, so serialising costs the
- * customer nothing visible — but it means an add can never race another add.
- * Two quick adds of the same dessert would otherwise both match a line the
- * server has not acknowledged yet, and the second would send a placeholder id
- * the server has never seen; two adds from a customer with no cart would race
- * to create one. Queueing also lets each write re-read the cart when its turn
- * comes, by which point the write before it has landed.
+ * An add can never race another add or a removal. Two adds from a customer
+ * with no cart would otherwise race to create one, and an add overlapping a
+ * removal takes the same rows in the opposite order on the server, which
+ * deadlocked. Queueing also lets each write read the cart when its turn comes,
+ * by which point the write before it has landed.
  */
 let cartWrites: Promise<unknown> = Promise.resolve()
 
+/**
+ * Resolves when everything queued so far has settled.
+ *
+ * Checkout waits on this before reading the cart back from the server. The
+ * quantity buttons apply their change locally and sync it after a debounce, so
+ * without this the customer can reach checkout while their last tap is still
+ * in the air, and be charged for the quantity they had before it.
+ */
+export const whenCartWritesSettle = () => cartWrites
+
+const countWrite = (delta: number) =>
+  useCartStore.setState((state) => ({
+    cartOperations: state.cartOperations + delta,
+  }))
+
 const enqueueCartWrite = <T>(work: () => Promise<T>): Promise<T> => {
+  // Counted from the moment it is queued, so `cartOperations` means "cart
+  // writes in flight" for every write rather than only for removals. Checkout
+  // refuses to refetch while it is above zero, and an add that did not count
+  // itself is how an item could be dropped on the way there.
+  countWrite(1)
+
   const next = cartWrites.then(work, work)
 
   // The chain must not carry a rejection forward, or one failure would skip
@@ -107,6 +109,11 @@ const enqueueCartWrite = <T>(work: () => Promise<T>): Promise<T> => {
   cartWrites = next.then(
     () => undefined,
     () => undefined,
+  )
+
+  void next.then(
+    () => countWrite(-1),
+    () => countWrite(-1),
   )
 
   return next
@@ -132,27 +139,6 @@ const showAddedToast = (item: AddCartItem) => {
   })
 }
 
-/**
- * Mirrors the server's calculateBestDiscount — the better of the membership
- * and promo discounts — closely enough that the cart total does not visibly
- * jump between the optimistic line appearing and the server's row replacing
- * it. The server remains the authority; this figure lives for about a second.
- */
-const estimateDiscountInCents = (
-  item: AddCartItem,
-  usersMembership?: UsersMembership | null,
-) => {
-  const membershipDiscount = calculateMembershipDiscount(
-    item.itemPriceInCents,
-    usersMembership ?? null,
-  )
-  const promoDiscount = Math.max(
-    0,
-    item.dessert.priceInCents - calculatePriceAfterPromo(item.dessert),
-  )
-
-  return Math.max(membershipDiscount, promoDiscount)
-}
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
@@ -206,7 +192,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       )
     }, 0)
   },
-  addItem: async (item, usersMembership) => {
+  addItem: async (item) => {
     const areListsEqual = (list1: Customisations, list2: Customisations) => {
       if (list1.length !== list2.length) return false
 
@@ -225,129 +211,45 @@ export const useCartStore = create<CartState>((set, get) => ({
       Math.round(line.itemPriceInCents) === Math.round(item.itemPriceInCents) &&
       areListsEqual(line.customisations, item.customisations)
 
-    // Shown before the server has agreed to it.
+    // Nothing goes into the cart until the server has agreed to it.
     //
-    // A plain add has no outcome worth waiting for. A redemption does - the
-    // server refuses it when the points are not there - but the app knows the
-    // balance, so it can answer that question itself and only wait when the
-    // answer might be no. That was the whole of the five to seven seconds a
-    // reward used to take.
+    // This was optimistic for a while, and it did not survive contact with a
+    // backend that takes four to five seconds to answer. Optimistic UI assumes
+    // the customer cannot act inside the confirmation window; at five seconds
+    // they act inside it constantly, and every button then has to defend
+    // itself against a line the server has never heard of. The one that got
+    // away was worse than dead buttons: checkout refetched the cart mid-add
+    // and the item vanished on the way to being paid for.
     //
-    // An offer still waits. Its refusals turn on a usage limit and an audience,
-    // neither of which this device can check.
+    // The wait is the real problem and it belongs in the backend, not behind a
+    // guess about what the backend is going to say.
+    //
+    // A redemption is never merged into an existing line. A quantity change
+    // redeems nothing and debits nothing, so merging one handed out free
+    // desserts; the server refuses it outright now.
     const isPlainAdd = !item.offerId && !item.loyaltyPointsUsed
-    const pointsCost = item.offerId ? 0 : (item.loyaltyPointsUsed ?? 0)
-    const isRedemption = pointsCost > 0
-
-    const appliedOptimistically =
-      isPlainAdd || (isRedemption && canAffordRedemption(pointsCost))
-
-    // Only a line the server already knows about can be incremented — a
-    // pending one has no id worth sending. Matching one anyway is how two
-    // quick adds of the same dessert used to send a placeholder id and get a
-    // 404 back.
-    const confirmedMatch = get().items.find(
-      (line) => !isPendingCartItem(line.id) && isSameLine(line),
-    )
-
-    let placeholderId: string | null = null
-
-    if (appliedOptimistically) {
-      // Only a plain add may merge into an existing line. A redemption is
-      // always its own line and its own request, because a quantity change
-      // redeems nothing and debits nothing.
-      if (isPlainAdd && confirmedMatch) {
-        set({
-          items: get().items.map((line) =>
-            line.id === confirmedMatch.id
-              ? { ...line, quantity: line.quantity + 1 }
-              : line,
-          ),
-        })
-      } else {
-        placeholderId = nextPendingId()
-        set({
-          items: [
-            ...get().items,
-            {
-              ...item,
-              id: placeholderId,
-              discountedAmountInCents: estimateDiscountInCents(
-                item,
-                usersMembership,
-              ),
-            },
-          ],
-        })
-      }
-
-      // Spent here rather than when the server says so, or the counter would
-      // sit at its old value next to a reward already in the cart.
-      if (isRedemption) {
-        useLoyaltyStore.getState().addPoints(-pointsCost)
-      }
-
-      showAddedToast(item)
-    }
 
     return enqueueCartWrite(async () => {
       try {
-        // Re-read now that the write queued ahead of this one has landed: the
-        // line to merge into may only just have become one the server knows.
-        //
-        // Only a plain add may merge. A redemption looks identical to the one
-        // already in the cart — same dessert, same points, same customisations
-        // — so it used to merge too, and a quantity update is the one cart
-        // write that does not redeem an offer or debit any points. That handed
-        // out free desserts: the line's quantity climbed while its cost did
-        // not, and a reward is stored at zero cents. Each redemption is its own
-        // add now, so each one pays.
-        const current = get().items
-        const target = isPlainAdd
-          ? current.find(
-              (line) =>
-                line.id !== placeholderId &&
-                !isPendingCartItem(line.id) &&
-                isSameLine(line),
-            )
-          : undefined
+        // Read when the turn comes rather than when the tap happened, so a
+        // line added by the write queued ahead of this one is visible here.
+        const target = isPlainAdd ? get().items.find(isSameLine) : undefined
 
         if (target) {
-          const placeholder = placeholderId
-            ? current.find((line) => line.id === placeholderId)
-            : undefined
-
-          // An absolute quantity. Whatever this add has already contributed
-          // to the line on screen is in target.quantity; what has not been
-          // applied locally still has to be added — which is the placeholder
-          // when this add made one, and nothing when it bumped the line
-          // directly.
-          const quantity = target.quantity + (placeholder?.quantity ?? 0)
-
           const updatedCartItem = await updateCartItemQuantity(
             target.id,
-            quantity,
+            target.quantity + item.quantity,
           )
 
           set({
-            items: get()
-              .items.filter((line) => line.id !== placeholderId)
-              .map((line) =>
-                line.id === updatedCartItem.id ? updatedCartItem : line,
-              ),
+            items: get().items.map((line) =>
+              line.id === updatedCartItem.id ? updatedCartItem : line,
+            ),
           })
         } else {
           const newCartItem = await addItemToCart(item)
 
-          set({
-            items: placeholderId
-              ? // Swap the placeholder for the server's row, which carries the
-                // real id, price and discount.
-                get().items.map((line) =>
-                  line.id === placeholderId ? newCartItem : line,
-                )
-              : [...get().items, newCartItem],
-          })
+          set({ items: [...get().items, newCartItem] })
         }
 
         // There used to be a "join our membership" error toast here, fired on a
@@ -357,41 +259,15 @@ export const useCartStore = create<CartState>((set, get) => ({
         // to everyone it would scold a non-member for using one they are
         // entitled to. The server's own refusal message is the single source of
         // truth for why an offer was turned down.
-        if (!appliedOptimistically) {
-          // Nothing has been said yet on this path, because nothing was
-          // applied until the server agreed.
-          showAddedToast(item)
-        }
+        showAddedToast(item)
 
-        if (isRedemption) {
-          // Not awaited. The balance on screen was already adjusted when the
-          // reward went in, so this only reconciles it against the server -
-          // and awaiting it would put a second round trip in front of the
-          // customer on the very path this is meant to speed up.
-          void useLoyaltyStore.getState().fetchPoints()
+        if (item.loyaltyPointsUsed) {
+          // Awaited: the balance on screen is only ever the server's answer
+          // now, and the customer is looking at it.
+          await useLoyaltyStore.getState().fetchPoints()
         }
       } catch (error) {
-        // Undo this add and nothing else. Restoring a snapshot of the whole
-        // cart would discard any add that was applied while this one was in
-        // flight.
-        if (appliedOptimistically) {
-          set({
-            items: placeholderId
-              ? get().items.filter((line) => line.id !== placeholderId)
-              : get().items.map((line) =>
-                  line.id === confirmedMatch?.id
-                    ? { ...line, quantity: Math.max(1, line.quantity - 1) }
-                    : line,
-                ),
-          })
-
-          // Hand the points straight back, so the counter is right even if the
-          // refetch below fails too.
-          if (isRedemption) {
-            useLoyaltyStore.getState().addPoints(pointsCost)
-          }
-        }
-
+        // Nothing was applied, so there is nothing to undo.
         if (item?.loyaltyPointsUsed) {
           console.error("Failed to order with loyalty points", error)
           await useLoyaltyStore.getState().fetchPoints()
@@ -459,19 +335,12 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
   removeItem: async (id) => {
-    // Still in flight. The add that created this line has not come back
-    // with a real id yet, so there is nothing the server would recognise
-    // to delete — and the pending row is about to be replaced anyway.
-    if (isPendingCartItem(id)) return
-
     const previousItems = get().items
     const item = get().items.find((i) => i.id === id)
     set({
       items: get().items.filter((i) => i.id !== id),
       error: null, // Clear error on successful removal
     })
-    set({ cartOperations: get().cartOperations + 1 })
-
     // Queued with the adds. A remove and an add in flight together take the
     // same rows in opposite orders on the server and used to deadlock each
     // other; the line has already gone from the list here, so waiting a turn
@@ -479,7 +348,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     return enqueueCartWrite(async () => {
       try {
         await removeItemFromCart(id)
-        set({ cartOperations: get().cartOperations - 1 })
 
         if (item?.loyaltyPointsUsed) {
           await useLoyaltyStore.getState().fetchPoints()
@@ -513,7 +381,6 @@ export const useCartStore = create<CartState>((set, get) => ({
           items: previousItems,
           error: "Failed to remove item",
         })
-        set({ cartOperations: get().cartOperations - 1 })
         if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
           await useLoyaltyStore.getState().fetchPoints()
           console.error("Failed to restore points", error)
@@ -625,10 +492,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   incrementItem: async (id) => {
-    // Inert until the line lands, so the count cannot drift from the row
-    // the server is about to send back.
-    if (isPendingCartItem(id)) return
-
     set({
       items: get().items.map((i) =>
         i.id === id ? { ...i, quantity: i.quantity + 1 } : i,
@@ -636,9 +499,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   decrementItem: async (id) => {
-    // See incrementItem.
-    if (isPendingCartItem(id)) return
-
     set({
       items: get().items.map((i) =>
         // Floored at one: removing the last one is `removeItem`, and only the
@@ -649,9 +509,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     })
   },
   updateCartItemQuantity: async (id, quantity) => {
-    // See removeItem: a pending line has no server-side id to update.
-    if (isPendingCartItem(id)) return
-
     // A counter rather than Date.now(): two taps inside the same millisecond
     // produced identical ids, so neither response counted as stale. Claimed
     // before queueing, so the newest tap still wins even if an earlier one is

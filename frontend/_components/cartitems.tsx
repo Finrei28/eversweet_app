@@ -40,10 +40,13 @@ export function CartItems({
     [item.id],
   )
 
-  // Cleanup on unmount (very important in lists)
+  // Flushed, not cancelled. Cancelling threw away the customer's last tap:
+  // pressing + and going straight to checkout unmounted this row inside the
+  // debounce window, so the change never reached the server and checkout
+  // charged the old quantity.
   useEffect(() => {
     return () => {
-      syncQuantity.cancel()
+      syncQuantity.flush()
     }
   }, [syncQuantity])
 

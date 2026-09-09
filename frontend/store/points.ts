@@ -13,19 +13,6 @@ type LoyaltyStore = {
   reset: () => void
 }
 
-/**
- * Whether the balance held on this device covers a redemption.
- *
- * The app knows what the customer has, so it can decide before asking. That is
- * what lets a reward go into the cart immediately instead of waiting out the
- * round trip. The server still decides in the end - this can be stale if points
- * were spent on another device - so the add rolls back if it turns out to be
- * wrong. Reading the balance rather than subscribing to it, because this is
- * asked at the moment of a tap, not during a render.
- */
-export const canAffordRedemption = (cost: number) =>
-  useLoyaltyStore.getState().points >= cost
-
 export const useLoyaltyStore = create<LoyaltyStore>()(
   persist(
     (set) => ({
