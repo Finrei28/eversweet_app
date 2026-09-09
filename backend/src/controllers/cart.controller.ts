@@ -504,31 +504,46 @@ export const addItemToCart = async (req: Request, res: Response) => {
               await redeemOfferForUser(userId, cartItem.offerId, tx)
             }
 
-            // If user used loyalty points, deduct from their account
+            // Spend the points only if they are there, in one statement.
+            //
+            // Reading the balance and then writing it is check-then-act: two
+            // redemptions arriving together both read a sufficient balance,
+            // both subtract, and the customer ends up with fewer points than
+            // they had - or below zero - for one reward's worth of desserts.
+            // A filter beside the unique field makes the check and the debit
+            // the same operation, so the loser matches no row.
+            //
+            // It also drops a round trip from the slowest add in the app,
+            // which is the reason a redemption felt slower than a plain one.
             if (isRedemption) {
-              const existing = await tx.loyalty.findUnique({
-                where: { userId },
-                select: { points: true },
-              })
-
-              if (!existing) throw new Error("User loyalty record not found")
-              if (existing.points < pointsSpent) {
-                throw new Error("INSUFFICIENT_LOYALTY_POINTS")
-              }
-              await tx.loyalty.update({
-                where: { userId },
-                data: {
-                  points: {
-                    decrement: pointsSpent,
-                  },
-                  records: {
-                    create: {
-                      change: -pointsSpent,
-                      reason: "REWARDS",
+              try {
+                await tx.loyalty.update({
+                  where: { userId, points: { gte: pointsSpent } },
+                  data: {
+                    points: {
+                      decrement: pointsSpent,
+                    },
+                    records: {
+                      create: {
+                        change: -pointsSpent,
+                        reason: "REWARDS",
+                      },
                     },
                   },
-                },
-              })
+                })
+              } catch (error) {
+                // P2025 is "no row matched", which here is either no loyalty
+                // record or not enough points in it. The customer is told the
+                // same thing either way.
+                if (
+                  error instanceof Prisma.PrismaClientKnownRequestError &&
+                  error.code === "P2025"
+                ) {
+                  throw new Error("INSUFFICIENT_LOYALTY_POINTS")
+                }
+
+                throw error
+              }
             }
 
             return writeCartItem(tx)
