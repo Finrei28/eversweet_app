@@ -27,7 +27,6 @@ export default function CartPage() {
     null,
   )
   const [offerId, setOfferId] = useState<string | null>(null)
-  const [debounceActive, setDebounceActive] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [type, setType] = useState<"points" | "cents">("cents")
   const [earnablePoints, setEarnablePoints] = useState<number | null>(null)
@@ -74,7 +73,7 @@ export default function CartPage() {
 
   return (
     <>
-      <CustomHeader disableBack={debounceActive} />
+      <CustomHeader />
       <View className="flex-1 bg-background pt-5 px-5 pb-10">
         <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
 
@@ -95,7 +94,6 @@ export default function CartPage() {
                   setSelectedCartItem={setSelectedCartItem}
                   setType={setType}
                   setModalVisible={setModalVisible}
-                  setDebounceActive={setDebounceActive}
                   setOfferId={setOfferId}
                 />
               )}
@@ -117,7 +115,6 @@ export default function CartPage() {
               <TouchableOpacity
                 onPress={() => router.push("/checkout")}
                 className="mt-4 bg-primary py-3 rounded-lg items-center"
-                disabled={debounceActive}
               >
                 <Text className="text-white font-bold">Checkout</Text>
               </TouchableOpacity>

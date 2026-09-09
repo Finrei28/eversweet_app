@@ -83,12 +83,38 @@ let cartWrites: Promise<unknown> = Promise.resolve()
 /**
  * Resolves when everything queued so far has settled.
  *
- * Checkout waits on this before reading the cart back from the server. The
- * quantity buttons apply their change locally and sync it after a debounce, so
- * without this the customer can reach checkout while their last tap is still
- * in the air, and be charged for the quantity they had before it.
+ * Checkout waits on this before reading the cart back from the server, so a
+ * write still in the air cannot be overwritten by a cart the server has not
+ * finished being told about.
  */
 export const whenCartWritesSettle = () => cartWrites
+
+/**
+ * Quantity taps are applied locally and sent after a 500ms debounce, and in
+ * that window there is nothing queued for `whenCartWritesSettle` to wait on -
+ * the tap exists only as a pending timer inside a cart row.
+ *
+ * The cart screen used to cover that by disabling its own checkout button
+ * until the sync came back, which meant a dead button for the debounce plus a
+ * four to five second round trip. Letting checkout force the pending syncs out
+ * instead keeps the button live: the wait moves onto the checkout screen,
+ * where it is a spinner that says what it is doing.
+ */
+const pendingQuantitySyncs = new Set<() => void>()
+
+export const registerPendingQuantitySync = (flush: () => void) => {
+  pendingQuantitySyncs.add(flush)
+
+  return () => {
+    pendingQuantitySyncs.delete(flush)
+  }
+}
+
+export const flushPendingQuantitySyncs = () => {
+  // Copied first: flushing sends the write, and the row may deregister while
+  // this is iterating. Flushing a debounce with nothing pending is a no-op.
+  for (const flush of [...pendingQuantitySyncs]) flush()
+}
 
 const countWrite = (delta: number) =>
   useCartStore.setState((state) => ({

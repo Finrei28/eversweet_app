@@ -25,7 +25,11 @@ import {
   checkPaymentStatus,
   DuplicateOrderError,
 } from "@/services/stripe-api"
-import { useCartStore, whenCartWritesSettle } from "@/store/cart"
+import {
+  flushPendingQuantitySyncs,
+  useCartStore,
+  whenCartWritesSettle,
+} from "@/store/cart"
 import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker"
@@ -163,6 +167,12 @@ function CheckoutContent() {
       // Anything still in the air first. fetchCart replaces the list outright,
       // so arriving here mid-write meant reading back a cart the server had
       // not finished being told about.
+      //
+      // A quantity tap is not in the air yet - it is sitting in a debounce
+      // inside a cart row, invisible to the queue - so it has to be forced out
+      // before there is anything to wait for. This is what lets the cart
+      // screen keep its checkout button enabled while a tap is pending.
+      flushPendingQuantitySyncs()
       await whenCartWritesSettle()
       await useCartStore.getState().fetchCart()
       setLoading(false)
