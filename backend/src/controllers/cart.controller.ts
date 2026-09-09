@@ -27,6 +27,42 @@ import {
 //   return date
 // }
 
+/**
+ * Prisma defaults an interactive transaction to 5s. A round trip to this
+ * database costs the better part of a second, so a transaction making five or
+ * six of them can exceed that as soon as two requests overlap — which is
+ * exactly how adding two items quickly used to fail, with P2028 "transaction
+ * already closed" after 5182ms. The work inside these transactions is small;
+ * the time goes on waiting for the network, so the bound has to be set for a
+ * remote database rather than a local one.
+ */
+const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
+
+/**
+ * Two adds racing to create the same customer's first cart both take upsert's
+ * create branch, and one loses the unique index on Cart.userId with P2002.
+ * The cart exists by then, so running the same work again takes the update
+ * branch. Retried once, and only for that conflict.
+ *
+ * A transaction that failed this way committed nothing, so re-running it does
+ * not double up an offer redemption or a points debit.
+ */
+const retryOnCartConflict = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work()
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return work()
+    }
+
+    throw error
+  }
+}
+
+
 function calculateBestDiscount(
   cartItem: CartItem | AddCartItem,
   membership: Membership,
@@ -349,54 +385,55 @@ export const addItemToCart = async (req: Request, res: Response) => {
     )
 
     const rawCartItem = needsAtomicSideEffects
-      ? await db.$transaction(async (tx) => {
-          // redeem offer
-          //
-          // Not conditional on a membership any more. It used to be, harmlessly,
-          // because only a member could reach this line — but an open offer held
-          // by a non-member would then be priced without ever writing a
-          // redemption, so `used` would never increment and `limit` would never
-          // be enforced.
-          if (cartItem.offerId) {
-            await redeemOfferForUser(userId, cartItem.offerId, tx)
-          }
-
-          // If user used loyalty points, deduct from their account
-          if (cartItem.loyaltyPointsUsed) {
-            const existing = await tx.loyalty.findUnique({
-              where: { userId },
-              select: { points: true },
-            })
-
-            if (!existing) throw new Error("User loyalty record not found")
-            if (existing.points < cartItem.loyaltyPointsUsed) {
-              throw new Error("INSUFFICIENT_LOYALTY_POINTS")
+      ? await retryOnCartConflict(() =>
+          db.$transaction(async (tx) => {
+            // redeem offer
+            //
+            // Not conditional on a membership any more. It used to be, harmlessly,
+            // because only a member could reach this line — but an open offer held
+            // by a non-member would then be priced without ever writing a
+            // redemption, so `used` would never increment and `limit` would never
+            // be enforced.
+            if (cartItem.offerId) {
+              await redeemOfferForUser(userId, cartItem.offerId, tx)
             }
-            await tx.loyalty.update({
-              where: { userId },
-              data: {
-                points: {
-                  decrement: cartItem.loyaltyPointsUsed,
-                },
-                records: {
-                  create: {
-                    change: -cartItem.loyaltyPointsUsed,
-                    reason: "REWARDS",
+
+            // If user used loyalty points, deduct from their account
+            if (cartItem.loyaltyPointsUsed) {
+              const existing = await tx.loyalty.findUnique({
+                where: { userId },
+                select: { points: true },
+              })
+
+              if (!existing) throw new Error("User loyalty record not found")
+              if (existing.points < cartItem.loyaltyPointsUsed) {
+                throw new Error("INSUFFICIENT_LOYALTY_POINTS")
+              }
+              await tx.loyalty.update({
+                where: { userId },
+                data: {
+                  points: {
+                    decrement: cartItem.loyaltyPointsUsed,
+                  },
+                  records: {
+                    create: {
+                      change: -cartItem.loyaltyPointsUsed,
+                      reason: "REWARDS",
+                    },
                   },
                 },
-              },
-            })
-          }
+              })
+            }
 
-          return writeCartItem(tx)
-        })
-      : await writeCartItem(db)
+            return writeCartItem(tx)
+          }, TRANSACTION_OPTIONS),
+        )
+      : await retryOnCartConflict(() => writeCartItem(db))
 
     if (!rawCartItem) {
       res.status(500).json({ success: false, message: "Could not add to cart" })
       return
     }
-
 
     const formattedCartItem = {
       ...rawCartItem,
@@ -638,7 +675,7 @@ export const clearCart = async (req: Request, res: Response) => {
       }
 
       await tx.cart.delete({ where: { userId } })
-    })
+    }, TRANSACTION_OPTIONS)
 
     res.status(200).json({ success: true, message: "Cart cleared" })
     return
@@ -750,7 +787,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       }
 
       return cartItem.id
-    })
+    }, TRANSACTION_OPTIONS)
 
     res.status(200).json({ success: true, id: cartItem.id })
     return

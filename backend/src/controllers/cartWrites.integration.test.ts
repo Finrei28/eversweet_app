@@ -178,4 +178,54 @@ describeIfDb("cart write paths", () => {
     expect(cart?.cartItems[0].quantity).toBe(3)
     expect(cart?.totalPriceInCents).toBe(3600)
   })
+
+  it("survives two adds racing to create the first cart", async () => {
+    const user = await makeUser()
+    const first = await makeDessert(1200)
+    const second = await makeDessert(800)
+
+    // No cart exists yet, so both requests take the create branch of the
+    // upsert and one loses the unique index on Cart.userId. The loser has to
+    // recover rather than surface a 500 — this is what adding two items
+    // quickly actually does.
+    const [a, b] = await Promise.all([
+      addItem(user.id, { dessertId: first.id, itemPriceInCents: 1200 }),
+      addItem(user.id, { dessertId: second.id, itemPriceInCents: 800 }),
+    ])
+
+    expect(a.status).toBe(201)
+    expect(b.status).toBe(201)
+
+    const cart = await db.cart.findUnique({
+      where: { userId: user.id },
+      include: { cartItems: true },
+    })
+
+    expect(cart?.cartItems).toHaveLength(2)
+    expect(cart?.totalPriceInCents).toBe(2000)
+  })
+
+  it("keeps the total right when several adds land together", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(500)
+
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        addItem(user.id, { dessertId: dessert.id, itemPriceInCents: 500 }),
+      ),
+    )
+
+    for (const res of results) expect(res.status).toBe(201)
+
+    const cart = await db.cart.findUnique({
+      where: { userId: user.id },
+      include: { cartItems: true },
+    })
+
+    // Each add is its own row and the totals move by increment, so the result
+    // is the sum rather than whichever write finished last.
+    expect(cart?.cartItems).toHaveLength(4)
+    expect(cart?.totalPriceInCents).toBe(2000)
+  })
+
 })
