@@ -64,7 +64,7 @@ export const DessertCard = React.memo(
           disabled={
             loyaltyPoints ? loyaltyPoints < dessert.priceInLoyaltyPoints : false
           }
-          className="bg-primary rounded-lg p-3 items-center w-1/2  mx-auto"
+          className={`${loyaltyPoints && loyaltyPoints < dessert.priceInLoyaltyPoints ? "bg-gray-300" : "bg-primary"} rounded-lg p-3 items-center w-1/2  mx-auto`}
         >
           {token ? (
             <View className="flex-col items-center justify-center">
