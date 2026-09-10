@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { findFirst } = vi.hoisted(() => ({ findFirst: vi.fn() }))
+const { findMany } = vi.hoisted(() => ({ findMany: vi.fn() }))
 
-vi.mock("./db", () => ({ db: { loyaltyWinner: { findFirst } } }))
+vi.mock("./db", () => ({ db: { loyaltyWinner: { findMany } } }))
 
 import { organiseLeaderboardDetails } from "./leaderboardDetails"
 
-/** What the select in findLastMonthsWinner hands back for a winner. */
-const winner = (over: Partial<Record<string, unknown>> = {}) => ({
+/** One row shaped the way findLastMonthsWinners selects it. */
+const winner = (
+  place: number,
+  over: Record<string, unknown> = {},
+) => ({
+  place,
   user: {
     firstName: "Ana",
     lastName: "Ruiz",
@@ -17,7 +21,7 @@ const winner = (over: Partial<Record<string, unknown>> = {}) => ({
 })
 
 beforeEach(() => {
-  findFirst.mockReset().mockResolvedValue(winner())
+  findMany.mockReset().mockResolvedValue([winner(1)])
 })
 
 describe("organiseLeaderboardDetails", () => {
@@ -32,7 +36,7 @@ describe("organiseLeaderboardDetails", () => {
     // anonymity setting, so an opted-out winner was named to every customer who
     // had not opted out themselves — and to anyone at all, since the endpoint
     // this feeds is unauthenticated and publicly cacheable.
-    findFirst.mockResolvedValue(winner({ anonymousEnabled: true }))
+    findMany.mockResolvedValue([winner(1, { anonymousEnabled: true })])
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
       lastMonthsWinner: "Anonymous",
@@ -40,9 +44,9 @@ describe("organiseLeaderboardDetails", () => {
   })
 
   it("still announces an anonymous winner who has no name on file", async () => {
-    findFirst.mockResolvedValue(
-      winner({ firstName: null, lastName: null, anonymousEnabled: true }),
-    )
+    findMany.mockResolvedValue([
+      winner(1, { firstName: null, lastName: null, anonymousEnabled: true }),
+    ])
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
       lastMonthsWinner: "Anonymous",
@@ -50,38 +54,95 @@ describe("organiseLeaderboardDetails", () => {
   })
 
   it("reports no winner when the month had none", async () => {
-    findFirst.mockResolvedValue(null)
+    findMany.mockResolvedValue([])
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
       lastMonthsWinner: null,
+      lastMonthsTopThree: [],
     })
   })
 
   it("reports no winner when the winning account has since been deleted", async () => {
-    // LoyaltyWinner.user is a nullable relation, so the row can outlive nothing
-    // but still arrive without a user attached.
-    findFirst.mockResolvedValue({ user: null })
+    // LoyaltyWinner.user is a nullable relation, and closing an account now
+    // nulls the link rather than deleting the row.
+    findMany.mockResolvedValue([{ place: 1, user: null }])
+
+    await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
+      lastMonthsWinner: null,
+      lastMonthsTopThree: [],
+    })
+  })
+
+  it("reports no winner rather than half a name", async () => {
+    findMany.mockResolvedValue([winner(1, { lastName: null })])
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
       lastMonthsWinner: null,
     })
   })
 
-  it("reports no winner rather than half a name", async () => {
-    findFirst.mockResolvedValue(winner({ lastName: null }))
+  it("returns the whole podium in place order", async () => {
+    findMany.mockResolvedValue([
+      winner(1, { firstName: "Ana", lastName: "Ruiz" }),
+      winner(2, { firstName: "Sam", lastName: "Lee" }),
+      winner(3, { firstName: "Kit", lastName: "Patel" }),
+    ])
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
-      lastMonthsWinner: null,
+      lastMonthsTopThree: [
+        { place: 1, name: "Ana Ruiz" },
+        { place: 2, name: "Sam Lee" },
+        { place: 3, name: "Kit Patel" },
+      ],
     })
+  })
+
+  it("decides anonymity per winner, not for the podium", async () => {
+    // Second place opting out says nothing about first or third.
+    findMany.mockResolvedValue([
+      winner(1, { firstName: "Ana", lastName: "Ruiz" }),
+      winner(2, { anonymousEnabled: true }),
+      winner(3, { firstName: "Kit", lastName: "Patel" }),
+    ])
+
+    await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
+      lastMonthsWinner: "Ana Ruiz",
+      lastMonthsTopThree: [
+        { place: 1, name: "Ana Ruiz" },
+        { place: 2, name: "Anonymous" },
+        { place: 3, name: "Kit Patel" },
+      ],
+    })
+  })
+
+  it("keeps lastMonthsWinner working for app builds that predate the podium", async () => {
+    // Dropping this field would blank the banner on every phone that has not
+    // been updated, and this endpoint is public and publicly cached.
+    findMany.mockResolvedValue([winner(1), winner(2), winner(3)])
+
+    const details = await organiseLeaderboardDetails()
+
+    expect(details.lastMonthsWinner).toBe("Ana Ruiz")
+  })
+
+  it("still names first place when a runner-up has no name", async () => {
+    findMany.mockResolvedValue([
+      winner(1, { firstName: "Ana", lastName: "Ruiz" }),
+      { place: 2, user: null },
+    ])
+
+    const details = await organiseLeaderboardDetails()
+
+    expect(details.lastMonthsWinner).toBe("Ana Ruiz")
+    expect(details.lastMonthsTopThree).toEqual([{ place: 1, name: "Ana Ruiz" }])
   })
 
   it("asks for last month, not this one", async () => {
     await organiseLeaderboardDetails()
 
-    const asked = findFirst.mock.calls[0][0].where
-    const now = new Date()
+    const asked = findMany.mock.calls[0][0].where
     const nzThisMonth = Number(
-      now.toLocaleString("en-NZ", {
+      new Date().toLocaleString("en-NZ", {
         timeZone: "Pacific/Auckland",
         month: "numeric",
       }),
@@ -93,11 +154,12 @@ describe("organiseLeaderboardDetails", () => {
   })
 
   it("survives a database error without taking the whole payload down", async () => {
-    findFirst.mockRejectedValue(new Error("connection reset"))
+    findMany.mockRejectedValue(new Error("connection reset"))
 
     await expect(organiseLeaderboardDetails()).resolves.toMatchObject({
       show: true,
       lastMonthsWinner: null,
+      lastMonthsTopThree: [],
     })
   })
 })

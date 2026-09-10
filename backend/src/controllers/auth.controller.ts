@@ -1249,16 +1249,27 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
       _sum: {
         change: true,
       },
+      _max: {
+        createdAt: true,
+      },
       orderBy: [
         {
           _sum: {
             change: "desc",
           },
         },
-        // Ties need a deterministic second key or Postgres is free to order
-        // equal sums however the plan happens to emit them: three customers
-        // level across positions 9-11 meant one refresh put you at #10 and the
-        // next at #11, and tied leaders traded gold and silver.
+        // A tie goes to whoever got there first: of two customers level on
+        // points, the one whose last qualifying earning came earlier.
+        //
+        // Ties need *some* deterministic key or Postgres orders equal sums
+        // however the plan happens to emit them — three customers level across
+        // positions 9-11 meant one refresh put you at #10 and the next at #11.
+        // This particular key is the one settleMonthlyWinners uses to decide who
+        // is actually paid, and the two must not disagree: the board a customer
+        // watched all month has to be the board that pays out.
+        { _max: { createdAt: "asc" } },
+        // Last resort, for two customers whose final earning landed in the same
+        // millisecond. Arbitrary, but total — without it the order is undefined.
         { loyaltyId: "asc" },
       ],
     })

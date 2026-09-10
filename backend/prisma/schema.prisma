@@ -350,18 +350,60 @@ model LoyaltyRecord {
 }
 
 model LoyaltyWinner {
-  id             String    @id @default(cuid())
-  userId         String?
-  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  results        String[]
-  month          Int
-  year           Int
-  points         Int
-  createdAt      DateTime  @default(now())
-  rewardPickedUp DateTime?
+  id     String  @id @default(cuid())
+  userId String?
+  /// SetNull rather than Cascade: closing an account used to delete the record that
+  /// they had won, which the shop still needs afterwards. Nulling the link anonymises
+  /// the row instead, and leaves the prize unclaimable — correct, since there is no
+  /// longer anyone to claim it.
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// 1, 2 or 3. Defaults to 1 so every row written while only first place was
+  /// recorded is already a valid first place under the unique index below.
+  place  Int     @default(1)
 
-  @@unique([month, year]) // only one winner per month
+  month     Int
+  year      Int
+  points    Int
+  createdAt DateTime @default(now())
+
+  reward WinnerReward?
+
+  @@unique([month, year, place]) // one winner per place per month
   @@index([userId])
+}
+
+/// What the shop owes a monthly winner, and the code they collect it with.
+///
+/// Deliberately not an Offer: OfferAudience has no way to name one person, and
+/// renewMochiOffer resets `used` on every OfferRedemption row weekly, which would make
+/// a won prize collectable again every Monday.
+model WinnerReward {
+  id       String        @id @default(cuid())
+  winnerId String        @unique
+  winner   LoyaltyWinner @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+
+  /// Free text. The prize is whatever the shop decides and differs per winner, so
+  /// there is nothing structured to model here.
+  title       String
+  description String?
+
+  /// Shown at the counter and typed in by staff. Stored readable because the winner
+  /// re-reads it every time they open the app, so it cannot be a one-way hash the way
+  /// User.resetToken is. What protects it is that only an ADMIN request can test a
+  /// code at all, plus 30^8 of entropy and a single-use claim.
+  code String @unique
+
+  /// End of the month after the one that was won, so assigning late does not extend
+  /// the deadline. Hard: past this the app stops showing the code and the counter
+  /// refuses it.
+  expiresAt DateTime
+
+  assignedAt        DateTime  @default(now())
+  assignedByAdminId String?
+  redeemedAt        DateTime?
+  redeemedByAdminId String?
+
+  @@index([redeemedAt])
 }
 
 model Cart {
