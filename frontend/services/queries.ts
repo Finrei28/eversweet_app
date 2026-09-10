@@ -9,7 +9,6 @@ import {
   getRestaurantStatus,
   getStoreInfo,
   getTermAndConditions,
-  getUserLoyaltyPoints,
   getLoyaltyRates,
   getUserOrders,
   getUserOrdersPage,
@@ -33,7 +32,6 @@ export const queryKeys = {
   restaurantStatus: ["restaurant-status"] as const,
   privacyPolicy: ["privacy-policy"] as const,
   termsAndConditions: ["terms-and-conditions"] as const,
-  loyaltyPoints: ["loyalty-points"] as const,
   loyaltyRates: ["loyalty-rates"] as const,
   customisations: (dessertId: string) =>
     ["customisations", dessertId] as const,
@@ -90,13 +88,6 @@ export const useLeaderboardQuery = ({ enabled = true }: AuthedOptions = {}) =>
   useQuery({
     queryKey: queryKeys.leaderboard,
     queryFn: getLeaderBoard,
-    enabled,
-  })
-
-export const useLoyaltyPointsQuery = ({ enabled = true }: AuthedOptions = {}) =>
-  useQuery({
-    queryKey: queryKeys.loyaltyPoints,
-    queryFn: getUserLoyaltyPoints,
     enabled,
   })
 
