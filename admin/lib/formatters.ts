@@ -157,3 +157,32 @@ export const formatCustomisation = (line: OrderCustomisation) =>
   isRemoval(line)
     ? `No ${line.customisation.name}`
     : `+${line.quantity} ${line.customisation.name}`
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+]
+
+/**
+ * A leaderboard month, e.g. "August 2026".
+ *
+ * `month` is 1-indexed because that is how the server stores it — the same
+ * convention that, read as 0-indexed, once made the admin dashboard show no
+ * winner for the whole of January.
+ */
+export const formatLeaderboardMonth = (month: number, year: number) =>
+  `${MONTH_NAMES[month - 1] ?? "Unknown"} ${year}`
+
+/** "1st", "2nd", "3rd" — the podium only ever goes to three. */
+export const formatPlace = (place: number) =>
+  place === 1 ? "1st" : place === 2 ? "2nd" : place === 3 ? "3rd" : `${place}th`

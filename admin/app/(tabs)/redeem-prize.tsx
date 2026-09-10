@@ -20,10 +20,8 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { redeemPrizeCode, verifyPrizeCode } from "@/services/api"
 import { getErrorMessage } from "@/utilities/getError"
 import { formatAsTyped, isComplete } from "@/lib/prizeCode"
+import { formatLeaderboardMonth, formatPlace } from "@/lib/formatters"
 import { PrizeCodeCheck } from "@/lib/types"
-
-const placeLabel = (place: number) =>
-  place === 1 ? "1st" : place === 2 ? "2nd" : place === 3 ? "3rd" : `${place}th`
 
 /**
  * Collects a prize from a code the customer shows.
@@ -48,14 +46,25 @@ export default function RedeemPrize() {
   const [check, setCheck] = useState<PrizeCodeCheck | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  /** What was just handed over, kept after `check` is cleared. */
+  const [collected, setCollected] = useState<{
+    name: string
+    title: string
+  } | null>(null)
 
   const complete = isComplete(code)
+
+  const winner = check?.winner ?? null
+  const winnerName =
+    [winner?.firstName, winner?.lastName].filter(Boolean).join(" ") ||
+    "Name unavailable"
 
   const reset = useCallback(() => {
     setCode("")
     setCheck(null)
     setProblem(null)
     setDone(false)
+    setCollected(null)
   }, [])
 
   // A code handed in from the winners screen. Applied once per distinct value:
@@ -68,6 +77,7 @@ export default function RedeemPrize() {
       setCheck(null)
       setProblem(null)
       setDone(false)
+      setCollected(null)
     }
   }, [fromWinnersScreen])
 
@@ -88,6 +98,7 @@ export default function RedeemPrize() {
       setCheck(null)
       setProblem(null)
       setDone(false)
+      setCollected(null)
     }
   }
 
@@ -111,6 +122,10 @@ export default function RedeemPrize() {
     try {
       setRedeeming(true)
       await redeemPrizeCode(code)
+      setCollected({
+        name: winnerName,
+        title: winner?.reward?.title ?? "their prize",
+      })
       setDone(true)
       Toast.show({
         type: "success",
@@ -199,14 +214,33 @@ export default function RedeemPrize() {
 
           {check?.valid && !done && (
             <View className="bg-white rounded-xl p-4 mt-4 shadow-sm">
+              {/* Which month, because a customer can be holding prizes from
+                  more than one — "2nd place" on its own does not say which. */}
               <Text className="text-xs font-semibold text-indigo-600">
-                {`${placeLabel(check.winner.place)} place`}
+                {`${formatPlace(check.winner.place)} place · ${formatLeaderboardMonth(check.winner.month, check.winner.year)}`}
               </Text>
-              <Text className="text-xl font-bold mt-1">
-                {[check.winner.firstName, check.winner.lastName]
-                  .filter(Boolean)
-                  .join(" ") || "Name unavailable"}
+              <Text className="text-xl font-bold mt-1">{winnerName}</Text>
+              <Text className="text-xs text-gray-500 mt-0.5">
+                {`${check.winner.points} points that month`}
               </Text>
+
+              {/* A prize assigned before the customer closed their account
+                  keeps a live code, so this can be valid with nobody behind it.
+                  Staff decide — but they have to be told, or all they see is
+                  "Name unavailable" and no reason for it. */}
+              {check.winner.accountClosed && (
+                <View className="flex-row items-start bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={18}
+                    color="#B45309"
+                  />
+                  <Text className="ml-2 flex-1 text-xs text-amber-800">
+                    This customer has closed their account. The code is still
+                    valid — use your judgement.
+                  </Text>
+                </View>
+              )}
 
               <View className="border-t border-gray-100 mt-3 pt-3">
                 <Text className="text-gray-500 text-xs">Hand over</Text>
@@ -216,6 +250,11 @@ export default function RedeemPrize() {
                 {check.winner.reward?.description ? (
                   <Text className="text-sm text-gray-500 mt-1">
                     {check.winner.reward.description}
+                  </Text>
+                ) : null}
+                {check.winner.reward?.expiresAt ? (
+                  <Text className="text-xs text-gray-500 mt-2">
+                    {`Collectable until ${new Date(check.winner.reward.expiresAt).toLocaleDateString("en-NZ", { timeZone: "Pacific/Auckland" })}`}
                   </Text>
                 ) : null}
               </View>
@@ -241,7 +280,20 @@ export default function RedeemPrize() {
             <View className="bg-white rounded-xl p-6 mt-4 shadow-sm items-center border border-green-200">
               <Ionicons name="checkmark-circle" size={48} color="#059669" />
               <Text className="text-lg font-semibold mt-2">Collected</Text>
-              <Text className="text-gray-500 text-center mt-1">
+              {/* Repeated rather than cleared: staff get interrupted between
+                  confirming and actually handing the thing over, and this is
+                  the only place left saying what it was and who it is for. */}
+              {collected && (
+                <>
+                  <Text className="text-gray-900 font-medium text-center mt-2">
+                    {collected.title}
+                  </Text>
+                  <Text className="text-gray-500 text-center mt-0.5">
+                    {`for ${collected.name}`}
+                  </Text>
+                </>
+              )}
+              <Text className="text-gray-500 text-xs text-center mt-2">
                 Recorded against your account.
               </Text>
               <TouchableOpacity

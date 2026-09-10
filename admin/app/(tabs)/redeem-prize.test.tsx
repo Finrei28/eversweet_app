@@ -151,7 +151,59 @@ describe("collecting a prize", () => {
     const text = textOf(tree)
     expect(text).toContain("Ana Ruiz")
     expect(text).toContain("A free tub of mochi")
+    expect(text).toContain("Any flavour")
     expect(text).toContain("2nd place")
+  })
+
+  it("says which month it was won", async () => {
+    // A customer can be holding prizes from more than one month, and staff may
+    // be handing over an old one. "2nd place" alone does not say which.
+    await act(async () => {
+      tree = create(<RedeemPrize />)
+    })
+    await type(tree, CODE)
+    await press(tree, "Check code")
+
+    expect(textOf(tree)).toContain("August 2026")
+  })
+
+  it("shows what they earned and how long they have left", async () => {
+    await act(async () => {
+      tree = create(<RedeemPrize />)
+    })
+    await type(tree, CODE)
+    await press(tree, "Check code")
+
+    const text = textOf(tree)
+    expect(text).toContain("640 points")
+    expect(text).toContain("Collectable until")
+  })
+
+  it("warns when the winner has closed their account", async () => {
+    // A prize assigned before the account closed keeps a live code, so this can
+    // be valid with nobody behind it — and all staff would otherwise see is
+    // "Name unavailable" with no reason for it.
+    mockVerifyPrizeCode.mockResolvedValue({
+      ...validCheck,
+      winner: {
+        ...validCheck.winner,
+        accountClosed: true,
+        firstName: null,
+        lastName: null,
+      },
+    })
+
+    await act(async () => {
+      tree = create(<RedeemPrize />)
+    })
+    await type(tree, CODE)
+    await press(tree, "Check code")
+
+    const text = textOf(tree)
+    expect(text).toContain("closed their account")
+    expect(text).toContain("Name unavailable")
+    // Still collectable — staff decide, they are just told.
+    expect(buttonSaying(tree, "Mark as collected")).toBeDefined()
   })
 
   it("does not collect anything just by checking", async () => {
@@ -175,6 +227,21 @@ describe("collecting a prize", () => {
 
     expect(mockRedeemPrizeCode).toHaveBeenCalledWith(CODE)
     expect(textOf(tree)).toContain("Collected")
+  })
+
+  it("keeps saying what was handed over, and to whom", async () => {
+    // Staff get interrupted between confirming and handing the thing over.
+    // Once the check is cleared this panel is the only record left on screen.
+    await act(async () => {
+      tree = create(<RedeemPrize />)
+    })
+    await type(tree, CODE)
+    await press(tree, "Check code")
+    await press(tree, "Mark as collected")
+
+    const text = textOf(tree)
+    expect(text).toContain("A free tub of mochi")
+    expect(text).toContain("Ana Ruiz")
   })
 
   it("says a prize was already collected, and does not offer to hand it over", async () => {
