@@ -18,6 +18,51 @@ directory**.
 Eversweet is a New Zealand dessert shop. Everything is single-store, NZD, GST-inclusive,
 and `Pacific/Auckland` wall-clock time.
 
+### The database schema lives in another repo
+
+`backend/prisma/` has no `migrations/` directory, which makes this look like a
+`prisma db push` project. **It is not.** The migration history — 80-odd migrations — belongs
+to the separate Eversweet **website** project at `C:\Personal Projects\eversweet`, which
+shares this database. The two `prisma/schema.prisma` files are kept **byte-for-byte
+identical**.
+
+So never run `prisma migrate` here, and never hand-edit `backend/prisma/schema.prisma` on
+its own. To change the schema:
+
+```bash
+# 1. Edit the schema in the website project
+cd "C:/Personal Projects/eversweet"
+vim prisma/schema.prisma
+
+# 2. Generate the migration there. --create-only when the SQL needs hand-writing,
+#    which it does for anything destructive.
+npx prisma migrate dev --name <name>          # or: npm run db:generate
+npx prisma migrate dev --create-only --name <name>
+
+# 3. Mirror the schema back, byte for byte
+cp prisma/schema.prisma "<this repo>/backend/prisma/schema.prisma"
+
+# 4. Regenerate the client here
+cd "<this repo>/backend" && npx prisma generate
+```
+
+Production is `npm run db:migrate` (`prisma migrate deploy`) from the website project,
+against `DIRECT_URL` — DDL through the pooled `DATABASE_URL` is unreliable.
+
+`npx prisma db push` **is** still how the local and CI test databases are built here; that
+is a separate database and does not touch the migration history.
+
+House style for a migration is set by
+`prisma/migrations/20260908000000_offer_audience_and_redemption_rekey/migration.sql`: a
+header saying what Prisma's own generated SQL would have done and why this differs, then
+add-backfill-**assert**-drop, with the assertion load-bearing. Prisma wraps each migration
+in a transaction, so a failed assertion rolls the whole thing back rather than leaving a
+half-migrated table. Name new indexes and constraints the way Prisma would, so a later
+`migrate diff` reports empty instead of proposing a rebuild.
+
+Mind the version skew: the website is on Prisma 5.14, this backend on 6.19. One schema, one
+database, migrations authored from the website — so don't reach for 6.x-only syntax.
+
 ## Commands
 
 ### backend/
