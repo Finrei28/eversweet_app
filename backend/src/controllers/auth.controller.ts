@@ -13,7 +13,11 @@ import { loyaltyRates } from "../lib/loyaltyRates"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
 import { getErrorMessage } from "../utils/getError"
-import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
+import {
+  checkPickUpTime,
+  getDaysOffKeys,
+  nzMonthRange,
+} from "../lib/tradingHours"
 import { calculateCartPrice } from "../lib/cartPricing"
 import { redeemableAudiences } from "../lib/offerAudience"
 
@@ -1220,41 +1224,57 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const date = new Date()
-    const start = new Date(date.getFullYear(), date.getMonth(), 1)
-    const end = new Date(date.getFullYear(), date.getMonth() + 1, 1)
+    // The New Zealand month, because that is what the app's copy promises and
+    // what calculateMonthlyWinner settles against. This filter spent a while
+    // commented out, which quietly turned the board into an all-time ranking
+    // that disagreed with its own description — and left the query summing every
+    // positive loyalty record ever written, for every customer, on each view.
+    const { start, end } = nzMonthRange(new Date())
 
     const leaderboard = await db.loyaltyRecord.groupBy({
       by: ["loyaltyId"],
       where: {
+        // Earnings only. `change > 0` alone is not enough: a refunded redemption
+        // is written back as a *positive* record, so redeeming points and then
+        // having the order cancelled left the points on the board — repeatably,
+        // with the balance restored. `reason` is a free-form string rather than
+        // an enum, so this pairs with the sign rather than replacing it.
         change: { gt: 0 },
-        // createdAt: {
-        //   gte: start,
-        //   lt: end,
-        // },
+        reason: "EARNED",
+        createdAt: {
+          gte: start,
+          lt: end,
+        },
       },
       _sum: {
         change: true,
       },
-      orderBy: {
-        _sum: {
-          change: "desc",
+      orderBy: [
+        {
+          _sum: {
+            change: "desc",
+          },
         },
-      },
+        // Ties need a deterministic second key or Postgres is free to order
+        // equal sums however the plan happens to emit them: three customers
+        // level across positions 9-11 meant one refresh put you at #10 and the
+        // next at #11, and tied leaders traded gold and silver.
+        { loyaltyId: "asc" },
+      ],
     })
 
-    const usersLoyalty = await db.loyalty.upsert({
+    // Read, not upsert: this is a GET, and the upsert it replaces created a
+    // Loyalty row as a side effect of merely looking at the leaderboard. A
+    // customer who has never earned anything has no row, which findIndex already
+    // reports as unranked.
+    const usersLoyalty = await db.loyalty.findUnique({
       where: { userId },
-      create: {
-        userId,
-        points: 0,
-      },
-      update: {},
+      select: { id: true },
     })
 
-    const userRankIndex = leaderboard.findIndex(
-      (r) => r.loyaltyId === usersLoyalty.id,
-    )
+    const userRankIndex = usersLoyalty
+      ? leaderboard.findIndex((r) => r.loyaltyId === usersLoyalty.id)
+      : -1
 
     const top10 = leaderboard.slice(0, 10)
 
