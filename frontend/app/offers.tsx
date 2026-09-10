@@ -15,9 +15,11 @@ import BouncingLoader from "@/_components/loader"
 import OfferCard from "@/_components/offerCard"
 import AudienceBadge from "@/_components/audienceBadge"
 import OfferModal from "@/_components/offerModal"
-import { useOffersQuery } from "@/services/queries"
+import { PrizeCard } from "@/_components/prizeCard"
+import { PrizeCodeModal } from "@/_components/prizeCodeModal"
+import { useMyPrizesQuery, useOffersQuery } from "@/services/queries"
 import { useAuth } from "@/store/authProvider"
-import { Offer, Offers, OfferViewer } from "@/utils/types"
+import { Offer, Offers, OfferViewer, Prize } from "@/utils/types"
 import { getOfferState, groupOffers } from "@/lib/offerHelpers"
 
 /** Until the first fetch lands, assume the least: no perks, nothing unlocked. */
@@ -30,6 +32,8 @@ export default function OffersPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [offerModal, setOfferModal] = useState(false)
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null)
+  const [prizeModal, setPrizeModal] = useState(false)
+  const [selectedPrize, setSelectedPrize] = useState<Prize | null>(null)
 
   const {
     data,
@@ -37,6 +41,13 @@ export default function OffersPage() {
     refetch: getOffers,
     isStale,
   } = useOffersQuery({ enabled: !!token })
+
+  // Separate query rather than folded into the offers payload: a prize is not
+  // an offer, and the server keeps them apart for the same reason.
+  const { data: prizeData, refetch: refetchPrizes } = useMyPrizesQuery({
+    enabled: !!token,
+  })
+  const prizes = useMemo(() => prizeData ?? [], [prizeData])
 
   // Memoised so the fallbacks don't hand back a fresh array/object each render
   // and defeat the grouping memo below.
@@ -61,7 +72,9 @@ export default function OffersPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await getOffers()
+    // Both, because a prize can be collected at the counter while this screen
+    // is open and the card should stop offering a code that has been spent.
+    await Promise.all([getOffers(), refetchPrizes()])
     setRefreshing(false)
   }
 
@@ -72,6 +85,11 @@ export default function OffersPage() {
   const handleRedeem = useCallback((offer: Offer) => {
     setSelectedOffer(offer)
     setOfferModal(true)
+  }, [])
+
+  const handleShowCode = useCallback((prize: Prize) => {
+    setSelectedPrize(prize)
+    setPrizeModal(true)
   }, [])
 
   // OfferModal wants a plain thunk; refetch resolves with the query result.
@@ -144,6 +162,25 @@ export default function OffersPage() {
         <View className="flex-row justify-between items-center mt-6 mb-4 px-1">
           <Text className="text-2xl font-bold">Offers</Text>
         </View>
+
+        {/* Above the empty state on purpose. `nothingToShow` replaces everything
+            inside the branch below, so a prize rendered in there would vanish
+            exactly when the customer has no other offers — which is the moment
+            it matters most. */}
+        {prizes.length > 0 && (
+          <View className="mb-2">
+            <Text className="text-lg font-semibold mb-3 px-1">
+              {prizes.length > 1 ? "Your prizes" : "Your prize"}
+            </Text>
+            {prizes.map((prize) => (
+              <PrizeCard
+                key={prize.id}
+                prize={prize}
+                onShowCode={handleShowCode}
+              />
+            ))}
+          </View>
+        )}
 
         {nothingToShow ? (
           <View className="bg-white rounded-xl shadow-sm p-6 items-center mb-6">
@@ -230,6 +267,14 @@ export default function OffersPage() {
           offerModal={offerModal}
           setOfferModal={setOfferModal}
           refetchOffers={refetchOffers}
+        />
+      )}
+
+      {prizeModal && selectedPrize && (
+        <PrizeCodeModal
+          prize={selectedPrize}
+          visible={prizeModal}
+          onClose={() => setPrizeModal(false)}
         />
       )}
     </View>

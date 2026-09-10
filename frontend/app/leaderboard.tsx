@@ -458,6 +458,20 @@ export default function LeaderBoardPage() {
     return Math.max(1, leaderboard[9].pointsEarned - userRank.points + 1)
   }, [userRank, leaderboard])
 
+  /*
+   * The podium, or first place alone from a server that predates it. Both
+   * fields are sent; `lastMonthsWinner` is what builds already on people's
+   * phones read, and dropping it would blank their banner.
+   */
+  const lastMonthsPodium = useMemo(() => {
+    const podium = leaderboardDetails?.lastMonthsTopThree
+    if (podium && podium.length > 0) return podium
+
+    return leaderboardDetails?.lastMonthsWinner
+      ? [{ place: 1, name: leaderboardDetails.lastMonthsWinner }]
+      : []
+  }, [leaderboardDetails])
+
   const goToMenu = useCallback(() => router.push("/menu"), [router])
 
   // Hooks cannot run conditionally, so every early return sits below them.
@@ -553,18 +567,41 @@ export default function LeaderBoardPage() {
         </View>
 
         {/* A strip, not a card: this is a hook, and it must not out-weigh the
-            customer's own standing below it. The name is taken as the server
-            sends it — the server decides whether the winner may be named, since
-            it is the only place that knows the *winner's* privacy setting. */}
-        {leaderboardDetails?.lastMonthsWinner && (
-          <View className="bg-secondary rounded-xl px-4 py-3 flex-row items-center mb-4">
-            <MaterialCommunityIcons name="crown" size={20} color={LOGO_BROWN} />
-            <Text className="ml-2 flex-1 text-sm text-gray-700">
-              Last month&apos;s winner:{" "}
-              <Text className="font-semibold">
-                {leaderboardDetails.lastMonthsWinner}
+            customer's own standing below it. Names are taken as the server
+            sends them — the server decides who may be named, since it is the
+            only place that knows each winner's own privacy setting. */}
+        {lastMonthsPodium.length > 0 && (
+          <View className="bg-secondary rounded-xl px-4 py-3 mb-4">
+            <View className="flex-row items-center">
+              <MaterialCommunityIcons
+                name="crown"
+                size={20}
+                color={LOGO_BROWN}
+              />
+              <Text className="ml-2 text-sm font-semibold text-gray-700">
+                Last month&apos;s top {lastMonthsPodium.length === 1 ? "spot" : lastMonthsPodium.length}
               </Text>
-            </Text>
+            </View>
+            <View className="mt-1.5">
+              {lastMonthsPodium.map((winner) => (
+                <View
+                  key={winner.place}
+                  className="flex-row items-center mt-0.5"
+                  accessible
+                  accessibilityLabel={`${PLACE_WORDS[winner.place as Place] ?? winner.place} place, ${winner.name}`}
+                >
+                  <Text className="text-sm text-gray-700 w-6">
+                    {winner.place}.
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    className="flex-1 text-sm font-semibold text-gray-700"
+                  >
+                    {winner.name}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </View>
         )}
 

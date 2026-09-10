@@ -253,8 +253,43 @@ export type LoyaltyRates = {
 export type LeaderBoardDetails = {
   show: boolean
   description: string
+  /** First place only. Kept for builds that predate the podium. */
   lastMonthsWinner: string | null
+  /**
+   * Last month's podium, already redacted per winner. Optional because a
+   * server that predates it will not send it — and because the app must not
+   * decide anonymity itself: only the server knows each winner's setting.
+   */
+  lastMonthsTopThree?: { place: number; name: string }[]
 }
+
+/**
+ * A month the customer finished in the top three, and what they won for it.
+ *
+ * `reward` is null while staff have not yet decided on a prize — a real state,
+ * and the one a winner is in until the shop gets round to it.
+ */
+export type Prize = {
+  id: string
+  place: number
+  month: number
+  year: number
+  points: number
+  reward: {
+    title: string
+    description: string | null
+    expiresAt: string
+    redeemedAt: string | null
+    /**
+     * Only present while the counter would actually honour it. The server
+     * withholds it once the prize expires or is collected, so the app can
+     * never show a code that is about to be refused in a queue.
+     */
+    code: string | null
+  } | null
+}
+
+export type Prizes = Prize[]
 
 export type Announcement = {
   title: string

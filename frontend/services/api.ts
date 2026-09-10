@@ -22,6 +22,7 @@ import {
   LeaderBoardDetails,
   Menu,
   Order,
+  Prizes,
 } from "@/utils/types"
 import { formatDayStamp } from "@/lib/formatters"
 import { normaliseStoreHours } from "@/lib/businessHours"
@@ -582,3 +583,10 @@ export const getLeaderBoard = async (): Promise<{
   apiRequest("/api/auth/getLeaderBoard", {
     authMessage: "Please sign in to view the leaderboard",
   })
+
+export const getMyPrizes = async (): Promise<Prizes> => {
+  const data = await apiRequest<{ prizes: Prizes }>("/api/auth/getMyPrizes", {
+    authMessage: "Please sign in to see your prizes",
+  })
+  return data.prizes ?? []
+}
