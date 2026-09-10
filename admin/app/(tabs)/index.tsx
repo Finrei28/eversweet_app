@@ -7,9 +7,9 @@ import { OrderQueueIndicator } from "@/components/order-queue-indicator"
 import { OrdersOverviewChart } from "@/components/orders-overview-chart"
 import { SummaryCard } from "@/components/summary-card"
 import { formatCurrency } from "@/lib/formatters"
-import { Overview, WinnerDetails } from "@/lib/types"
+import { Overview, MonthlyWinners } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
-import { getLoyaltyWinner, getOverviewAPI } from "@/services/api"
+import { getMonthlyWinners, getOverviewAPI } from "@/services/api"
 import socketService from "@/services/socket-service"
 import { useOrderStore } from "@/store/order-store"
 import { useSocketStore } from "@/store/socket-store"
@@ -36,20 +36,31 @@ export default function Dashboard() {
   const isConnected = useSocketStore((state) => state.isConnected)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
-  const [loyaltyWinner, setLoyaltyWinner] = useState<WinnerDetails | null>(null)
+  const [podium, setPodium] = useState<MonthlyWinners | null>(null)
 
   const getOverview = async () => {
     try {
       setLoadingOverview(true)
-      const overViewData = await getOverviewAPI()
-      const winnerDetails = await getLoyaltyWinner()
-      setOverview(overViewData)
-      if (winnerDetails.firstName && winnerDetails.lastName) {
-        setLoyaltyWinner(winnerDetails)
+      // Independent of each other, so run them together rather than in series —
+      // and settled, so a failure in one still renders the other. This used to
+      // await them in turn inside a `catch {}` that swallowed everything, which
+      // rendered any failure as "No winner".
+      const [overviewResult, podiumResult] = await Promise.allSettled([
+        getOverviewAPI(),
+        getMonthlyWinners(),
+      ])
+
+      if (overviewResult.status === "fulfilled") {
+        setOverview(overviewResult.value)
       } else {
-        setLoyaltyWinner(null)
+        console.error("Failed to load the overview:", overviewResult.reason)
       }
-    } catch (error) {
+
+      if (podiumResult.status === "fulfilled") {
+        setPodium(podiumResult.value)
+      } else {
+        console.error("Failed to load the podium:", podiumResult.reason)
+      }
     } finally {
       setLoadingOverview(false)
     }
@@ -60,6 +71,11 @@ export default function Dashboard() {
       getOverview()
     }, []),
   )
+
+  const podiumWinners = podium?.winners ?? []
+  const prizesToGiveOut = podiumWinners.filter(
+    (winner) => !winner.reward && !winner.accountClosed,
+  ).length
 
   // We'll show the 5 most recent orders on the dashboard
   const recentOrders = [...currentOrders]
@@ -140,18 +156,66 @@ export default function Dashboard() {
             color="#EF4444"
             isLoading={loadingOverview}
           />
-          <SummaryCard
-            title="Loyalty Winner"
-            value={
-              loyaltyWinner
-                ? loyaltyWinner.firstName + " " + loyaltyWinner.lastName
-                : "No winner"
-            }
-            icon="medal-outline"
-            color="#FFD700"
-            isLoading={loadingOverview}
-          />
         </View>
+
+        {/* Last month's podium, and how many still owe a prize. Full width
+            rather than a summary tile: it is a list of three people and a job
+            that has to be done, not a number. */}
+        <TouchableOpacity
+          className="bg-white rounded-xl p-4 mt-2 shadow-sm"
+          onPress={() => router.push("/leaderboard-prizes")}
+          activeOpacity={0.7}
+        >
+          <View className="flex-row items-center justify-between mb-2">
+            <View className="flex-row items-center">
+              <View
+                style={{ backgroundColor: "#FFD70015" }}
+                className="w-8 h-8 rounded-full items-center justify-center mr-2"
+              >
+                <Ionicons name="medal-outline" size={18} color="#FFD700" />
+              </View>
+              <Text className="text-gray-500 font-medium">
+                Last Month&apos;s Winners
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+          </View>
+
+          {loadingOverview ? (
+            <View className="h-7 w-3/4 bg-gray-200 rounded-md mt-1 animate-pulse" />
+          ) : podiumWinners.length === 0 ? (
+            <Text className="text-gray-400">No winners recorded</Text>
+          ) : (
+            <>
+              {podiumWinners.map((winner) => (
+                <View
+                  key={winner.id}
+                  className="flex-row items-center justify-between py-1"
+                >
+                  <Text className="text-gray-800" numberOfLines={1}>
+                    {`${winner.place}. ${[winner.firstName, winner.lastName].filter(Boolean).join(" ") || "Name unavailable"}`}
+                  </Text>
+                  {winner.reward ? (
+                    <Text className="text-xs text-gray-500">
+                      {winner.reward.redeemedAt ? "Collected" : "Prize set"}
+                    </Text>
+                  ) : (
+                    <Text className="text-xs font-medium text-amber-700">
+                      Needs a prize
+                    </Text>
+                  )}
+                </View>
+              ))}
+              {prizesToGiveOut > 0 && (
+                <Text className="text-xs text-amber-700 mt-2">
+                  {prizesToGiveOut === 1
+                    ? "1 prize still to set"
+                    : `${prizesToGiveOut} prizes still to set`}
+                </Text>
+              )}
+            </>
+          )}
+        </TouchableOpacity>
 
         {/* Orders Chart */}
         {overview && (

@@ -5,6 +5,10 @@ import {
   PrepTimes,
   RestaurantStatus,
   WinnerDetails,
+  MonthlyWinners,
+  MonthlyWinner,
+  WinnerReward,
+  PrizeCodeCheck,
 } from "@/lib/types"
 import { getToken, isUserAuthorised } from "./auth"
 import { getErrorMessage } from "@/utilities/getError"
@@ -422,5 +426,149 @@ export const getLoyaltyWinner = async (): Promise<WinnerDetails> => {
     return data.winnerDetails
   } catch (error) {
     throw new Error(getErrorMessage(error, "Could not fetch loyalty winner"))
+  }
+}
+
+/**
+ * Last month's podium by default, or a named month.
+ *
+ * Names come back unredacted — staff have to hand a prize to a person, so this
+ * deliberately ignores the anonymity the public board honours.
+ */
+export const getMonthlyWinners = async (
+  period?: { month: number; year: number },
+): Promise<MonthlyWinners> => {
+  try {
+    const token = await getToken()
+    if (!(await isUserAuthorised())) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const query = period ? `?month=${period.month}&year=${period.year}` : ""
+    const res = await fetch(`${url}/api/admin/getMonthlyWinners${query}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(getErrorMessage(data, "Failed to get monthly winners"))
+    }
+
+    return data
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Could not fetch monthly winners"))
+  }
+}
+
+/** Sets or edits a winner's prize. The code is minted on the first assign. */
+export const assignWinnerReward = async (input: {
+  winnerId: string
+  title: string
+  description?: string | null
+}): Promise<WinnerReward> => {
+  try {
+    const token = await getToken()
+    if (!(await isUserAuthorised())) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const res = await fetch(`${url}/api/admin/assignWinnerReward`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(input),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(getErrorMessage(data, "Failed to save the reward"))
+    }
+
+    return data.reward
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Could not save the reward"))
+  }
+}
+
+/**
+ * Reads a code without spending it.
+ *
+ * The whole point of the two steps: staff see who is standing there and what
+ * the shop owes them before anything is committed, so a mistyped code that
+ * happens to land on somebody else's prize costs nothing.
+ *
+ * A refused code still answers 200-shaped data through the thrown message, so
+ * callers get "already collected at 2:14pm" rather than a bare failure.
+ */
+export const verifyPrizeCode = async (
+  code: string,
+): Promise<PrizeCodeCheck> => {
+  try {
+    const token = await getToken()
+    if (!(await isUserAuthorised())) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const res = await fetch(
+      `${url}/api/admin/verifyPrizeCode?code=${encodeURIComponent(code)}`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    )
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(
+        getErrorMessage(data, "That code does not match a prize."),
+      )
+    }
+
+    return data
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Could not check that code"))
+  }
+}
+
+/** Marks a prize collected. Refuses a second time, saying when the first was. */
+export const redeemPrizeCode = async (
+  code: string,
+): Promise<{ redeemed: boolean; winner: MonthlyWinner }> => {
+  try {
+    const token = await getToken()
+    if (!(await isUserAuthorised())) {
+      throw new Error("You're unauthorised to access this!")
+    }
+
+    const res = await fetch(`${url}/api/admin/redeemPrizeCode`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ code }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(getErrorMessage(data, "Could not collect that prize"))
+    }
+
+    return data
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Could not collect that prize"))
   }
 }
