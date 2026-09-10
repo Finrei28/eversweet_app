@@ -79,6 +79,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="redeem-prize"
+        options={{
+          title: "Prizes",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="ticket-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Keyboard,
@@ -13,20 +13,14 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native"
-import { useLocalSearchParams } from "expo-router"
+import { useFocusEffect, useLocalSearchParams } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import Toast from "react-native-toast-message"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { redeemPrizeCode, verifyPrizeCode } from "@/services/api"
 import { getErrorMessage } from "@/utilities/getError"
+import { formatAsTyped, isComplete } from "@/lib/prizeCode"
 import { PrizeCodeCheck } from "@/lib/types"
-
-/** Groups the code as the customer's screen shows it, while they type. */
-const formatAsTyped = (raw: string) => {
-  const bare = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8)
-  return bare.length > 4 ? `${bare.slice(0, 4)}-${bare.slice(4)}` : bare
-}
-
-const bareLength = (formatted: string) => formatted.replace(/-/g, "").length
 
 const placeLabel = (place: number) =>
   place === 1 ? "1st" : place === 2 ? "2nd" : place === 3 ? "3rd" : `${place}th`
@@ -48,20 +42,43 @@ export default function RedeemPrize() {
   const [code, setCode] = useState(() =>
     fromWinnersScreen ? formatAsTyped(fromWinnersScreen) : "",
   )
+  const appliedParam = useRef<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [redeeming, setRedeeming] = useState(false)
   const [check, setCheck] = useState<PrizeCodeCheck | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
-  const complete = bareLength(code) === 8
+  const complete = isComplete(code)
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setCode("")
     setCheck(null)
     setProblem(null)
     setDone(false)
-  }
+  }, [])
+
+  // A code handed in from the winners screen. Applied once per distinct value:
+  // the param stays on the route after a reset, so without the ref, returning
+  // to this tab would silently refill the box with the last customer's code.
+  useEffect(() => {
+    if (fromWinnersScreen && fromWinnersScreen !== appliedParam.current) {
+      appliedParam.current = fromWinnersScreen
+      setCode(formatAsTyped(fromWinnersScreen))
+      setCheck(null)
+      setProblem(null)
+      setDone(false)
+    }
+  }, [fromWinnersScreen])
+
+  // Cleared on the way out, so the next customer at the counter never finds the
+  // previous one's name and prize already on screen. A tab stays mounted, so
+  // without this the state would simply sit there between servings.
+  useFocusEffect(
+    useCallback(() => {
+      return () => reset()
+    }, [reset]),
+  )
 
   const onChange = (raw: string) => {
     setCode(formatAsTyped(raw))
@@ -119,6 +136,7 @@ export default function RedeemPrize() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         className="flex-1 bg-gray-50"
       >
+        <DashboardHeader title="Collect a Prize" />
         <ScrollView
           className="flex-1 px-4"
           contentContainerStyle={{ paddingBottom: 40 }}
@@ -141,7 +159,6 @@ export default function RedeemPrize() {
               maxLength={9}
               onSubmitEditing={() => complete && runCheck()}
               returnKeyType="search"
-              autoFocus={!fromWinnersScreen}
             />
             {code.length > 0 && (
               <TouchableOpacity onPress={reset}>

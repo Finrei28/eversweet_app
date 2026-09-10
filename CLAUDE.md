@@ -92,7 +92,7 @@ cannot start, so the container route is unavailable — and the test database is
 standalone PostgreSQL 16.4 cluster there: binaries in `pgsql\`, data in `data\`, log in
 `server.log`. It is deliberately outside OneDrive, because syncing a live data directory
 corrupts it. `backend/.env` already carries the matching `TEST_DATABASE_URL`, so
-`npm test` runs all 154 tests with nothing exported.
+`npm test` runs the whole suite with nothing exported.
 
 It is not registered as a Windows service, so it needs starting after a reboot:
 
@@ -119,11 +119,15 @@ npm run android / npm run ios / npm run web
 npx tsc --noEmit                 # CI type check
 npx expo lint                    # CI lint (errors fail, warnings don't)
 npx eslint app/checkout.tsx      # one file
+npm test                         # jest (jest-expo), CI runs this
+npm run test:watch
+npx jest _components/prizeCard   # one file
 npm run verify:lock              # see below
 ```
 
-- **`npm test` is `jest --watchAll` and there are no test files.** It never exits — do not
-  run it non-interactively. Frontend CI deliberately has no test step.
+- `npm test` is `jest` (exits) and `npm run test:watch` is `jest --watchAll`, matching
+  `admin/`. It used to be `--watchAll` with no test files, which never exited; Frontend CI
+  now runs `npm test -- --ci`.
 - **Prefer `npm ci` over `npm install` here, especially on Windows**: a plain install
   prunes the pinned `@emnapi/*` devDependencies and breaks Frontend CI.
 - Run `npm run verify:lock` after any change to the `overrides` block or the lockfile. EAS
