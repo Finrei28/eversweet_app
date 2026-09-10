@@ -15,6 +15,7 @@ import {
   updateAnonymousStatus,
   updateUser,
 } from "../controllers/auth.controller"
+import { getMyPrizes } from "../controllers/prize.controller"
 import { authenticateToken } from "../middleware/authentication"
 import { idempotency } from "../middleware/idempotency"
 import {
@@ -70,6 +71,7 @@ router.post("/createOrder", authenticateToken, idempotency("createOrder"), creat
 router.get("/orderStatus/:id", authenticateToken, orderStatus)
 router.get("/showOffers", authenticateToken, showOffers)
 router.get("/getLeaderBoard", authenticateToken, getLeaderBoard)
+router.get("/getMyPrizes", authenticateToken, getMyPrizes)
 router.patch("/updateAnonymousStatus", authenticateToken, updateAnonymousStatus)
 
 export default router

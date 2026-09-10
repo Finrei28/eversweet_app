@@ -196,3 +196,62 @@ export const serviceLimiter = rateLimit({
     error: "Too many requests.",
   },
 })
+
+// ==========================================
+// TIER 4: Prize Codes (Counter Operations)
+// ==========================================
+
+/**
+ * Keyed on the staff account, because every till in the shop shares one egress
+ * address. An IP-keyed limiter here would let one busy counter lock out every
+ * other one mid-service, which is the same trap `serviceLimiter` documents.
+ *
+ * Falls back to the IP only if `authenticateToken` somehow did not run — these
+ * routes always sit behind it, so that path should be unreachable.
+ */
+const adminKeyGenerator = (req: Request): string => {
+  const userId = (req as Request & { userId?: string }).userId
+  return typeof userId === "string" && userId
+    ? userId
+    : ipKeyGenerator(req.ip ?? "")
+}
+
+/**
+ * Guards the two endpoints that take a prize code.
+ *
+ * `verifyPrizeCode` reads without committing, which makes it an oracle: it says
+ * whether a code exists. That is only reachable with an ADMIN token, so this is
+ * not sized against the internet — it is sized to keep a compromised or
+ * borrowed staff account from walking the 30^8 code space, while leaving far
+ * more headroom than a counter could ever use. Someone re-typing a code four
+ * times because the screen is cracked must not be cut off mid-service.
+ *
+ * Its own Redis prefix, deliberately: sharing `rate-limit:login:*` would let
+ * counter traffic spend the budget that keeps staff able to sign in at all.
+ */
+export const prizeCodeLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // A counter tries a handful; a script wants millions
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: adminKeyGenerator,
+  store: makeStore("rate-limit:prize-code:"),
+  message: {
+    status: 429,
+    error: "Too many prize code attempts. Please wait a moment.",
+  },
+})
+
+/** The day-long backstop, so a slow walk over many hours is bounded too. */
+export const prizeCodeDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: adminKeyGenerator,
+  store: makeStore("rate-limit:prize-code-daily:"),
+  message: {
+    status: 429,
+    error: "Too many prize code attempts today.",
+  },
+})

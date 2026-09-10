@@ -38,6 +38,8 @@ vi.mock("../middleware/rateLimiter", () => {
     otpEmailMediumLimiter: passThrough,
     otpEmailLongLimiter: passThrough,
     serviceLimiter: passThrough,
+    prizeCodeLimiter: passThrough,
+    prizeCodeDailyLimiter: passThrough,
   }
 })
 
