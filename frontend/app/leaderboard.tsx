@@ -6,6 +6,7 @@ import { LeaderBoard, UserLeaderBoardRank } from "@/utils/types"
 import { router } from "expo-router"
 import React, { useEffect, useMemo } from "react"
 import { FlatList, View, Text } from "react-native"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 const getRankStyle = (index: number) => {
   if (index === 0) return { bg: "", label: "🥇" } // gold
@@ -134,9 +135,19 @@ export default function LeaderBoardPage() {
               </View>
 
               {/* RIGHT */}
-              <View style={{ flexShrink: 0 }}>
+              <View
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                {!isEmpty && (
+                  <SweetPointIcon size={14} accessibilityLabel="points" />
+                )}
                 <Text style={{ fontWeight: "600" }}>
-                  {isEmpty ? "-" : `${item.pointsEarned.toLocaleString()} pts`}
+                  {isEmpty ? "-" : item.pointsEarned.toLocaleString()}
                 </Text>
               </View>
             </View>
@@ -158,9 +169,20 @@ export default function LeaderBoardPage() {
                 {`Your Rank: ${userRank ? "#" + userRank.position : "-"}`}
               </Text>
 
-              <Text style={{ color: "#fff" }}>
-                {userRank ? userRank.points.toLocaleString() : "-"} pts
-              </Text>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+              >
+                {userRank && (
+                  <SweetPointIcon
+                    size={14}
+                    color="#FFFFFF"
+                    accessibilityLabel="points"
+                  />
+                )}
+                <Text style={{ color: "#fff" }}>
+                  {userRank ? userRank.points.toLocaleString() : "-"}
+                </Text>
+              </View>
             </View>
             {leaderboardDetails?.description && (
               <Text className="py-3 text-sm text-gray-500 px-5">

@@ -13,6 +13,7 @@ import {
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 import { getErrorMessage } from "@/utils/getError"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 // Module scope: defining this inside Profile gives it a new component identity
 // on every render, which unmounts and remounts the whole menu each time.
@@ -136,9 +137,12 @@ export default function Profile() {
             <Text className="text-gray-500 text-lg mb-2">
               Your Points Balance
             </Text>
-            <Text className="font-bold text-4xl text-primary mb-2">
-              {loyaltyPoints ?? 0}
-            </Text>
+            <View className="flex-row items-center gap-2 mb-2">
+              <SweetPointIcon size={28} />
+              <Text className="font-bold text-4xl text-primary">
+                {loyaltyPoints ?? 0}
+              </Text>
+            </View>
             <TouchableOpacity
               className="bg-primary/10 px-4 py-2 rounded-full mt-2"
               onPress={() => navigateTo("/rewards")}

@@ -21,6 +21,7 @@ import AntDesign from "@expo/vector-icons/AntDesign"
 import BouncingLoader from "@/_components/loader"
 import { useCustomisationsQuery } from "@/services/queries"
 import { formatCurrency } from "@/lib/formatters"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 import { useAuth } from "@/store/authProvider"
 import {
   calculateBestDiscountedPrice,
@@ -368,7 +369,13 @@ export default function CustomModal({
                             </Text>
                           )
                         ) : (
-                          <Text className="font-bold">{points} points</Text>
+                          <View className="flex flex-row items-center gap-1.5">
+                            <SweetPointIcon
+                              size={16}
+                              accessibilityLabel="points"
+                            />
+                            <Text className="font-bold">{points}</Text>
+                          </View>
                         )}
                       </View>
                     </View>

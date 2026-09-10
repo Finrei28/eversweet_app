@@ -18,6 +18,7 @@ import CustomModal from "@/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
 import { useAuth } from "@/store/authProvider"
 import { DessertCard } from "@/_components/dessertCard"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 export default function Loyalty() {
   const { token, authLoading, usersMembership } = useAuth()
@@ -190,9 +191,12 @@ export default function Loyalty() {
                   </ScrollView>
                 )}
                 <View className="flex flex-row justify-center items-center gap-3 my-6">
-                  <Text className="font-bold text-4xl ">Points:</Text>
+                  <SweetPointIcon size={28} />
                   <Text className="font-bold text-4xl text-primary">
                     {loyaltyPoints ?? 0}
+                  </Text>
+                  <Text className="font-bold text-2xl text-gray-500">
+                    points
                   </Text>
                 </View>
                 {selectedCategory ? (

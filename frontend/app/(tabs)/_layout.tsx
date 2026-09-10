@@ -3,6 +3,7 @@ import React from "react"
 import { Tabs } from "expo-router"
 import Entypo from "@expo/vector-icons/Entypo"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 
@@ -89,8 +90,8 @@ export default function _layout() {
           title: "Rewards",
           tabBarIcon: ({ color, focused }) => (
             <TabIcon focused={focused}>
-              <Ionicons
-                name={focused ? "star" : "star-outline"}
+              <SweetPointIcon
+                variant={focused ? "filled" : "outline"}
                 color={color}
                 size={ICON_SIZE}
               />
