@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import request from "supertest"
 
 import { redisStub as redis } from "../test/redisStub"
+import app from "../app"
 import { db } from "../lib/db"
-import { describeIfDb, resetDatabase } from "../test/db"
+import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeUser } from "../test/factories"
 import { nzMonthRange } from "../lib/tradingHours"
 import { settleMonthlyWinners } from "./client.controller"
@@ -284,5 +286,103 @@ describeIfDb("settleMonthlyWinners", () => {
     await db.user.delete({ where: { id: winner.user.id } })
 
     expect(await podium()).toEqual([{ place: 1, userId: null, points: 900 }])
+  })
+})
+
+describeIfDb("POST /api/admin/settleMonth", () => {
+  let adminId: string
+
+  beforeEach(async () => {
+    await resetDatabase()
+    redis.clear()
+    redis.recover()
+    adminId = (await makeUser()).id
+    await db.user.update({ where: { id: adminId }, data: { role: "ADMIN" } })
+  })
+
+  const settle = (body: unknown, who = adminId) =>
+    request(app)
+      .post("/api/admin/settleMonth")
+      .set("Authorization", `Bearer ${tokenFor(who, "ADMIN")}`)
+      .send(body as object)
+
+  it("settles the month it was asked for, not some other one", async () => {
+    // The endpoint turns an absolute (month, year) into the offset
+    // settleMonthlyWinners counts backwards by. An off-by-one here settles the
+    // wrong month — the exact shape of bug this feature has already had twice.
+    const target = nzMonthRange(new Date(), -2)
+    await makeEarner([
+      { change: 300, at: new Date(target.start.getTime() + 3600 * 1000) },
+    ])
+
+    const res = await settle({ month: target.month, year: target.year })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      month: target.month,
+      year: target.year,
+      recorded: 1,
+    })
+  })
+
+  it("settles the right month across a year boundary", async () => {
+    // December of the previous year, requested from whatever month it is now.
+    const target = nzMonthRange(new Date(), -13)
+
+    const res = await settle({ month: target.month, year: target.year })
+
+    expect(res.body).toMatchObject({ month: target.month, year: target.year })
+  })
+
+  it("refuses the month currently being competed for", async () => {
+    const now = nzMonthRange(new Date())
+
+    const res = await settle({ month: now.month, year: now.year })
+
+    expect(res.status).toBe(400)
+    expect(res.body.message).toMatch(/not finished/i)
+  })
+
+  it("refuses a future month", async () => {
+    const next = nzMonthRange(new Date(), 1)
+
+    expect((await settle({ month: next.month, year: next.year })).status).toBe(
+      400,
+    )
+  })
+
+  it("refuses a month outside 1 to 12", async () => {
+    expect((await settle({ month: 0, year: 2026 })).status).toBe(400)
+    expect((await settle({ month: 13, year: 2026 })).status).toBe(400)
+    expect((await settle({ month: "7", year: 2026 })).status).toBe(400)
+  })
+
+  it("refuses a nonsense year", async () => {
+    expect((await settle({ month: 7, year: 1066 })).status).toBe(400)
+    expect((await settle({ month: 7 })).status).toBe(400)
+  })
+
+  it("writes nothing the second time", async () => {
+    const target = nzMonthRange(new Date(), -2)
+    await makeEarner([
+      { change: 300, at: new Date(target.start.getTime() + 3600 * 1000) },
+    ])
+
+    await settle({ month: target.month, year: target.year })
+    const second = await settle({ month: target.month, year: target.year })
+
+    expect(second.body.recorded).toBe(0)
+  })
+
+  it("refuses a non-admin", async () => {
+    const customer = await makeUser()
+    const target = nzMonthRange(new Date(), -2)
+
+    const res = await request(app)
+      .post("/api/admin/settleMonth")
+      .set("Authorization", `Bearer ${tokenFor(customer.id)}`)
+      .send({ month: target.month, year: target.year })
+
+    expect(res.status).toBe(403)
   })
 })

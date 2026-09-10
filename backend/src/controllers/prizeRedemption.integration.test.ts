@@ -200,6 +200,138 @@ describeIfDb("prize rewards", () => {
     })
   })
 
+  describe("GET /api/admin/getMonthlyWinners", () => {
+    const podium = (period?: { month: number; year: number }) =>
+      request(app)
+        .get("/api/admin/getMonthlyWinners")
+        .query(period ?? {})
+        .set("Authorization", asAdmin(adminId))
+
+    it("defaults to the month that just ended", async () => {
+      await makeWinner({ place: 1 })
+      const { month, year } = lastMonth()
+
+      const res = await podium()
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ month, year })
+      expect(res.body.winners).toHaveLength(1)
+    })
+
+    it("returns the places in order", async () => {
+      await makeWinner({ place: 3 })
+      await makeWinner({ place: 1 })
+      await makeWinner({ place: 2 })
+
+      const res = await podium()
+
+      expect(res.body.winners.map((w: { place: number }) => w.place)).toEqual([
+        1, 2, 3,
+      ])
+    })
+
+    it("carries the reward and its code so staff can serve a lost phone", async () => {
+      const { reward } = await makeWinner({ reward: {} })
+
+      const res = await podium()
+
+      expect(res.body.winners[0].reward).toMatchObject({
+        title: "A free tub of mochi",
+        code: formatPrizeCode(reward!.code),
+        redeemedAt: null,
+        expired: false,
+      })
+    })
+
+    it("flags a prize nobody collected in time", async () => {
+      await makeWinner({
+        reward: { expiresAt: new Date(Date.now() - 1000) },
+      })
+
+      const res = await podium()
+
+      expect(res.body.winners[0].reward.expired).toBe(true)
+    })
+
+    it("says when there is nothing to assign a prize to", async () => {
+      const { winner } = await makeWinner()
+      await db.loyaltyWinner.update({
+        where: { id: winner.id },
+        data: { userId: null },
+      })
+
+      const res = await podium()
+
+      expect(res.body.winners[0]).toMatchObject({
+        accountClosed: true,
+        firstName: null,
+      })
+    })
+
+    it("names a winner who opted out of the public board", async () => {
+      // Deliberate asymmetry, and worth pinning: the customer-facing banner
+      // redacts an anonymous winner, but staff have to hand the prize to a
+      // person, so this endpoint does not.
+      const { user } = await makeWinner()
+      await db.user.update({
+        where: { id: user.id },
+        data: { anonymousEnabled: true },
+      })
+
+      const res = await podium()
+
+      expect(res.body.winners[0]).toMatchObject({
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })
+    })
+
+    it("reads an older month when asked", async () => {
+      const older = nzMonthRange(new Date(), -4)
+      const user = await makeUser()
+      await db.loyaltyWinner.create({
+        data: {
+          userId: user.id,
+          place: 1,
+          month: older.month,
+          year: older.year,
+          points: 120,
+        },
+      })
+
+      const res = await podium({ month: older.month, year: older.year })
+
+      expect(res.body).toMatchObject({ month: older.month, year: older.year })
+      expect(res.body.winners).toHaveLength(1)
+    })
+
+    it("falls back to last month when the query is nonsense", async () => {
+      await makeWinner({ place: 1 })
+      const { month, year } = lastMonth()
+
+      const res = await podium({ month: 99, year: 1066 } as never)
+
+      expect(res.body).toMatchObject({ month, year })
+    })
+
+    it("returns an empty podium for a month nobody won", async () => {
+      const res = await podium({ month: 1, year: 2001 })
+
+      expect(res.status).toBe(200)
+      expect(res.body.winners).toEqual([])
+    })
+
+    it("refuses a non-admin", async () => {
+      const customer = await makeUser()
+
+      const res = await request(app)
+        .get("/api/admin/getMonthlyWinners")
+        .set("Authorization", `Bearer ${tokenFor(customer.id)}`)
+
+      expect(res.status).toBe(403)
+    })
+  })
+
   describe("GET /api/admin/verifyPrizeCode", () => {
     const verify = (code: string) =>
       request(app)
