@@ -59,17 +59,31 @@ const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
 const isDeadlock = (error: unknown) =>
   error instanceof Error && error.message.includes("40P01")
 
-const isCartUniqueConflict = (error: unknown) =>
+/**
+ * The two codes a lost race to create the first cart can arrive as.
+ *
+ * P2002 is the obvious one: both adds took upsert's create branch and one lost
+ * the unique index on Cart.userId.
+ *
+ * P2014 is the same race wearing a different hat, and missing it is what made
+ * four simultaneous adds return a 500. `Cart.user` is a required one-to-one, so
+ * when the loser's `create` runs after the winner has committed, Prisma reads
+ * its `connect` as detaching the cart the winner just made and reports a
+ * violated relation instead of a duplicate key. Nothing is wrong with the
+ * request - the cart it wanted to create simply already exists - so it retries
+ * on exactly the same reasoning as P2002.
+ */
+const isCartCreateConflict = (error: unknown) =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === "P2002"
+  (error.code === "P2002" || error.code === "P2014")
 
 /**
- * Runs `work`, retrying once for the two conflicts that are a normal part of
+ * Runs `work`, retrying once for the conflicts that are a normal part of
  * concurrent cart writes rather than a fault.
  *
- * P2002: two adds racing to create the same customer's first cart both take
- * upsert's create branch, and one loses the unique index on Cart.userId. The
- * cart exists by then, so the retry takes the update branch.
+ * P2002 / P2014: two adds racing to create the same customer's first cart. The
+ * cart exists by the time the loser retries, so the retry takes the update
+ * branch. See `isCartCreateConflict` for why one race produces two codes.
  *
  * 40P01: a deadlock. Consistent lock ordering makes these rare rather than
  * impossible - Postgres can still pick a victim when index or tuple locks
@@ -83,7 +97,7 @@ const retryOnCartConflict = async <T>(work: () => Promise<T>): Promise<T> => {
   try {
     return await work()
   } catch (error) {
-    if (isCartUniqueConflict(error) || isDeadlock(error)) {
+    if (isCartCreateConflict(error) || isDeadlock(error)) {
       return work()
     }
 
