@@ -14,8 +14,10 @@ import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { getErrorMessage } from "../utils/getError"
-import { cached, CACHE_KEYS } from "../lib/cache"
+import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
+import { nzMonthRange } from "../lib/tradingHours"
+import { Prisma } from "@prisma/client"
 
 /*
  * Where an admin endpoint exists to make one of these wrong it calls
@@ -426,9 +428,16 @@ export const getDaysOff = async (req: Request, res: Response) => {
 
 export const getLoyaltyWinner = async (req: Request, res: Response) => {
   try {
-    const now = new Date()
-    const month = now.getMonth()
-    const year = now.getFullYear()
+    // The month that just ended — the same one calculateMonthlyWinner writes.
+    //
+    // This used to read `now.getMonth()`, which is 0-indexed, against months the
+    // cron stores 1-indexed. It looked right for eleven months of the year by
+    // coincidence: 0-indexed September (8) matches stored August (8). In January
+    // `getMonth()` is 0, no row can ever carry month 0, and the admin dashboard
+    // showed no winner for the whole month — while December's lookup also asked
+    // for the wrong year.
+    const { month, year } = nzMonthRange(new Date(), -1)
+
     const winner = await db.loyaltyWinner.findUnique({
       where: {
         month_year: { month, year },
@@ -486,13 +495,13 @@ export async function getEstimatedPickUpTime(req: Request, res: Response) {
 }
 
 export async function calculateMonthlyWinner() {
-  const now = new Date()
+  // Scheduled at NZ midnight on the 1st, so the month that just ended is the one
+  // to settle. The bounds have to come from the New Zealand calendar and not the
+  // host's: this ran on `new Date(y, m - 1, 1)` under Render's UTC clock, where
+  // NZ's 1 September is still 31 August, so it kept recomputing the month before
+  // the one it wanted. See nzMonthRange for the full account.
+  const { start, end, month, year } = nzMonthRange(new Date(), -1)
 
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const end = new Date(now.getFullYear(), now.getMonth(), 1)
-
-  const month = start.getMonth() + 1
-  const year = start.getFullYear()
   try {
     const leaderboard = await db.loyaltyRecord.groupBy({
       by: ["loyaltyId"],
@@ -548,6 +557,8 @@ export async function calculateMonthlyWinner() {
             },
           })
 
+          // Safe: this loyaltyId came out of the groupBy above under exactly
+          // this filter, so at least one matching record must exist.
           return {
             loyaltyId: entry.loyaltyId,
             createdAt: latestRecord!.createdAt,
@@ -555,6 +566,9 @@ export async function calculateMonthlyWinner() {
         }),
       )
 
+      // A tie goes to whoever got there first: sorted ascending on each tied
+      // customer's *last* earning, so the one who stopped needing to earn
+      // earliest takes it.
       latestRecords.sort(
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
       )
@@ -576,7 +590,25 @@ export async function calculateMonthlyWinner() {
         points: highestPoints,
       },
     })
+
+    // The banner in the app reads this through a 5 minute cache, so without
+    // this the new winner appears minutes after the month turns over.
+    await invalidate(CACHE_KEYS.leaderboardDetails)
   } catch (error) {
-    console.error(error)
+    // A duplicate is the expected outcome, not a failure: cron.schedule runs in
+    // every process, so instances race this insert and @@unique([month, year])
+    // is what settles it. Naming the month matters — an unlabelled console.error
+    // here is what hid the timezone bug above for months, because the P2002 it
+    // logged looked like noise rather than like "this job computed the wrong
+    // month and is overwriting history".
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      console.log(`Monthly winner for ${month}/${year} was already recorded`)
+      return
+    }
+
+    console.error(`Failed to settle the ${month}/${year} winner:`, error)
   }
 }

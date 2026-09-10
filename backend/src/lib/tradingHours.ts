@@ -1,4 +1,4 @@
-import { formatInTimeZone } from "date-fns-tz"
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 import { db } from "./db"
 import { storeHours } from "./storeInfo"
 
@@ -35,6 +35,55 @@ export const nzCalendarDay = (date: Date) =>
 /** The New Zealand weekday name at `date`, e.g. "Monday". */
 export const nzDayName = (date: Date) =>
   formatInTimeZone(date, NZ_TIMEZONE, "EEEE")
+
+/**
+ * The New Zealand calendar month containing `date` — as a half-open range of
+ * instants, plus the 1-indexed month number and year naming it.
+ *
+ * The loyalty leaderboard is monthly on the New Zealand calendar and its winner
+ * cron fires at NZ midnight on the 1st, but the API runs on Render in UTC. Every
+ * month boundary in that feature used to be worked out with `new Date(y, m, 1)`,
+ * which is server-local: on a UTC host the boundary landed 12-13 hours early, so
+ * the cron firing at NZ midnight on 1 September computed *July's* window, tried
+ * to insert a July row that already existed, and had the resulting P2002
+ * swallowed. After its first successful run it never recorded a winner again.
+ *
+ * `offset` steps whole months — -1 is the month that just ended. It is applied
+ * as integer arithmetic on the month number rather than by mutating a Date with
+ * `setMonth`, which overflows: asking a 31 March date for the previous month
+ * produced "31 February", which normalises forward into March.
+ *
+ * Both bounds go through `fromZonedTime`, so the daylight saving switch in late
+ * September and early April is the zone's problem rather than arithmetic's.
+ */
+export const nzMonthRange = (date: Date, offset = 0) => {
+  const year = Number(formatInTimeZone(date, NZ_TIMEZONE, "yyyy"))
+  const monthIndex = Number(formatInTimeZone(date, NZ_TIMEZONE, "MM")) - 1
+
+  // Normalised through a single count of months since year 0, so an offset that
+  // crosses New Year wraps the year with it and no month ever lands outside 1-12.
+  const absolute = year * 12 + monthIndex + offset
+  const targetYear = Math.floor(absolute / 12)
+  const targetMonth = absolute - targetYear * 12 + 1
+
+  return {
+    start: nzMonthStart(targetYear, targetMonth),
+    end: nzMonthStart(targetYear, targetMonth + 1),
+    month: targetMonth,
+    year: targetYear,
+  }
+}
+
+/** NZ midnight on the 1st, taking a 13th month to mean January of the next year. */
+const nzMonthStart = (year: number, month: number) => {
+  const rolledYear = month > 12 ? year + 1 : year
+  const rolledMonth = month > 12 ? month - 12 : month
+
+  return fromZonedTime(
+    `${rolledYear}-${String(rolledMonth).padStart(2, "0")}-01T00:00:00`,
+    NZ_TIMEZONE,
+  )
+}
 
 /** Minutes past New Zealand midnight at `date`. */
 const nzMinutesOfDay = (date: Date) => {
