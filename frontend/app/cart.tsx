@@ -13,6 +13,7 @@ import { router } from "expo-router"
 import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
 import { CartItems } from "@/_components/cartitems"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -108,7 +109,15 @@ export default function CartPage() {
                   <Text className="text-lg font-bold text-right">
                     Total: {formatCurrency(total / 100)}
                   </Text>
-                  {total > 0 && <Text>Earnable points: {earnablePoints}</Text>}
+                  {total > 0 && (
+                    <View className="flex-row items-center justify-end gap-1">
+                      <Text className="text-gray-500">Earn</Text>
+                      <SweetPointIcon size={14} accessibilityLabel="points" />
+                      <Text className="font-semibold text-primary">
+                        {earnablePoints}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
 

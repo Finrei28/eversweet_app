@@ -5,6 +5,7 @@ import { Router } from "expo-router"
 import React, { useMemo } from "react"
 import { View, Text, TouchableOpacity } from "react-native"
 import { CachedImage } from "@/_components/cachedImage"
+import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 type DessertCardProps = {
   dessert: Dessert
@@ -99,9 +100,16 @@ export const DessertCard = React.memo(
                   )}
                 </>
               ) : (
-                <Text className="text-white font-bold text-lg">
-                  {dessert.priceInLoyaltyPoints} points
-                </Text>
+                <View className="flex-row items-center gap-1.5">
+                  <SweetPointIcon
+                    size={16}
+                    color="#FFFFFF"
+                    accessibilityLabel="points"
+                  />
+                  <Text className="text-white font-bold text-lg">
+                    {dessert.priceInLoyaltyPoints}
+                  </Text>
+                </View>
               )}
             </View>
           ) : (
