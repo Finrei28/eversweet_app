@@ -1,3 +1,12 @@
+/**
+ * Tests for app/(tabs)/redeem-prize.tsx, deliberately not beside it.
+ *
+ * Expo Router turns every file under app/ into a route and requires it at boot,
+ * so a test file there is a screen. This one crashed the app on launch with
+ * "Property 'jest' doesn't exist" the moment the router reached it. expo-router
+ * ignores only +html, +api and +middleware — there is no test pattern — so
+ * nothing under app/ may be a test, however much it wants to sit by its screen.
+ */
 import {
   act,
   create,
@@ -33,7 +42,7 @@ jest.mock("@/services/api", () => ({
   redeemPrizeCode: (...args: unknown[]) => mockRedeemPrizeCode(...args),
 }))
 
-import RedeemPrize from "./redeem-prize"
+import RedeemPrize from "@/app/(tabs)/redeem-prize"
 
 const CODE = "7K4M-Q92X"
 
