@@ -1186,9 +1186,12 @@ export const showOffers = async (req: Request, res: Response) => {
       },
     })
 
+    // `discountAmount` used to be serialised here with `.toNumber()`, because it was a
+    // Decimal and a decimal.js instance is not something to put on the wire. It is a
+    // plain Int since the 2026-09-12 migration, so the spread already carries it and the
+    // old line is now a TypeError on every offer that has one.
     const serializedOffers = offers.map((o) => ({
       ...o,
-      discountAmount: o.discountAmount ? o.discountAmount.toNumber() : null,
       dessert: o.dessert
         ? {
             ...o.dessert,

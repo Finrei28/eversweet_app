@@ -105,11 +105,27 @@ model Offer {
   description      String?
   image            String?
   isActive         Boolean            @default(true)
+  /// The offer runs only while `isActive` AND inside this window. NULL is "no bound" on
+  /// either end, which is how every offer written before these columns existed behaves -
+  /// unchanged. Mirrors Promo.startsAt/endsAt and is read through the same predicate,
+  /// isWithinActiveWindow.
+  startsAt         DateTime?
+  endsAt           DateTime?
+  /// Soft delete. Offers are never removed: OrderDessert.offer and CartItem.offer both
+  /// cascade from here, so deleting one takes the order lines that used it - and the
+  /// shop's sales history - with it.
+  archivedAt       DateTime?
   audience         OfferAudience      @default(MEMBERS)
   dessertId        String?
   categoryId       String?
   itemPriceInCents Int?
-  discountAmount   Decimal?
+  /// Whole percent off, 0-100. Was a Decimal holding a fraction (0.2 meaning 20%), which
+  /// put a decimal.js instance on every wire and read as `x * 100` in the app and
+  /// `1 - x` in the cart. Int matches every other discount here (Promo.value,
+  /// MembershipPlan.membershipDiscount).
+  ///
+  /// Ignored entirely when itemPriceInCents is set - that wins.
+  discountAmount   Int?
   limit            Int                @default(1)
   requirements     OfferRequirement[]
   cartItems        CartItem[]
@@ -141,7 +157,6 @@ model OfferRedemption {
   userId     String
   unlockedAt DateTime    @default(now())
   redeemedAt DateTime?
-  renewsAt   DateTime?
   status     OfferStatus
   used       Int         @default(0)
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
