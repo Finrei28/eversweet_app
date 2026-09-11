@@ -726,15 +726,31 @@ export const updatePrepTimeSettings = async (req: Request, res: Response) => {
   }
 }
 
-export const renewMochiOffer = async () => {
+/**
+ * Monday morning: hand back the offers that renew every week.
+ *
+ * This was `updateMany({ data: { used: 0 } })` with no `where` at all, so it reset the
+ * usage counter on every OfferRedemption row in the database rather than the weekly
+ * mochi perk it is named after. Harmless only while `status` was written REDEEMED on
+ * every use and the gate read `status`; now that REDEEMED means "used up to the limit",
+ * an unscoped reset would hand back every requirement-gated offer once a week - which is
+ * the thing the admin's Close run deletes redemption rows to prevent.
+ *
+ * `status` moves with `used`. OfferRedemption.status has no @default, so an updateMany
+ * that zeroes the counter and leaves the row REDEEMED is exactly what showed a member a
+ * greyed, inert Redeem button every Monday.
+ */
+export const renewWeeklyOffers = async () => {
   try {
     await db.offerRedemption.updateMany({
+      where: { offer: { renewsWeekly: true, archivedAt: null } },
       data: {
         used: 0,
+        status: "AVAILABLE",
       },
     })
   } catch (error) {
-    throw new Error(`Failed to renew mochi offer: ${getErrorMessage(error)}`)
+    throw new Error(`Failed to renew weekly offers: ${getErrorMessage(error)}`)
   }
 }
 

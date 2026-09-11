@@ -229,4 +229,101 @@ describeIfDb("POST /api/auth/createOrder", () => {
     // The cart survives, so the customer still has what they chose.
     expect(await db.cartItem.count({ where: { cartId: cart.id } })).toBe(1)
   })
+
+  /**
+   * The unlock sweep is the only thing that writes an AVAILABLE redemption, and until
+   * the window landed it read `isActive` alone - so an order placed today could unlock
+   * an offer scheduled for next month or one whose run finished last week.
+   */
+  describe("the post-order unlock sweep", () => {
+    const gatedOffer = (dessertId: string, extra: object = {}) =>
+      db.offer.create({
+        data: {
+          name: "Buy one, get one",
+          audience: "EVERYONE",
+          dessertId,
+          itemPriceInCents: 0,
+          requirements: { create: [{ dessertId, quantity: 1 }] },
+          ...extra,
+        },
+      })
+
+    it("unlocks an offer that is running", async () => {
+      const { user, dessert } = await makeCustomerWithCart()
+      const offer = await gatedOffer(dessert.id)
+
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_unlock" })
+      expect(res.status).toBe(201)
+
+      const redemption = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(redemption?.status).toBe("AVAILABLE")
+      expect(redemption?.used).toBe(0)
+    })
+
+    it.each([
+      { state: "ended", extra: { endsAt: new Date(Date.now() - 60_000) } },
+      {
+        state: "not started",
+        extra: { startsAt: new Date(Date.now() + 86_400_000) },
+      },
+      { state: "archived", extra: { archivedAt: new Date() } },
+    ])("leaves an offer that is $state locked", async ({ extra }) => {
+      const { user, dessert } = await makeCustomerWithCart()
+      await gatedOffer(dessert.id, extra)
+
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_skip" })
+
+      // The order still lands. The sweep only ever narrows - it runs inside the paid
+      // order transaction, so refusing here would roll back an order already charged.
+      expect(res.status).toBe(201)
+      expect(await db.offerRedemption.count()).toBe(0)
+    })
+
+    /**
+     * The guarantee the whole run lifecycle rests on. The admin's Close run *deletes*
+     * redemption rows rather than resetting them to AVAILABLE, precisely so that
+     * `redemptions: { none: { userId } }` matches again and the requirements are
+     * re-evaluated against a real qualifying order instead of being handed back to
+     * everyone who had already earned the offer once.
+     */
+    it("re-grants the offer after its redemptions are cleared", async () => {
+      const { user, dessert } = await makeCustomerWithCart()
+      const offer = await gatedOffer(dessert.id)
+
+      await placeOrder(user.id, { paymentIntentId: "pi_first" })
+      expect(await db.offerRedemption.count()).toBe(1)
+
+      // What closeRun does.
+      await db.offerRedemption.deleteMany({ where: { offerId: offer.id } })
+
+      // A second qualifying order, the way the next run would be earned.
+      const dessert2 = await db.dessert.findUniqueOrThrow({
+        where: { id: dessert.id },
+      })
+      await db.cart.create({
+        data: {
+          userId: user.id,
+          totalPriceInCents: dessert2.priceInCents,
+          cartItems: {
+            create: {
+              dessertId: dessert2.id,
+              itemPriceInCents: dessert2.priceInCents,
+              discountedAmountInCents: 0,
+              quantity: 1,
+            },
+          },
+        },
+      })
+
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_second" })
+      expect(res.status).toBe(201)
+
+      const regranted = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(regranted?.status).toBe("AVAILABLE")
+    })
+  })
 })

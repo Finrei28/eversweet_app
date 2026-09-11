@@ -20,6 +20,7 @@ import {
 } from "../lib/tradingHours"
 import { calculateCartPrice } from "../lib/cartPricing"
 import { redeemableAudiences } from "../lib/offerAudience"
+import { liveOfferWhere } from "../lib/offerAvailability"
 
 //Helper function
 /**
@@ -935,7 +936,10 @@ export const createOrder = async (req: Request, res: Response) => {
 
             const lockedOffers = await tx.offer.findMany({
               where: {
-                isActive: true,
+                // Only ever narrows, which is what lets it run inside the paid
+                // order transaction: unlocking nothing is a missed perk, but
+                // throwing here would roll back an order already charged for.
+                ...liveOfferWhere(),
                 audience: { in: redeemableAudiences(viewer) },
                 redemptions: { none: { userId } },
                 requirements: {
@@ -1146,7 +1150,7 @@ export const showOffers = async (req: Request, res: Response) => {
     }
 
     const offers = await db.offer.findMany({
-      where: { isActive: true },
+      where: liveOfferWhere(),
       include: {
         dessert: {
           select: {
@@ -1179,7 +1183,17 @@ export const showOffers = async (req: Request, res: Response) => {
             },
           },
         },
-        requirements: true,
+        // The names ride along so the app can say *why* a gated offer is not
+        // redeemable yet ("Order 4 x Mochi Bowl to unlock"). Without them the
+        // card showed a greyed Redeem button that looked identical to one
+        // already used up. Two nested selects on a handful of rows, and no
+        // extra round trip - which is the cost that matters here.
+        requirements: {
+          include: {
+            dessert: { select: { name: true } },
+            category: { select: { name: true } },
+          },
+        },
         redemptions: {
           where: { userId },
         },

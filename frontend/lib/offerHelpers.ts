@@ -39,6 +39,24 @@ export const offerUnitPriceInCents = (
   return Math.round(((dessert?.priceInCents ?? 0) * (100 - percent)) / 100)
 }
 
+/**
+ * What an offer's requirements ask for, phrased for the customer.
+ *
+ * A requirement carrying neither a dessert nor a category is skipped: the server's
+ * eligibility check returns false for such a row, so it can never be satisfied and
+ * naming it would only promise something unreachable.
+ */
+export const describeRequirements = (offer: Offer): string | null => {
+  const parts = offer.requirements
+    .map((requirement) => {
+      const name = requirement.dessert?.name ?? requirement.category?.name
+      return name ? `${requirement.quantity} × ${name}` : null
+    })
+    .filter((part): part is string => part !== null)
+
+  return parts.length > 0 ? `Order ${parts.join(" and ")} to unlock` : null
+}
+
 export type OfferState = {
   /** Viewer does not qualify for the audience. */
   locked: boolean
@@ -46,6 +64,13 @@ export type OfferState = {
   alreadyRedeemed: boolean
   /** Qualified, not used up, and any requirements already met. */
   isRedeemable: boolean
+  /**
+   * Why the Redeem button is inert, for the card to explain.
+   *
+   * Without this a gated offer nobody has earned yet and one already used up both
+   * rendered as the same greyed "Redeem" — indistinguishable, with no copy saying which.
+   */
+  unavailableReason: "AUDIENCE" | "LIMIT_REACHED" | "REQUIREMENTS_NOT_MET" | null
 }
 
 export const getOfferState = (
@@ -58,16 +83,22 @@ export const getOfferState = (
 
   const locked = !canRedeemAudience(offer.audience, viewer)
   const alreadyRedeemed = usedCount >= offer.limit
+  // A requirement-gated offer only becomes usable once an order has
+  // unlocked it; the server writes that AVAILABLE row.
+  const requirementsMet =
+    offer.requirements.length === 0 || redemption?.status === "AVAILABLE"
 
   return {
     locked,
     alreadyRedeemed,
-    isRedeemable:
-      !locked &&
-      !alreadyRedeemed &&
-      // A requirement-gated offer only becomes usable once an order has
-      // unlocked it; the server writes that AVAILABLE row.
-      (offer.requirements.length === 0 || redemption?.status === "AVAILABLE"),
+    isRedeemable: !locked && !alreadyRedeemed && requirementsMet,
+    unavailableReason: locked
+      ? "AUDIENCE"
+      : alreadyRedeemed
+        ? "LIMIT_REACHED"
+        : !requirementsMet
+          ? "REQUIREMENTS_NOT_MET"
+          : null,
   }
 }
 

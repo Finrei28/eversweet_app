@@ -13,6 +13,7 @@ import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
+import { isOfferLive } from "../lib/offerAvailability"
 import { getErrorMessage } from "../utils/getError"
 import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
@@ -377,12 +378,17 @@ export const showOfferForClient = async (req: Request, res: Response) => {
     // isActive was missing here, so the public home carousel was advertising
     // deactivated offers. `audience` rides along as a scalar so the carousel
     // can vary its call to action.
+    //
+    // Only the two flags are asked of the database. The dates are applied below,
+    // *after* the cache read, so an offer starts and stops on time rather than
+    // whenever the 120s entry happens to have been filled — caching the verdict
+    // would freeze `now` for the life of the entry.
     const offers = await cached(
       CACHE_KEYS.clientOffers,
       OFFERS_TTL_SECONDS,
       () =>
         db.offer.findMany({
-          where: { isActive: true },
+          where: { isActive: true, archivedAt: null },
           include: {
             dessert: { select: { imagePath: true } },
             category: { select: { desserts: { select: { imagePath: true } } } },
@@ -390,8 +396,24 @@ export const showOfferForClient = async (req: Request, res: Response) => {
         }),
     )
 
+    // Redis hands back JSON, so the dates arrive as strings on a cache hit and as
+    // Date objects on a miss. Normalised here rather than trusted either way.
+    const now = new Date()
+    const live = offers.filter((offer) =>
+      isOfferLive(
+        {
+          isActive: offer.isActive,
+          startsAt: offer.startsAt === null ? null : new Date(offer.startsAt),
+          endsAt: offer.endsAt === null ? null : new Date(offer.endsAt),
+          archivedAt:
+            offer.archivedAt === null ? null : new Date(offer.archivedAt),
+        },
+        now,
+      ),
+    )
+
     res.set("Cache-Control", "public, max-age=60")
-    res.status(200).json({ offers })
+    res.status(200).json({ offers: live })
     return
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch offers" })

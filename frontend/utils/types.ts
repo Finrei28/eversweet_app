@@ -177,6 +177,13 @@ export type OfferRequirement = {
   dessertId: string | null
   categoryId: string | null
   quantity: number
+  /**
+   * Exactly one of these is set in practice, though nothing in the schema enforces it.
+   * They exist so the card can name what unlocks the offer instead of showing a greyed
+   * button with no explanation — see `describeRequirements`.
+   */
+  dessert: { name: string } | null
+  category: { name: string } | null
 }
 
 /** Who an offer is for. Mirrors the OfferAudience enum in the Prisma schema. */

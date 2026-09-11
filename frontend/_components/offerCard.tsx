@@ -2,6 +2,7 @@ import React from "react"
 import { View, Text, TouchableOpacity } from "react-native"
 import { Feather } from "@expo/vector-icons"
 import { formatCurrency } from "@/lib/formatters"
+import { describeRequirements, type OfferState } from "@/lib/offerHelpers"
 import { Offer } from "@/utils/types"
 import AudienceBadge from "./audienceBadge"
 import { CachedImage } from "@/_components/cachedImage"
@@ -12,6 +13,8 @@ type OfferCardProps = {
   locked: boolean
   isRedeemable: boolean
   alreadyRedeemed: boolean
+  /** Why Redeem is inert, so the card can say so rather than just greying out. */
+  unavailableReason: OfferState["unavailableReason"]
   onRedeem: (offer: Offer) => void
   /** Tapping the lock — routes to the page that would unlock it. */
   onUnlock: (offer: Offer) => void
@@ -30,10 +33,18 @@ const OfferCard = React.memo(function OfferCard({
   locked,
   isRedeemable,
   alreadyRedeemed,
+  unavailableReason,
   onRedeem,
   onUnlock,
 }: OfferCardProps) {
   const uri = offerImage(offer)
+
+  // Only ever the requirements case. AUDIENCE already shows an Unlock pill and
+  // LIMIT_REACHED already says "Redeemed"; this is the one that had no copy at all.
+  const unlockHint =
+    unavailableReason === "REQUIREMENTS_NOT_MET"
+      ? describeRequirements(offer)
+      : null
 
   return (
     <View className="bg-white rounded-xl shadow-sm p-4 flex-row items-center">
@@ -110,6 +121,10 @@ const OfferCard = React.memo(function OfferCard({
           >
             {formatCurrency((offer.dessert?.priceInCents ?? 0) / 100)}
           </Text>
+        )}
+
+        {unlockHint && (
+          <Text className="text-gray-500 text-xs mt-1">{unlockHint}</Text>
         )}
       </View>
 

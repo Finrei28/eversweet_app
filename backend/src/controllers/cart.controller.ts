@@ -16,7 +16,44 @@ import {
   isNewCustomer,
   offerRefusalMessage,
 } from "../lib/offerAudience"
+import { isOfferLive } from "../lib/offerAvailability"
 import { offerUnitPriceInCents } from "../lib/offerPricing"
+
+/**
+ * Handing a held redemption back, as one `data` block because all four release paths -
+ * removing an item, clearing the cart, the cart expiring, and a membership lapsing -
+ * have to agree.
+ *
+ * `status` goes with `used`. Releasing used to move the counter alone, which was
+ * harmless only while `status` was written REDEEMED on every use; now that it means
+ * "used up", leaving it behind would lock a gated offer out for good the first time
+ * somebody changed their mind. AVAILABLE is unconditionally right here: redeeming
+ * refuses at `used >= limit`, so `used <= limit` always, and every release below is
+ * guarded by `used > 0` - so afterwards `used <= limit - 1`, which is short of the limit.
+ */
+const RELEASE_REDEMPTION = {
+  used: { decrement: 1 },
+  status: "AVAILABLE",
+} as const
+
+/**
+ * A refusal the customer should be told about, thrown from inside the cart transaction.
+ *
+ * `redeemOfferForUser` threw plain Errors, which land in the generic catch and come back
+ * as "Internal server error" - so tapping Redeem on an offer that had just run out said
+ * the server was broken. The app takes the server's message as the single source of
+ * truth for a rejected offer (see the comment in the app's store/cart.ts), so the reason
+ * has to survive the trip.
+ */
+export class OfferUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "OfferUnavailableError"
+  }
+}
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -227,20 +264,35 @@ export const redeemOfferForUser = async (
     where: { id: offerId },
     include: { requirements: true },
   })
-  if (!offer) throw new Error("Offer does not exist")
+  if (!offer) throw new OfferUnavailableError("Offer does not exist", 404)
+  // Offers are never deleted - archiving is the supported way to retire one - so the
+  // check above has never actually refused anything. This is the one that does.
+  if (!isOfferLive(offer)) {
+    throw new OfferUnavailableError("Offer may be expired or finished", 404)
+  }
+
   const existing = await tx.offerRedemption.findUnique({
     where: {
       offerId_userId: { offerId, userId },
     },
   })
 
+  // REDEEMED only at the limit. Writing it on every use meant the gate below refused
+  // the second use whatever `limit` said, so `limit > 1` was meaningless on any offer
+  // carrying requirements.
+  const statusAfter = (used: number) =>
+    used >= offer.limit ? ("REDEEMED" as const) : ("AVAILABLE" as const)
+
   if (existing) {
     if (existing.used >= offer.limit) {
-      throw new Error("Offer usage limit reached")
+      throw new OfferUnavailableError("You have used this offer already", 409)
     }
 
     if (offer.requirements.length > 0 && existing.status !== "AVAILABLE") {
-      throw new Error("Requirements to unlock offer not met")
+      throw new OfferUnavailableError(
+        "Place a qualifying order to unlock this offer",
+        409,
+      )
     }
 
     return await tx.offerRedemption.update({
@@ -248,9 +300,21 @@ export const redeemOfferForUser = async (
       data: {
         used: { increment: 1 },
         redeemedAt: new Date(),
-        status: "REDEEMED",
+        status: statusAfter(existing.used + 1),
       },
     })
+  }
+
+  // No row means nobody has unlocked this for them. The branch below used to create one
+  // outright, skipping the requirement check entirely, so a gated offer could be taken
+  // once by POSTing its id straight at addItemToCart - unreachable through the UI only
+  // because the button is hidden. It matters more now that the admin's Close run
+  // *deletes* these rows: a deleted row is exactly this state.
+  if (offer.requirements.length > 0) {
+    throw new OfferUnavailableError(
+      "Place a qualifying order to unlock this offer",
+      409,
+    )
   }
 
   // Create new redemption
@@ -260,7 +324,7 @@ export const redeemOfferForUser = async (
       userId,
       used: 1,
       redeemedAt: new Date(),
-      status: "REDEEMED",
+      status: statusAfter(1),
     },
   })
 }
@@ -334,7 +398,9 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     if (cartItem.offerId) {
-      if (!offer) {
+      // `!offer` never fires - offers are archived, never deleted - so until the dates
+      // and archivedAt landed here a paused or expired offer still repriced the item.
+      if (!offer || !isOfferLive(offer)) {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
       }
@@ -612,6 +678,12 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
       return
     }
+    // Carries its own status and wording. Reported as "Internal server error" until
+    // now, which told a customer the shop was broken when the offer had simply run out.
+    if (error instanceof OfferUnavailableError) {
+      res.status(error.status).json({ message: error.message })
+      return
+    }
     console.error(error)
     res.status(500).json({ success: false, message: "Internal server error" })
     return
@@ -681,7 +753,7 @@ export const getCartItems = async (req: Request, res: Response) => {
           .map((item) =>
             db.offerRedemption.updateMany({
               where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-              data: { used: { decrement: 1 } },
+              data: RELEASE_REDEMPTION,
             }),
           ),
       ])
@@ -709,7 +781,7 @@ export const getCartItems = async (req: Request, res: Response) => {
             memberOnlyItems.map((item) =>
               db.offerRedemption.updateMany({
                 where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-                data: { used: { decrement: 1 } },
+                data: RELEASE_REDEMPTION,
               }),
             ),
           ),
@@ -813,9 +885,7 @@ export const clearCart = async (req: Request, res: Response) => {
               userId,
               used: { gt: 0 },
             },
-            data: {
-              used: { decrement: 1 },
-            },
+            data: RELEASE_REDEMPTION,
           })
         }
 
@@ -886,9 +956,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
               userId,
               used: { gt: 0 },
             },
-            data: {
-              used: { decrement: 1 },
-            },
+            data: RELEASE_REDEMPTION,
           })
         }
 
@@ -1073,7 +1141,9 @@ export const updateCartItem = async (req: Request, res: Response) => {
         where: { id: existingCartItem.offerId },
         include: { dessert: true },
       })
-      if (!offer) {
+      // Same liveness check as addItemToCart: editing a line must not reprice it
+      // against an offer that has since been paused, archived or run out.
+      if (!offer || !isOfferLive(offer)) {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
       }

@@ -127,6 +127,14 @@ model Offer {
   /// Ignored entirely when itemPriceInCents is set - that wins.
   discountAmount   Int?
   limit            Int                @default(1)
+  /// `used` on this offer's redemptions resets every Monday, so a membership perk can be
+  /// taken once a week. The order server's weekly cron used to be an updateMany with no
+  /// WHERE at all, resetting every redemption row in the database - including the
+  /// requirement-gated offers closeRun deletes rows precisely to stop handing back.
+  ///
+  /// Replaces OfferRedemption.renewsAt, dropped as dead in the migration before this:
+  /// per-offer is the level this question is actually asked at.
+  renewsWeekly     Boolean            @default(false)
   requirements     OfferRequirement[]
   cartItems        CartItem[]
   category         Category?          @relation(fields: [categoryId], references: [id])
