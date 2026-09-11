@@ -211,8 +211,27 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
   fetchCart: async () => {
     try {
-      const cartItems = (await getCartItems()) ?? []
+      const { cartItems, warning } = await getCartItems()
       set({ items: cartItems })
+
+      // The server removed something and said why. This was discarded, so a
+      // members-only item or an offer that had ended just disappeared between
+      // one cart load and the next with nothing said about it.
+      if (warning) {
+        Toast.show({
+          type: "info",
+          text1: "Your cart has changed",
+          text2: warning,
+          position: "bottom",
+          visibilityTime: 5000,
+          autoHide: true,
+          bottomOffset: 90,
+          props: {
+            text1NumberOfLines: 0,
+            text2NumberOfLines: 0, // allow wrapping
+          },
+        })
+      }
     } catch (error) {
       console.error("Failed to fetch cart items", error)
     }

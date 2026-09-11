@@ -712,8 +712,17 @@ export const getCartItems = async (req: Request, res: Response) => {
               offerId: true,
               loyaltyPointsUsed: true,
               // Needed below to tell a members-only item (which dies with a
-              // lapsed membership) from one anybody may hold.
-              offer: { select: { audience: true } },
+              // lapsed membership) from one anybody may hold, and to tell
+              // whether the offer behind it still stands at all.
+              offer: {
+                select: {
+                  audience: true,
+                  isActive: true,
+                  startsAt: true,
+                  endsAt: true,
+                  archivedAt: true,
+                },
+              },
             },
           },
         },
@@ -765,20 +774,39 @@ export const getCartItems = async (req: Request, res: Response) => {
 
     let warning: string | null = null
 
-    // A lapsed membership only invalidates the members-only offers. An offer
-    // open to everyone (or to new customers) is still perfectly valid, so it
-    // must survive — this used to delete every offer item indiscriminately,
-    // which would strip a non-member's legitimate item on every cart load.
-    if (!membership?.isActive && cart) {
-      const memberOnlyItems = cart.cartItems.filter(
-        (item) => item.offerId && item.offer?.audience === "MEMBERS",
+    if (cart) {
+      const now = new Date()
+
+      // A lapsed membership only invalidates the members-only offers. An offer
+      // open to everyone (or to new customers) is still perfectly valid, so it
+      // must survive — this used to delete every offer item indiscriminately,
+      // which would strip a non-member's legitimate item on every cart load.
+      const memberOnlyItems = !membership?.isActive
+        ? cart.cartItems.filter(
+            (item) => item.offerId && item.offer?.audience === "MEMBERS",
+          )
+        : []
+
+      // The other way a held offer item stops standing: the offer ended, was
+      // archived, or was switched off while the item sat in the cart. Nothing
+      // swept these, so the cart kept the offer price for as long as it lived —
+      // all the way through the payment intent and into the order, because
+      // `calculateCartPrice` reads the discount stored on the row and never asks
+      // the offer whether it is still running. Closing a run in the admin left
+      // every cart already holding the offer able to buy at its price.
+      const retiredOfferItems = cart.cartItems.filter(
+        (item) => item.offerId && item.offer && !isOfferLive(item.offer, now),
       )
 
-      if (memberOnlyItems.length > 0) {
+      // One item can qualify both ways; deleting it twice would be harmless but
+      // releasing its redemption twice would hand back a use it never had.
+      const doomed = [...new Set([...memberOnlyItems, ...retiredOfferItems])]
+
+      if (doomed.length > 0) {
         // Releases and the delete hit different tables, so they go together.
         const [, deletedItems] = await Promise.all([
           Promise.all(
-            memberOnlyItems.map((item) =>
+            doomed.map((item) =>
               db.offerRedemption.updateMany({
                 where: { offerId: item.offerId!, userId, used: { gt: 0 } },
                 data: RELEASE_REDEMPTION,
@@ -786,13 +814,17 @@ export const getCartItems = async (req: Request, res: Response) => {
             ),
           ),
           db.cartItem.deleteMany({
-            where: { id: { in: memberOnlyItems.map((item) => item.id) } },
+            where: { id: { in: doomed.map((item) => item.id) } },
           }),
         ])
 
         if (deletedItems.count > 0) {
           warning =
-            "One or more items in your cart requires an active membership. These items have been removed from your cart."
+            memberOnlyItems.length > 0 && retiredOfferItems.length > 0
+              ? "Some items in your cart are no longer available. They have been removed from your cart."
+              : memberOnlyItems.length > 0
+                ? "One or more items in your cart requires an active membership. These items have been removed from your cart."
+                : "One or more offers in your cart is no longer available. Those items have been removed from your cart."
         }
       }
     }

@@ -6,6 +6,7 @@ import { membershipBenefits } from "../lib/membership"
 import { getErrorMessage } from "../utils/getError"
 import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
 import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
+import { isOfferLive } from "../lib/offerAvailability"
 
 // Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
@@ -368,21 +369,53 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       }
     }
 
-    // Get or create a Stripe customer for this user
-    const { customerId } = await getOrCreateCustomerId(userId)
-
     // The amount is worked out here, from the cart rows, and never taken from
     // the request: a modified client could otherwise name its own price and pay
     // a cent for a full order. The client's figure is compared only so a cart
     // that changed underneath the customer is reported rather than silently
     // charged at a different price than the one on their screen.
+    //
+    // Ahead of the Stripe customer lookup, so a cart that is going to be refused
+    // does not create a customer at Stripe on its way out.
     const cart = await db.cart.findUnique({
       where: { userId },
-      include: { cartItems: { include: cartPricingInclude } },
+      include: {
+        cartItems: {
+          include: {
+            ...cartPricingInclude,
+            offer: {
+              select: {
+                isActive: true,
+                startsAt: true,
+                endsAt: true,
+                archivedAt: true,
+              },
+            },
+          },
+        },
+      },
     })
 
     if (!cart || cart.cartItems.length === 0) {
       res.status(400).json({ message: "Your cart is empty" })
+      return
+    }
+
+    // Loading the cart sweeps out an offer that has stopped running, but an offer
+    // can end between that load and this call - and this is the last point before
+    // the card is charged where it can still be caught. `calculateCartPrice` reads
+    // the discount stored on the row, so without this the customer pays the old
+    // offer price and `createOrder` is then obliged to honour it: past this line
+    // the money has moved, and a paid order is never refused.
+    //
+    // Refused rather than silently repriced, for the same reason as the amount
+    // mismatch below: the total on their screen must be the total they are charged.
+    const now = new Date()
+    if (cart.cartItems.some((item) => item.offer && !isOfferLive(item.offer, now))) {
+      res.status(409).json({
+        message:
+          "An offer in your cart is no longer available. Please review your cart and try again.",
+      })
       return
     }
 
@@ -431,6 +464,11 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
         return
       }
     }
+
+    // Get or create a Stripe customer for this user. Last, because it is the only
+    // step here that writes at Stripe — every refusal above now returns without
+    // having created a customer for an order that is not going to happen.
+    const { customerId } = await getOrCreateCustomerId(userId)
 
     // Create a payment intent
     const paymentIntent = await stripe.paymentIntents.create({

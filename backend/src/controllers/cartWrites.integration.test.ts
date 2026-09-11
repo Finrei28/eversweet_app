@@ -17,6 +17,10 @@ vi.mock("../lib/redis", () => ({
 const ADD = "/api/cart/addItemToCart"
 const SET_QUANTITY = "/api/cart/updateCartItemQuantity"
 const REMOVE_ITEM = "/api/cart/removeItemFromCart"
+const GET_CART = "/api/cart/getCartItems"
+
+const loadCart = (userId: string) =>
+  request(app).get(GET_CART).set("Authorization", `Bearer ${tokenFor(userId)}`)
 
 const addItem = (
   userId: string,
@@ -340,6 +344,110 @@ describeIfDb("cart write paths", () => {
       offerId: offer.id,
     })
     expect(again.status).toBe(201)
+  })
+
+  /**
+   * An offer can stop running while its item sits in a cart — the run ends, the admin
+   * archives it, or Close run switches it off. Nothing swept those items, so the cart
+   * kept the offer price right through the payment intent and into the order, because
+   * `calculateCartPrice` reads the discount stored on the row. Closing a run left every
+   * cart already holding the offer able to buy at its price.
+   */
+  describe.each([
+    { state: "ended", data: { endsAt: new Date(Date.now() - 60_000) } },
+    { state: "archived", data: { archivedAt: new Date() } },
+    { state: "switched off by Close run", data: { isActive: false } },
+  ])("an offer held in a cart that is then $state", ({ data }) => {
+    it("is removed from the cart, and its redemption handed back", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      const offer = await db.offer.create({
+        data: {
+          name: "Running, for now",
+          audience: "EVERYONE",
+          dessertId: dessert.id,
+          itemPriceInCents: 500,
+        },
+      })
+
+      const added = await addItem(user.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+        offerId: offer.id,
+      })
+      expect(added.status).toBe(201)
+
+      // The offer stops running underneath the cart.
+      await db.offer.update({ where: { id: offer.id }, data })
+
+      const res = await loadCart(user.id)
+
+      expect(res.status).toBe(200)
+      expect(res.body.cartItems).toHaveLength(0)
+      expect(res.body.warning).toMatch(/no longer available/i)
+
+      const redemption = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(redemption?.used).toBe(0)
+      expect(redemption?.status).toBe("AVAILABLE")
+    })
+  })
+
+  it("leaves an ordinary item alone when an offer item is swept", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const plain = await makeDessert(800)
+    const offer = await db.offer.create({
+      data: {
+        name: "About to end",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+      },
+    })
+
+    await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    await addItem(user.id, { dessertId: plain.id, itemPriceInCents: 800 })
+
+    await db.offer.update({
+      where: { id: offer.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    })
+
+    const res = await loadCart(user.id)
+
+    expect(res.body.cartItems).toHaveLength(1)
+    expect(res.body.cartItems[0].dessert.id).toBe(plain.id)
+  })
+
+  it("says nothing when every offer in the cart is still running", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Still going",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+        endsAt: new Date(Date.now() + 86_400_000),
+      },
+    })
+
+    await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+
+    const res = await loadCart(user.id)
+
+    expect(res.body.cartItems).toHaveLength(1)
+    expect(res.body.warning).toBeNull()
   })
 
   it("writes nothing at all when the customer cannot afford the points", async () => {
