@@ -18,7 +18,7 @@ import {
 } from "react-native"
 import Toast from "react-native-toast-message"
 
-export default function signin() {
+export default function SignIn() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)

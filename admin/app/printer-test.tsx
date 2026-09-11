@@ -259,7 +259,7 @@ export default function PrinterTest() {
               • Check if the printer head is clean
             </Text>
             <Text style={styles.troubleshootingText}>
-              • Make sure you're using the recommended paper type
+              • Make sure you&apos;re using the recommended paper type
             </Text>
             <Text style={styles.troubleshootingText}>
               • Some printers may not support all formatting options
