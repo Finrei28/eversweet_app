@@ -171,13 +171,19 @@ export function handleNotification(
 ) {
   const data = notification.request.content.data
 
-  // You can handle different notification types here
-  if (data.type === "ORDER_STATUS_CHANGED") {
-    // Navigate to the order details screen or update UI
-    onNavigate("/orders")
-
-    // You could use a navigation ref or event emitter to navigate
-    // Example: navigationRef.current?.navigate('OrderDetails', { orderId: data.orderId })
+  // Every push the server sends carries a `type` saying what it is about, and
+  // that is the only thing routed on — an unrecognised one deliberately does
+  // nothing rather than guessing a destination.
+  switch (data.type) {
+    case "ORDER_STATUS_CHANGED":
+      onNavigate("/orders")
+      return
+    case "PRIZE_READY":
+      // Where the prize card lives, and where the code is read from.
+      onNavigate("/offers")
+      return
+    default:
+      return
   }
 }
 

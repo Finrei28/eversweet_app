@@ -14,7 +14,7 @@ import {
   renewMochiOffer,
   updateDailySpecial,
 } from "./controllers/admin.controller"
-import { calculateMonthlyWinner } from "./controllers/client.controller"
+import { settleMonthlyWinners } from "./controllers/client.controller"
 import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 
 const PORT = process.env.PORT || 3000
@@ -58,7 +58,10 @@ try {
   cron.schedule("0 0 * * *", updateDailySpecial, {
     timezone: "Pacific/Auckland",
   })
-  cron.schedule("0 0 1 * *", calculateMonthlyWinner, {
+  // Wrapped rather than passed by reference: node-cron hands the task a
+  // TaskContext, which would arrive as settleMonthlyWinners' `offset` and settle
+  // some arbitrary month instead of the one that just ended.
+  cron.schedule("0 0 1 * *", () => settleMonthlyWinners(), {
     timezone: "Pacific/Auckland",
   })
 } catch (err) {

@@ -5,6 +5,7 @@ import {
   fetchCategoriesWithDesserts,
   getAvailableCustomisations,
   getLeaderBoard,
+  getMyPrizes,
   getPrivacyPolicy,
   getRestaurantStatus,
   getStoreInfo,
@@ -28,6 +29,7 @@ export const queryKeys = {
   orders: (status: OrderStatus) => ["orders", status] as const,
   orderHistory: ["orders", "PICKED_UP", "paged"] as const,
   leaderboard: ["leaderboard"] as const,
+  myPrizes: ["prizes", "mine"] as const,
   storeInfo: ["store-info"] as const,
   restaurantStatus: ["restaurant-status"] as const,
   privacyPolicy: ["privacy-policy"] as const,
@@ -81,6 +83,20 @@ export const useOrderHistoryQuery = ({ enabled = true }: AuthedOptions = {}) =>
       getUserOrdersPage("PICKED_UP", ORDER_HISTORY_PAGE_SIZE, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled,
+  })
+
+/**
+ * The customer's own leaderboard prizes.
+ *
+ * No staleTime override, so it revalidates on focus: a prize can be collected
+ * at the counter while this screen is open, and the card should stop offering
+ * a code that has just been spent.
+ */
+export const useMyPrizesQuery = ({ enabled = true }: AuthedOptions = {}) =>
+  useQuery({
+    queryKey: queryKeys.myPrizes,
+    queryFn: getMyPrizes,
     enabled,
   })
 

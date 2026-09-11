@@ -14,8 +14,10 @@ import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { getErrorMessage } from "../utils/getError"
-import { cached, CACHE_KEYS } from "../lib/cache"
+import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
+import { nzMonthRange } from "../lib/tradingHours"
+import { Prisma } from "@prisma/client"
 
 /*
  * Where an admin endpoint exists to make one of these wrong it calls
@@ -426,12 +428,22 @@ export const getDaysOff = async (req: Request, res: Response) => {
 
 export const getLoyaltyWinner = async (req: Request, res: Response) => {
   try {
-    const now = new Date()
-    const month = now.getMonth()
-    const year = now.getFullYear()
+    // The month that just ended — the same one settleMonthlyWinners writes.
+    //
+    // This used to read `now.getMonth()`, which is 0-indexed, against months the
+    // cron stores 1-indexed. It looked right for eleven months of the year by
+    // coincidence: 0-indexed September (8) matches stored August (8). In January
+    // `getMonth()` is 0, no row can ever carry month 0, and the admin dashboard
+    // showed no winner for the whole month — while December's lookup also asked
+    // for the wrong year.
+    const { month, year } = nzMonthRange(new Date(), -1)
+
+    // Place 1. Kept so admin builds already installed on the shop's tablets keep
+    // working after the podium landed; getMonthlyWinners is what the new screen
+    // calls.
     const winner = await db.loyaltyWinner.findUnique({
       where: {
-        month_year: { month, year },
+        month_year_place: { month, year, place: 1 },
       },
       select: {
         userId: true,
@@ -485,98 +497,94 @@ export async function getEstimatedPickUpTime(req: Request, res: Response) {
   }
 }
 
-export async function calculateMonthlyWinner() {
-  const now = new Date()
+/** How many of the month's leaderboard are recorded and rewarded. */
+export const WINNING_PLACES = 3
 
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const end = new Date(now.getFullYear(), now.getMonth(), 1)
+/**
+ * Records the podium for a finished month.
+ *
+ * `offset` is in months from now, so the default -1 is "the month that just
+ * ended" — what the cron wants, firing at NZ midnight on the 1st. The admin
+ * backfill passes an explicit offset for a month the cron missed.
+ *
+ * Winners are settled once and never revisited. A refund landing in March that
+ * would have changed February's ranking does not reopen February; the podium is
+ * whatever it was when the month closed.
+ */
+export async function settleMonthlyWinners(offset = -1) {
+  // The bounds have to come from the New Zealand calendar and not the host's:
+  // this ran on `new Date(y, m - 1, 1)` under Render's UTC clock, where NZ's
+  // 1 September is still 31 August, so it kept settling the month before the one
+  // it wanted. See nzMonthRange for the full account.
+  const { start, end, month, year } = nzMonthRange(new Date(), offset)
 
-  const month = start.getMonth() + 1
-  const year = start.getFullYear()
   try {
     const leaderboard = await db.loyaltyRecord.groupBy({
       by: ["loyaltyId"],
       where: {
-        change: {
-          gt: 0,
-        },
-        createdAt: {
-          gte: start,
-          lt: end,
-        },
+        // Matches getLeaderBoard exactly. This used to filter on the sign alone,
+        // so a refunded redemption — written back as a *positive* record — could
+        // crown someone the board never showed in front all month.
+        change: { gt: 0 },
+        reason: "EARNED",
+        createdAt: { gte: start, lt: end },
       },
-      _sum: {
-        change: true,
-      },
-      orderBy: {
-        _sum: {
-          change: "desc",
-        },
-      },
+      _sum: { change: true },
+      _max: { createdAt: true },
+      orderBy: [
+        { _sum: { change: "desc" } },
+        // A tie goes to whoever got there first: of two customers level on
+        // points, the one whose last qualifying earning came earlier.
+        //
+        // This used to be a bespoke loop that fetched each tied customer's latest
+        // record a query at a time, and it only ever resolved *first* place — a
+        // tie for second or third came out in whatever order Postgres happened to
+        // emit. Ordering on the aggregate settles every place inside this same
+        // query, and getLeaderBoard now orders identically, so the podium
+        // customers watched all month is the podium that pays.
+        { _max: { createdAt: "asc" } },
+        // Last resort, for two customers whose final earning landed in the same
+        // millisecond. Arbitrary, but total — without it the order is undefined.
+        { loyaltyId: "asc" },
+      ],
+      take: WINNING_PLACES,
     })
 
     if (leaderboard.length === 0) {
-      return
+      return { month, year, recorded: 0 }
     }
 
-    const highestPoints = leaderboard[0]._sum.change ?? 0
-
-    const tied = leaderboard.filter(
-      (entry) => (entry._sum.change ?? 0) === highestPoints,
-    )
-
-    let winnerLoyaltyId: string
-
-    if (tied.length === 1) {
-      winnerLoyaltyId = tied[0].loyaltyId
-    } else {
-      const latestRecords = await Promise.all(
-        tied.map(async (entry) => {
-          const latestRecord = await db.loyaltyRecord.findFirst({
-            where: {
-              loyaltyId: entry.loyaltyId,
-              change: {
-                gt: 0,
-              },
-              createdAt: {
-                gte: start,
-                lt: end,
-              },
-            },
-            orderBy: {
-              createdAt: "desc",
-            },
-          })
-
-          return {
-            loyaltyId: entry.loyaltyId,
-            createdAt: latestRecord!.createdAt,
-          }
-        }),
-      )
-
-      latestRecords.sort(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-      )
-
-      winnerLoyaltyId = latestRecords[0].loyaltyId
-    }
-
-    const winner = await db.loyalty.findUnique({
-      where: {
-        id: winnerLoyaltyId,
-      },
+    const loyalties = await db.loyalty.findMany({
+      where: { id: { in: leaderboard.map((entry) => entry.loyaltyId) } },
+      select: { id: true, userId: true },
     })
+    const userIdFor = new Map(loyalties.map((l) => [l.id, l.userId]))
 
-    await db.loyaltyWinner.create({
-      data: {
-        userId: winner ? winner.userId : null,
+    // One statement, so a month cannot half-settle. cron.schedule runs in every
+    // process and instances race this; skipDuplicates against the unique on
+    // (month, year, place) means the loser writes nothing, rather than throwing a
+    // P2002 that then has to be told apart from a real failure.
+    const { count } = await db.loyaltyWinner.createMany({
+      data: leaderboard.map((entry, index) => ({
+        userId: userIdFor.get(entry.loyaltyId) ?? null,
+        place: index + 1,
         month,
         year,
-        points: highestPoints,
-      },
+        points: entry._sum.change ?? 0,
+      })),
+      skipDuplicates: true,
     })
+
+    // The banner in the app reads this through a 5 minute cache, so without this
+    // the new podium appears minutes after the month turns over.
+    await invalidate(CACHE_KEYS.leaderboardDetails)
+
+    return { month, year, recorded: count }
   } catch (error) {
-    console.error(error)
+    // Naming the month matters — an unlabelled console.error here is what hid a
+    // timezone bug for months, because what it logged looked like noise rather
+    // than like "this job settled the wrong month".
+    console.error(`Failed to settle the ${month}/${year} podium:`, error)
+    return { month, year, recorded: 0 }
   }
 }

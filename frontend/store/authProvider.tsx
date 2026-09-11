@@ -28,6 +28,7 @@ import {
 import { DaysOff, toDaysOff, TradingCalendar } from "@/lib/businessHours"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
+import { queryClient } from "@/services/queryClient"
 import { removePushToken, syncPushToken } from "@/services/notifications"
 import Toast from "react-native-toast-message"
 
@@ -306,6 +307,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // this device starts with the previous user's cart and balance.
       useLoyaltyStore.getState().reset()
       useCartStore.setState({ items: [], cartOperations: 0, error: null })
+      // Same hazard, one layer up. Every per-customer query is gated on the
+      // token, so signing out disables them — but react-query keeps the data
+      // for gcTime, and the next account to sign in re-enables those same keys
+      // and paints the previous customer's orders, offers and prizes from cache
+      // while the refetch is still in flight. A prize carries a code someone
+      // could walk to the counter with, which is what made this worth closing.
+      queryClient.clear()
     } catch (error) {
       console.error("Sign out error: ", error)
     } finally {

@@ -113,3 +113,52 @@ export type WinnerDetails = {
   firstName: string | null
   lastName: string | null
 }
+
+/** What the shop owes a winner, once staff have decided. */
+export type WinnerReward = {
+  id: string
+  title: string
+  description: string | null
+  /** Already grouped for reading aloud, e.g. "7K4M-Q92X". */
+  code: string
+  expiresAt: string
+  redeemedAt: string | null
+  expired: boolean
+}
+
+/**
+ * One place on a month's podium.
+ *
+ * Real names, unlike the customer-facing board: staff have to hand the prize to
+ * a person, so anonymity is deliberately not applied here.
+ */
+export type MonthlyWinner = {
+  id: string
+  place: number
+  month: number
+  year: number
+  points: number
+  userId: string | null
+  firstName: string | null
+  lastName: string | null
+  /** The customer closed their account, so the prize cannot be collected. */
+  accountClosed: boolean
+  /** Null until staff have said what the prize is. */
+  reward: WinnerReward | null
+}
+
+export type MonthlyWinners = {
+  month: number
+  year: number
+  winners: MonthlyWinner[]
+}
+
+/** Why a code was refused, in the three cases staff need told apart. */
+export type PrizeRefusal = "NOT_FOUND" | "ALREADY_REDEEMED" | "EXPIRED"
+
+export type PrizeCodeCheck = {
+  valid: boolean
+  reason: PrizeRefusal | null
+  message: string | null
+  winner: MonthlyWinner
+}

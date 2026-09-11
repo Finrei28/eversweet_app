@@ -45,6 +45,11 @@ jobs:
       - name: Lint
         run: npx expo lint
 
+      # `npm test` is plain `jest` now, not `jest --watchAll`, so it exits.
+      # --ci stops a missing snapshot being written on the fly and passing.
+      - name: Test
+        run: npm test -- --ci
+
       # Report-only, and deliberately so. Expo and React Native ship their
       # build tooling in `dependencies` rather than `devDependencies`, so
       # --omit=dev still walks the CLI, doctor and devtools packages:
@@ -64,7 +69,3 @@ jobs:
       - name: Security audit (report only)
         run: npm audit --omit=dev --audit-level=critical
         continue-on-error: true
-
-      # No test step: the suite is empty and `npm test` is `jest --watchAll`,
-      # which never exits. Add one here when there are tests to run, with
-      # --watchAll=false or --ci.

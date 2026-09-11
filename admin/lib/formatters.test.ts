@@ -1,4 +1,10 @@
-import { formatCustomisation, formatStartsIn, isRemoval } from "./formatters"
+import {
+  formatCustomisation,
+  formatLeaderboardMonth,
+  formatPlace,
+  formatStartsIn,
+  isRemoval,
+} from "./formatters"
 
 const NOW = new Date("2026-03-02T12:00:00+13:00")
 const inMinutes = (n: number) =>
@@ -96,5 +102,31 @@ describe("customisations", () => {
   it("knows which is which", () => {
     expect(isRemoval(line(0))).toBe(true)
     expect(isRemoval(line(1))).toBe(false)
+  })
+})
+
+describe("formatLeaderboardMonth", () => {
+  it("names the month the way staff would say it", () => {
+    expect(formatLeaderboardMonth(8, 2026)).toBe("August 2026")
+  })
+
+  it("treats the month as 1-indexed, the way the server stores it", () => {
+    // Read as 0-indexed, this convention once made the admin dashboard show no
+    // winner for the whole of January.
+    expect(formatLeaderboardMonth(1, 2026)).toBe("January 2026")
+    expect(formatLeaderboardMonth(12, 2026)).toBe("December 2026")
+  })
+
+  it("does not render a month that cannot exist as a real one", () => {
+    expect(formatLeaderboardMonth(0, 2026)).toBe("Unknown 2026")
+    expect(formatLeaderboardMonth(13, 2026)).toBe("Unknown 2026")
+  })
+})
+
+describe("formatPlace", () => {
+  it("covers the podium", () => {
+    expect(formatPlace(1)).toBe("1st")
+    expect(formatPlace(2)).toBe("2nd")
+    expect(formatPlace(3)).toBe("3rd")
   })
 })

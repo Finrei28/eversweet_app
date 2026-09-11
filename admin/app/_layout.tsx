@@ -114,6 +114,21 @@ function AppLayout() {
           }}
         />
         <Stack.Screen
+          name="leaderboard-prizes"
+          options={{
+            title: "Monthly Winners",
+            headerShown: true,
+            headerTitleStyle: {
+              fontFamily: "Inter-SemiBold",
+            },
+            headerLeft: () => (
+              <TouchableOpacity onPress={() => router.back()} className="ml-2">
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+            ),
+          }}
+        />
+        <Stack.Screen
           name="bluetooth-printer-setup"
           options={{
             title: "Bluetooth Printer Setup",
