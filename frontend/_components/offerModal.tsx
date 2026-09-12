@@ -8,6 +8,7 @@ import {
   ScrollView,
 } from "react-native"
 import { formatCurrency } from "@/lib/formatters"
+import { offerUnitPriceInCents } from "@/lib/offerHelpers"
 import CustomModal from "./modal"
 import { CachedImage } from "@/_components/cachedImage"
 
@@ -58,16 +59,10 @@ export default function OfferModal({
                   offer.dessert ? offer.dessert : selectedDessert!
                 }
                 offerId={offer.id}
-                offerItemPrice={
-                  itemPriceInCents !== null
-                    ? itemPriceInCents
-                    : offer.dessert
-                      ? offer.dessert.priceInCents * (1 - (discountAmount ?? 0))
-                      : selectedDessert
-                        ? selectedDessert.priceInCents *
-                          (1 - (discountAmount ?? 0))
-                        : 0
-                }
+                offerItemPrice={offerUnitPriceInCents(
+                  { itemPriceInCents, discountAmount },
+                  offer.dessert ?? selectedDessert,
+                )}
                 type="cents"
               />
             )}
@@ -105,10 +100,10 @@ export default function OfferModal({
 
                       <Text className="text-lg font-medium ml-2">
                         {formatCurrency(
-                          (itemPriceInCents !== null
-                            ? itemPriceInCents
-                            : dessert.priceInCents *
-                              (1 - (discountAmount ?? 0))) / 100,
+                          offerUnitPriceInCents(
+                            { itemPriceInCents, discountAmount },
+                            dessert,
+                          ) / 100,
                         )}
                       </Text>
                     </TouchableOpacity>

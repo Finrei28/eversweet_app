@@ -130,6 +130,38 @@ describeIfDb("cart write paths", () => {
     expect(redemption?.status).toBe("REDEEMED")
   })
 
+  /**
+   * `discountAmount` is whole percent since the 2026-09-12 migration. Priced as the
+   * fraction it used to be, a stored 20 reads as `1 - 20` and hands back a discount
+   * twenty times the item — so this asserts the discount, not just that the row landed.
+   */
+  it("prices a percentage offer as percent off, not as a multiplier", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "20% off the good stuff",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        discountAmount: 20,
+      },
+    })
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body.cartItem.itemPriceInCents).toBe(1200)
+    expect(res.body.cartItem.discountedAmountInCents).toBe(240)
+
+    const cart = await db.cart.findUnique({ where: { userId: user.id } })
+
+    expect(cart?.totalPriceInCents).toBe(960)
+  })
+
   it("writes nothing at all when the customer cannot afford the points", async () => {
     const user = await makeUser()
     const dessert = await makeDessert(1200)

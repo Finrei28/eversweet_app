@@ -16,6 +16,7 @@ import {
   isNewCustomer,
   offerRefusalMessage,
 } from "../lib/offerAudience"
+import { offerUnitPriceInCents } from "../lib/offerPricing"
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -384,19 +385,9 @@ export const addItemToCart = async (req: Request, res: Response) => {
     let finalDiscountedAmount = 0
 
     if (offer) {
-      const offerPrice =
-        offer?.itemPriceInCents !== null
-          ? offer?.itemPriceInCents
-          : offer.dessert
-            ? offer.dessert.priceInCents *
-              (1 - (Number(offer.discountAmount) ?? 0))
-            : dessert
-              ? dessert.priceInCents * (1 - (Number(offer.discountAmount) ?? 0))
-              : 0
-
       finalDiscountedAmount = Math.max(
         0,
-        Math.round(itemPriceInCentsBeforeDiscount - offerPrice),
+        itemPriceInCentsBeforeDiscount - offerUnitPriceInCents(offer, dessert),
       ) // this calculates the discount from member offers
     } else {
       finalDiscountedAmount = calculateBestDiscount(
@@ -1105,19 +1096,9 @@ export const updateCartItem = async (req: Request, res: Response) => {
         return
       }
 
-      const offerPrice =
-        offer?.itemPriceInCents !== null
-          ? offer?.itemPriceInCents
-          : offer.dessert
-            ? offer.dessert.priceInCents *
-              (1 - (Number(offer.discountAmount) ?? 0))
-            : dessert
-              ? dessert.priceInCents * (1 - (Number(offer.discountAmount) ?? 0))
-              : 0
-
       finalDiscountedAmount = Math.max(
         0,
-        Math.round(itemPriceInCentsBeforeDiscount - offerPrice),
+        itemPriceInCentsBeforeDiscount - offerUnitPriceInCents(offer, dessert),
       ) // this calculates the discount from the offer
     } else {
       finalDiscountedAmount = calculateBestDiscount(

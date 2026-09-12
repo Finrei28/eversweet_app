@@ -198,6 +198,11 @@ export type Offer = {
   dessertId: string | null
   categoryId: string | null
   itemPriceInCents: number | null
+  /**
+   * Whole percent off, 0-100. Ignored entirely when `itemPriceInCents` is set — that
+   * wins. Was a Decimal fraction (0.2 meaning 20%) until the 2026-09-12 migration;
+   * price it with `offerUnitPriceInCents` rather than by hand.
+   */
   discountAmount: number | null
   limit: number
   dessert: Dessert | null
@@ -210,7 +215,6 @@ export type Offer = {
     redeemedAt: Date | null
     used: number
     unlockedAt: Date
-    renewsAt: Date | null
     status: "REDEEMED" | "AVAILABLE" | "EXPIRED"
   }[]
 }
@@ -224,6 +228,7 @@ export type offerForClient = {
   dessertId: string | null
   categoryId: string | null
   itemPriceInCents: number | null
+  /** Whole percent off, 0-100 — see the note on `Offer.discountAmount`. */
   discountAmount: number | null
   limit: number
   dessert: {

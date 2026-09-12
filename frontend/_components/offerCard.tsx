@@ -97,7 +97,10 @@ const OfferCard = React.memo(function OfferCard({
               locked ? "text-gray-400" : "text-primary"
             }`}
           >
-            {offer.discountAmount * 100}% off
+            {/* Whole percent since the 2026-09-12 migration. This read
+                `discountAmount * 100`, from when the column held a fraction, so a
+                stored 20 rendered as "2000% off". */}
+            {offer.discountAmount}% off
           </Text>
         ) : (
           <Text

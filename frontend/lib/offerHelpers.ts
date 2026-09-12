@@ -18,6 +18,27 @@ export const canRedeemAudience = (
   }
 }
 
+/**
+ * What one unit costs under an offer. Mirrors `offerUnitPriceInCents` in
+ * backend/src/lib/offerPricing.ts — if the two drift, the app shows a price the server
+ * then charges differently.
+ *
+ * `discountAmount` is WHOLE PERCENT, 0-100, since the 2026-09-12 migration. The card used
+ * to render `discountAmount * 100` and the modal priced at `1 - discountAmount`; both were
+ * reading it as a fraction, so a stored 20 showed "2000% off" and priced at -19x list.
+ */
+export const offerUnitPriceInCents = (
+  offer: Pick<Offer, "itemPriceInCents" | "discountAmount">,
+  /** The dessert being bought — the offer may name a category rather than one item. */
+  dessert: { priceInCents: number } | null,
+): number => {
+  // Null, not falsy: `itemPriceInCents: 0` is how a free item is expressed.
+  if (offer.itemPriceInCents !== null) return offer.itemPriceInCents
+
+  const percent = Math.min(100, Math.max(0, offer.discountAmount ?? 0))
+  return Math.round(((dessert?.priceInCents ?? 0) * (100 - percent)) / 100)
+}
+
 export type OfferState = {
   /** Viewer does not qualify for the audience. */
   locked: boolean
