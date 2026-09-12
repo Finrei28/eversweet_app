@@ -262,7 +262,17 @@ export const redeemOfferForUser = async (
 ) => {
   const offer = await tx.offer.findUnique({
     where: { id: offerId },
-    include: { requirements: true },
+    // Spelled out rather than an `include`: see the note on `showOffers`' select. The
+    // four window columns are read by `isOfferLive` below, so they are genuinely used
+    // here even though the app never sees them.
+    select: {
+      limit: true,
+      isActive: true,
+      startsAt: true,
+      endsAt: true,
+      archivedAt: true,
+      requirements: { select: { id: true } },
+    },
   })
   if (!offer) throw new OfferUnavailableError("Offer does not exist", 404)
   // Offers are never deleted - archiving is the supported way to retire one - so the
@@ -275,6 +285,9 @@ export const redeemOfferForUser = async (
     where: {
       offerId_userId: { offerId, userId },
     },
+    // The other path that returned 42703 on the dropped `renewsAt`, and the reason
+    // adding any offer item to a cart was failing. Three fields are all this needs.
+    select: { id: true, used: true, status: true },
   })
 
   // REDEEMED only at the limit. Writing it on every use meant the gate below refused
@@ -376,7 +389,18 @@ export const addItemToCart = async (req: Request, res: Response) => {
       cartItem.offerId
         ? db.offer.findUnique({
             where: { id: cartItem.offerId },
-            include: { dessert: true },
+            // Spelled out rather than an `include` - see the note on `showOffers`'
+            // select. `dessert` is narrowed to the one field the pricing reads.
+            select: {
+              audience: true,
+              itemPriceInCents: true,
+              discountAmount: true,
+              isActive: true,
+              startsAt: true,
+              endsAt: true,
+              archivedAt: true,
+              dessert: { select: { priceInCents: true } },
+            },
           })
         : Promise.resolve(null),
       loadCustomisations(cartItem.customisations),
@@ -1171,7 +1195,17 @@ export const updateCartItem = async (req: Request, res: Response) => {
     if (existingCartItem.offerId) {
       const offer = await db.offer.findUnique({
         where: { id: existingCartItem.offerId },
-        include: { dessert: true },
+        // Same narrowed shape as addItemToCart, for the same reason.
+        select: {
+          audience: true,
+          itemPriceInCents: true,
+          discountAmount: true,
+          isActive: true,
+          startsAt: true,
+          endsAt: true,
+          archivedAt: true,
+          dessert: { select: { priceInCents: true } },
+        },
       })
       // Same liveness check as addItemToCart: editing a line must not reprice it
       // against an offer that has since been paused, archived or run out.

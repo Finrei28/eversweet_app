@@ -946,8 +946,13 @@ export const createOrder = async (req: Request, res: Response) => {
                   some: {}, // ensures at least 1 requirement exists
                 },
               },
-              include: {
-                requirements: true,
+              // Only the id and the requirements are read below, so only those are
+              // asked for — see the note on `showOffers`' select.
+              select: {
+                id: true,
+                requirements: {
+                  select: { dessertId: true, categoryId: true, quantity: true },
+                },
               },
             })
             // count desserts and categories in the order for offer eligibility check
@@ -1151,7 +1156,25 @@ export const showOffers = async (req: Request, res: Response) => {
 
     const offers = await db.offer.findMany({
       where: liveOfferWhere(),
-      include: {
+      // Spelled out rather than an `include`, which would select every scalar the
+      // generated client knows about. That is what broke this screen on 2026-09-12: the
+      // deployed client still declared `OfferRedemption.renewsAt`, the migration had
+      // dropped the column, and Prisma asked for it anyway — Postgres 42703 on a field
+      // nothing here ever read. A list of what the app actually uses cannot do that, in
+      // either direction, and it keeps the four window columns off the wire: the server
+      // is what gates on them, so the app neither receives nor re-decides them.
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        image: true,
+        audience: true,
+        dessertId: true,
+        categoryId: true,
+        itemPriceInCents: true,
+        discountAmount: true,
+        limit: true,
+        renewsWeekly: true,
         dessert: {
           select: {
             id: true,
@@ -1189,13 +1212,29 @@ export const showOffers = async (req: Request, res: Response) => {
         // already used up. Two nested selects on a handful of rows, and no
         // extra round trip - which is the cost that matters here.
         requirements: {
-          include: {
+          select: {
+            id: true,
+            offerId: true,
+            dessertId: true,
+            categoryId: true,
+            quantity: true,
             dessert: { select: { name: true } },
             category: { select: { name: true } },
           },
         },
         redemptions: {
           where: { userId },
+          // The exact path that returned 42703. `renewsAt` was a column on this table,
+          // not on Offer, and this sub-select is what asked for it.
+          select: {
+            id: true,
+            userId: true,
+            offerId: true,
+            unlockedAt: true,
+            redeemedAt: true,
+            used: true,
+            status: true,
+          },
         },
       },
     })

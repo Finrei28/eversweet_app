@@ -101,6 +101,95 @@ describeIfDb("showOffers", () => {
     expect(returned.requirements[0].dessert.name).toBe(dessert.name)
   })
 
+  /**
+   * The payload is built from an explicit `select`, which is what stops the client asking
+   * for a column the database may not have yet — the 2026-09-12 failure. The cost of that
+   * is that a field the app reads can now be dropped by editing one line, with nothing to
+   * notice: the screen would just render blanks. So the shape is pinned here.
+   *
+   * Keep this in step with the `Offer` type in the app's utils/types.ts.
+   */
+  it("sends exactly the fields the app declares, and no more", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Shape",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 0,
+        requirements: { create: [{ dessertId: dessert.id, quantity: 2 }] },
+      },
+    })
+    await db.offerRedemption.create({
+      data: { offerId: offer.id, userId: user.id, status: "AVAILABLE" },
+    })
+
+    const res = await load(user.id)
+    const returned = res.body.offers[0]
+
+    expect(Object.keys(returned).sort()).toEqual([
+      "audience",
+      "category",
+      "categoryId",
+      "description",
+      "dessert",
+      "dessertId",
+      "discountAmount",
+      "id",
+      "image",
+      "itemPriceInCents",
+      "limit",
+      "name",
+      "redemptions",
+      "renewsWeekly",
+      "requirements",
+    ])
+
+    expect(Object.keys(returned.redemptions[0]).sort()).toEqual([
+      "id",
+      "offerId",
+      "redeemedAt",
+      "status",
+      "unlockedAt",
+      "used",
+      "userId",
+    ])
+
+    expect(Object.keys(returned.requirements[0]).sort()).toEqual([
+      "category",
+      "categoryId",
+      "dessert",
+      "dessertId",
+      "id",
+      "offerId",
+      "quantity",
+    ])
+  })
+
+  // Deliberately absent: the server is what gates on the window, so sending it would
+  // invite the app to form a second, drifting opinion about whether an offer is live.
+  it("keeps the window columns off the wire", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    await db.offer.create({
+      data: {
+        name: "Running",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 0,
+        startsAt: new Date(Date.now() - 60_000),
+        endsAt: new Date(Date.now() + 86_400_000),
+      },
+    })
+
+    const returned = (await load(user.id)).body.offers[0]
+
+    for (const field of ["isActive", "startsAt", "endsAt", "archivedAt"]) {
+      expect(returned).not.toHaveProperty(field)
+    }
+  })
+
   // The window gates the list as well as the cart - an ended or archived run must not be
   // advertised at all, not merely refused when someone taps Redeem.
   it("leaves out an offer whose run has ended or been archived", async () => {
