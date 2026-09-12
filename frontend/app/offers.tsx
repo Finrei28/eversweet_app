@@ -144,6 +144,7 @@ export default function OffersPage() {
         locked={state.locked}
         isRedeemable={state.isRedeemable}
         alreadyRedeemed={state.alreadyRedeemed}
+        unavailableReason={state.unavailableReason}
         onRedeem={handleRedeem}
         onUnlock={goToMembership}
       />

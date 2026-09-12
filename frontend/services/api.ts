@@ -321,15 +321,24 @@ export const checkOrderStatus = async (orderId: string) =>
     fallback: "Failed to check order status",
   })
 
-export const getCartItems = async (): Promise<CartItem[]> => {
-  const data = await apiRequest<{ cartItems: CartItem[] }>(
-    "/api/cart/getCartItems",
-    {
-      authMessage: "Please sign in to see your cart",
-      statusMessages: { 401: UNAUTHENTICATED },
-    },
-  )
-  return data.cartItems
+/**
+ * `warning` is the server telling us it removed something — a members-only item
+ * whose membership lapsed, or an offer that stopped running while it sat there.
+ * It used to be dropped on the floor here, so those items simply vanished from
+ * the cart with no explanation.
+ */
+export const getCartItems = async (): Promise<{
+  cartItems: CartItem[]
+  warning: string | null
+}> => {
+  const data = await apiRequest<{
+    cartItems: CartItem[]
+    warning?: string | null
+  }>("/api/cart/getCartItems", {
+    authMessage: "Please sign in to see your cart",
+    statusMessages: { 401: UNAUTHENTICATED },
+  })
+  return { cartItems: data.cartItems ?? [], warning: data.warning ?? null }
 }
 
 export const addItemToCart = async (item: AddCartItem): Promise<CartItem> => {

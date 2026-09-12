@@ -13,6 +13,7 @@ import { termAndConditions } from "../legal/term-and-conditions"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
+import { isOfferLive } from "../lib/offerAvailability"
 import { getErrorMessage } from "../utils/getError"
 import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
@@ -377,21 +378,70 @@ export const showOfferForClient = async (req: Request, res: Response) => {
     // isActive was missing here, so the public home carousel was advertising
     // deactivated offers. `audience` rides along as a scalar so the carousel
     // can vary its call to action.
+    //
+    // Only the two flags are asked of the database. The dates are applied below,
+    // *after* the cache read, so the clock running past an offer's `endsAt` drops it
+    // immediately instead of waiting out the 120s entry — caching the verdict would
+    // freeze `now` for the life of that entry.
+    //
+    // What this does not buy: the dates themselves are cached values, so an admin
+    // *editing* `startsAt`/`endsAt` is stale for up to the TTL, exactly like a rename or
+    // a price change. Time passing is the case worth being exact about, because it is
+    // the one that happens without anyone doing anything.
     const offers = await cached(
       CACHE_KEYS.clientOffers,
       OFFERS_TTL_SECONDS,
       () =>
         db.offer.findMany({
-          where: { isActive: true },
-          include: {
+          where: { isActive: true, archivedAt: null },
+          // Spelled out rather than an `include` - see the note on `showOffers`' select.
+          // The window columns are selected because `isOfferLive` below reads them; they
+          // are the only four the carousel does not render.
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            image: true,
+            audience: true,
+            dessertId: true,
+            categoryId: true,
+            itemPriceInCents: true,
+            discountAmount: true,
+            limit: true,
+            isActive: true,
+            startsAt: true,
+            endsAt: true,
+            archivedAt: true,
             dessert: { select: { imagePath: true } },
             category: { select: { desserts: { select: { imagePath: true } } } },
           },
         }),
     )
 
+    // Redis hands back JSON, so the dates arrive as strings on a cache hit and as
+    // Date objects on a miss. Normalised here rather than trusted either way.
+    const now = new Date()
+    const live = offers
+      .filter(({ isActive, startsAt, endsAt, archivedAt }) =>
+        isOfferLive(
+          {
+            isActive,
+            // Redis hands back JSON, so these are ISO strings on a cache hit and Dates
+            // on a miss. Normalised here rather than trusted to be either.
+            startsAt: startsAt === null ? null : new Date(startsAt),
+            endsAt: endsAt === null ? null : new Date(endsAt),
+            archivedAt: archivedAt === null ? null : new Date(archivedAt),
+          },
+          now,
+        ),
+      )
+      // The window decided the filter and then stays here: the server is what gates on
+      // it, and putting it on the wire only invites the app to form a second, drifting
+      // opinion about whether an offer is live. Same rule as `showOffers`.
+      .map(({ isActive, startsAt, endsAt, archivedAt, ...offer }) => offer)
+
     res.set("Cache-Control", "public, max-age=60")
-    res.status(200).json({ offers })
+    res.status(200).json({ offers: live })
     return
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch offers" })

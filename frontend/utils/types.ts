@@ -177,6 +177,13 @@ export type OfferRequirement = {
   dessertId: string | null
   categoryId: string | null
   quantity: number
+  /**
+   * Exactly one of these is set in practice, though nothing in the schema enforces it.
+   * They exist so the card can name what unlocks the offer instead of showing a greyed
+   * button with no explanation — see `describeRequirements`.
+   */
+  dessert: { name: string } | null
+  category: { name: string } | null
 }
 
 /** Who an offer is for. Mirrors the OfferAudience enum in the Prisma schema. */
@@ -205,6 +212,11 @@ export type Offer = {
    */
   discountAmount: number | null
   limit: number
+  /**
+   * The allowance resets every Monday, so spending it is not the end of the offer --
+   * `renewWeeklyOffers` on the server is what resets it.
+   */
+  renewsWeekly: boolean
   dessert: Dessert | null
   category: DessertCategory | null
   requirements: OfferRequirement[]

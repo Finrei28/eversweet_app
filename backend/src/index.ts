@@ -11,7 +11,7 @@ import { clearScheduledOrders } from "./lib/orderRelay"
 import {
   checkRestaurantStatus,
   getFutureOrders,
-  renewMochiOffer,
+  renewWeeklyOffers,
   updateDailySpecial,
 } from "./controllers/admin.controller"
 import { settleMonthlyWinners } from "./controllers/client.controller"
@@ -52,7 +52,7 @@ try {
   cron.schedule("* * * * *", checkRestaurantStatus, {
     timezone: "Pacific/Auckland",
   })
-  cron.schedule("0 0 * * 1", renewMochiOffer, {
+  cron.schedule("0 0 * * 1", renewWeeklyOffers, {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * *", updateDailySpecial, {

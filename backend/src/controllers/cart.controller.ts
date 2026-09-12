@@ -16,7 +16,44 @@ import {
   isNewCustomer,
   offerRefusalMessage,
 } from "../lib/offerAudience"
+import { isOfferLive } from "../lib/offerAvailability"
 import { offerUnitPriceInCents } from "../lib/offerPricing"
+
+/**
+ * Handing a held redemption back, as one `data` block because all four release paths -
+ * removing an item, clearing the cart, the cart expiring, and a membership lapsing -
+ * have to agree.
+ *
+ * `status` goes with `used`. Releasing used to move the counter alone, which was
+ * harmless only while `status` was written REDEEMED on every use; now that it means
+ * "used up", leaving it behind would lock a gated offer out for good the first time
+ * somebody changed their mind. AVAILABLE is unconditionally right here: redeeming
+ * refuses at `used >= limit`, so `used <= limit` always, and every release below is
+ * guarded by `used > 0` - so afterwards `used <= limit - 1`, which is short of the limit.
+ */
+const RELEASE_REDEMPTION = {
+  used: { decrement: 1 },
+  status: "AVAILABLE",
+} as const
+
+/**
+ * A refusal the customer should be told about, thrown from inside the cart transaction.
+ *
+ * `redeemOfferForUser` threw plain Errors, which land in the generic catch and come back
+ * as "Internal server error" - so tapping Redeem on an offer that had just run out said
+ * the server was broken. The app takes the server's message as the single source of
+ * truth for a rejected offer (see the comment in the app's store/cart.ts), so the reason
+ * has to survive the trip.
+ */
+export class OfferUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "OfferUnavailableError"
+  }
+}
 
 // function getNextMonday(fromDate = new Date()): Date {
 //   const date = new Date(fromDate)
@@ -225,22 +262,50 @@ export const redeemOfferForUser = async (
 ) => {
   const offer = await tx.offer.findUnique({
     where: { id: offerId },
-    include: { requirements: true },
+    // Spelled out rather than an `include`: see the note on `showOffers`' select. The
+    // four window columns are read by `isOfferLive` below, so they are genuinely used
+    // here even though the app never sees them.
+    select: {
+      limit: true,
+      isActive: true,
+      startsAt: true,
+      endsAt: true,
+      archivedAt: true,
+      requirements: { select: { id: true } },
+    },
   })
-  if (!offer) throw new Error("Offer does not exist")
+  if (!offer) throw new OfferUnavailableError("Offer does not exist", 404)
+  // Offers are never deleted - archiving is the supported way to retire one - so the
+  // check above has never actually refused anything. This is the one that does.
+  if (!isOfferLive(offer)) {
+    throw new OfferUnavailableError("Offer may be expired or finished", 404)
+  }
+
   const existing = await tx.offerRedemption.findUnique({
     where: {
       offerId_userId: { offerId, userId },
     },
+    // The other path that returned 42703 on the dropped `renewsAt`, and the reason
+    // adding any offer item to a cart was failing. Three fields are all this needs.
+    select: { id: true, used: true, status: true },
   })
+
+  // REDEEMED only at the limit. Writing it on every use meant the gate below refused
+  // the second use whatever `limit` said, so `limit > 1` was meaningless on any offer
+  // carrying requirements.
+  const statusAfter = (used: number) =>
+    used >= offer.limit ? ("REDEEMED" as const) : ("AVAILABLE" as const)
 
   if (existing) {
     if (existing.used >= offer.limit) {
-      throw new Error("Offer usage limit reached")
+      throw new OfferUnavailableError("You have used this offer already", 409)
     }
 
     if (offer.requirements.length > 0 && existing.status !== "AVAILABLE") {
-      throw new Error("Requirements to unlock offer not met")
+      throw new OfferUnavailableError(
+        "Place a qualifying order to unlock this offer",
+        409,
+      )
     }
 
     return await tx.offerRedemption.update({
@@ -248,9 +313,21 @@ export const redeemOfferForUser = async (
       data: {
         used: { increment: 1 },
         redeemedAt: new Date(),
-        status: "REDEEMED",
+        status: statusAfter(existing.used + 1),
       },
     })
+  }
+
+  // No row means nobody has unlocked this for them. The branch below used to create one
+  // outright, skipping the requirement check entirely, so a gated offer could be taken
+  // once by POSTing its id straight at addItemToCart - unreachable through the UI only
+  // because the button is hidden. It matters more now that the admin's Close run
+  // *deletes* these rows: a deleted row is exactly this state.
+  if (offer.requirements.length > 0) {
+    throw new OfferUnavailableError(
+      "Place a qualifying order to unlock this offer",
+      409,
+    )
   }
 
   // Create new redemption
@@ -260,7 +337,7 @@ export const redeemOfferForUser = async (
       userId,
       used: 1,
       redeemedAt: new Date(),
-      status: "REDEEMED",
+      status: statusAfter(1),
     },
   })
 }
@@ -312,7 +389,18 @@ export const addItemToCart = async (req: Request, res: Response) => {
       cartItem.offerId
         ? db.offer.findUnique({
             where: { id: cartItem.offerId },
-            include: { dessert: true },
+            // Spelled out rather than an `include` - see the note on `showOffers`'
+            // select. `dessert` is narrowed to the one field the pricing reads.
+            select: {
+              audience: true,
+              itemPriceInCents: true,
+              discountAmount: true,
+              isActive: true,
+              startsAt: true,
+              endsAt: true,
+              archivedAt: true,
+              dessert: { select: { priceInCents: true } },
+            },
           })
         : Promise.resolve(null),
       loadCustomisations(cartItem.customisations),
@@ -334,7 +422,9 @@ export const addItemToCart = async (req: Request, res: Response) => {
     }
 
     if (cartItem.offerId) {
-      if (!offer) {
+      // `!offer` never fires - offers are archived, never deleted - so until the dates
+      // and archivedAt landed here a paused or expired offer still repriced the item.
+      if (!offer || !isOfferLive(offer)) {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
       }
@@ -612,6 +702,12 @@ export const addItemToCart = async (req: Request, res: Response) => {
       })
       return
     }
+    // Carries its own status and wording. Reported as "Internal server error" until
+    // now, which told a customer the shop was broken when the offer had simply run out.
+    if (error instanceof OfferUnavailableError) {
+      res.status(error.status).json({ message: error.message })
+      return
+    }
     console.error(error)
     res.status(500).json({ success: false, message: "Internal server error" })
     return
@@ -640,8 +736,17 @@ export const getCartItems = async (req: Request, res: Response) => {
               offerId: true,
               loyaltyPointsUsed: true,
               // Needed below to tell a members-only item (which dies with a
-              // lapsed membership) from one anybody may hold.
-              offer: { select: { audience: true } },
+              // lapsed membership) from one anybody may hold, and to tell
+              // whether the offer behind it still stands at all.
+              offer: {
+                select: {
+                  audience: true,
+                  isActive: true,
+                  startsAt: true,
+                  endsAt: true,
+                  archivedAt: true,
+                },
+              },
             },
           },
         },
@@ -681,7 +786,7 @@ export const getCartItems = async (req: Request, res: Response) => {
           .map((item) =>
             db.offerRedemption.updateMany({
               where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-              data: { used: { decrement: 1 } },
+              data: RELEASE_REDEMPTION,
             }),
           ),
       ])
@@ -693,34 +798,57 @@ export const getCartItems = async (req: Request, res: Response) => {
 
     let warning: string | null = null
 
-    // A lapsed membership only invalidates the members-only offers. An offer
-    // open to everyone (or to new customers) is still perfectly valid, so it
-    // must survive — this used to delete every offer item indiscriminately,
-    // which would strip a non-member's legitimate item on every cart load.
-    if (!membership?.isActive && cart) {
-      const memberOnlyItems = cart.cartItems.filter(
-        (item) => item.offerId && item.offer?.audience === "MEMBERS",
+    if (cart) {
+      const now = new Date()
+
+      // A lapsed membership only invalidates the members-only offers. An offer
+      // open to everyone (or to new customers) is still perfectly valid, so it
+      // must survive — this used to delete every offer item indiscriminately,
+      // which would strip a non-member's legitimate item on every cart load.
+      const memberOnlyItems = !membership?.isActive
+        ? cart.cartItems.filter(
+            (item) => item.offerId && item.offer?.audience === "MEMBERS",
+          )
+        : []
+
+      // The other way a held offer item stops standing: the offer ended, was
+      // archived, or was switched off while the item sat in the cart. Nothing
+      // swept these, so the cart kept the offer price for as long as it lived —
+      // all the way through the payment intent and into the order, because
+      // `calculateCartPrice` reads the discount stored on the row and never asks
+      // the offer whether it is still running. Closing a run in the admin left
+      // every cart already holding the offer able to buy at its price.
+      const retiredOfferItems = cart.cartItems.filter(
+        (item) => item.offerId && item.offer && !isOfferLive(item.offer, now),
       )
 
-      if (memberOnlyItems.length > 0) {
+      // One item can qualify both ways; deleting it twice would be harmless but
+      // releasing its redemption twice would hand back a use it never had.
+      const doomed = [...new Set([...memberOnlyItems, ...retiredOfferItems])]
+
+      if (doomed.length > 0) {
         // Releases and the delete hit different tables, so they go together.
         const [, deletedItems] = await Promise.all([
           Promise.all(
-            memberOnlyItems.map((item) =>
+            doomed.map((item) =>
               db.offerRedemption.updateMany({
                 where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-                data: { used: { decrement: 1 } },
+                data: RELEASE_REDEMPTION,
               }),
             ),
           ),
           db.cartItem.deleteMany({
-            where: { id: { in: memberOnlyItems.map((item) => item.id) } },
+            where: { id: { in: doomed.map((item) => item.id) } },
           }),
         ])
 
         if (deletedItems.count > 0) {
           warning =
-            "One or more items in your cart requires an active membership. These items have been removed from your cart."
+            memberOnlyItems.length > 0 && retiredOfferItems.length > 0
+              ? "Some items in your cart are no longer available. They have been removed from your cart."
+              : memberOnlyItems.length > 0
+                ? "One or more items in your cart requires an active membership. These items have been removed from your cart."
+                : "One or more offers in your cart is no longer available. Those items have been removed from your cart."
         }
       }
     }
@@ -813,9 +941,7 @@ export const clearCart = async (req: Request, res: Response) => {
               userId,
               used: { gt: 0 },
             },
-            data: {
-              used: { decrement: 1 },
-            },
+            data: RELEASE_REDEMPTION,
           })
         }
 
@@ -886,9 +1012,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
               userId,
               used: { gt: 0 },
             },
-            data: {
-              used: { decrement: 1 },
-            },
+            data: RELEASE_REDEMPTION,
           })
         }
 
@@ -1071,9 +1195,21 @@ export const updateCartItem = async (req: Request, res: Response) => {
     if (existingCartItem.offerId) {
       const offer = await db.offer.findUnique({
         where: { id: existingCartItem.offerId },
-        include: { dessert: true },
+        // Same narrowed shape as addItemToCart, for the same reason.
+        select: {
+          audience: true,
+          itemPriceInCents: true,
+          discountAmount: true,
+          isActive: true,
+          startsAt: true,
+          endsAt: true,
+          archivedAt: true,
+          dessert: { select: { priceInCents: true } },
+        },
       })
-      if (!offer) {
+      // Same liveness check as addItemToCart: editing a line must not reprice it
+      // against an offer that has since been paused, archived or run out.
+      if (!offer || !isOfferLive(offer)) {
         res.status(404).json({ message: "Offer may be expired or finished" })
         return
       }

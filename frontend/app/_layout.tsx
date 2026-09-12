@@ -26,6 +26,10 @@ import { queryClient, subscribeAppStateFocus } from "@/services/queryClient"
 SplashScreen.preventAutoHideAsync()
 
 // Module scope: a new object each render remounts every toast that is on screen.
+// Wrapping has to be set here, not at the call site. Toast.show's `props` object
+// arrives at BaseToast as a nested `props` key, which BaseToast never reads — it
+// takes text1NumberOfLines from its own arguments, defaulting to one line. So a
+// type without an entry below silently truncates its message to "One or more…".
 const toastConfig = {
   error: (props: any) => (
     <BaseToast
@@ -33,6 +37,17 @@ const toastConfig = {
       style={{ borderLeftColor: "red" }}
       contentContainerStyle={{ paddingHorizontal: 10 }}
       text1NumberOfLines={0} // allow wrapping
+      text2NumberOfLines={0}
+    />
+  ),
+  // Used when the server tells us it removed something from the cart. Those
+  // messages are a full sentence, so they need the same wrapping.
+  info: (props: any) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: "#87CEFA" }}
+      contentContainerStyle={{ paddingHorizontal: 10 }}
+      text1NumberOfLines={0}
       text2NumberOfLines={0}
     />
   ),

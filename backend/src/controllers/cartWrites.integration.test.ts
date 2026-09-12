@@ -16,6 +16,11 @@ vi.mock("../lib/redis", () => ({
 
 const ADD = "/api/cart/addItemToCart"
 const SET_QUANTITY = "/api/cart/updateCartItemQuantity"
+const REMOVE_ITEM = "/api/cart/removeItemFromCart"
+const GET_CART = "/api/cart/getCartItems"
+
+const loadCart = (userId: string) =>
+  request(app).get(GET_CART).set("Authorization", `Bearer ${tokenFor(userId)}`)
 
 const addItem = (
   userId: string,
@@ -127,7 +132,10 @@ describeIfDb("cart write paths", () => {
     })
 
     expect(redemption?.used).toBe(1)
-    expect(redemption?.status).toBe("REDEEMED")
+    // AVAILABLE, not REDEEMED: this offer allows two and only one has been taken.
+    // `status` used to be written REDEEMED on every use, which is what made `limit > 1`
+    // meaningless on any offer carrying requirements.
+    expect(redemption?.status).toBe("AVAILABLE")
   })
 
   /**
@@ -160,6 +168,286 @@ describeIfDb("cart write paths", () => {
     const cart = await db.cart.findUnique({ where: { userId: user.id } })
 
     expect(cart?.totalPriceInCents).toBe(960)
+  })
+
+  /**
+   * `startsAt`, `endsAt` and `archivedAt` arrived on 2026-09-12 and nothing here read
+   * them, so a run scheduled for next month was served today and one that ended last
+   * week was still being served. Offers are archived rather than deleted, so the
+   * pre-existing `!offer` check never refused any of these.
+   */
+  describe.each([
+    { state: "ended", data: { endsAt: new Date(Date.now() - 60_000) } },
+    { state: "not started", data: { startsAt: new Date(Date.now() + 86_400_000) } },
+    { state: "archived", data: { archivedAt: new Date() } },
+    { state: "paused", data: { isActive: false } },
+  ])("an offer that is $state", ({ data }) => {
+    it("is refused, and holds no redemption", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      const offer = await db.offer.create({
+        data: {
+          name: "Not available",
+          audience: "EVERYONE",
+          dessertId: dessert.id,
+          itemPriceInCents: 500,
+          ...data,
+        },
+      })
+
+      const res = await addItem(user.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+        offerId: offer.id,
+      })
+
+      expect(res.status).toBe(404)
+      expect(await db.offerRedemption.count()).toBe(0)
+      expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
+    })
+  })
+
+  /**
+   * `status` used to be written REDEEMED on every use, and the requirement gate keys off
+   * `status`, so the second use was refused whatever `limit` said - `limit > 1` was
+   * meaningless on any offer carrying requirements.
+   */
+  it("lets a gated offer be used up to its limit, not just once", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Twice is fine",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+        limit: 2,
+        requirements: { create: [{ dessertId: dessert.id, quantity: 1 }] },
+      },
+    })
+    // What the post-order unlock sweep writes when the requirements are met.
+    await db.offerRedemption.create({
+      data: { offerId: offer.id, userId: user.id, status: "AVAILABLE" },
+    })
+
+    const first = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    expect(first.status).toBe(201)
+
+    // Still short of the limit, so still AVAILABLE - this is the bit that used to flip
+    // to REDEEMED and lock the second use out.
+    const afterFirst = await db.offerRedemption.findUnique({
+      where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+    })
+    expect(afterFirst?.used).toBe(1)
+    expect(afterFirst?.status).toBe("AVAILABLE")
+
+    const second = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    expect(second.status).toBe(201)
+
+    const afterSecond = await db.offerRedemption.findUnique({
+      where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+    })
+    expect(afterSecond?.used).toBe(2)
+    expect(afterSecond?.status).toBe("REDEEMED")
+
+    const third = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    expect(third.status).toBe(409)
+  })
+
+  /**
+   * The create branch used to write a redemption without checking requirements at all,
+   * so POSTing a gated offer's id straight at this endpoint took it once - unreachable
+   * through the UI only because the button is hidden. It matters more now that Close run
+   * *deletes* redemption rows: a deleted row is exactly this state.
+   */
+  it("refuses a gated offer nobody has unlocked", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Earn it first",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 0,
+        requirements: { create: [{ dessertId: dessert.id, quantity: 4 }] },
+      },
+    })
+
+    const res = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+
+    expect(res.status).toBe(409)
+    expect(res.body.message).toMatch(/qualifying order/i)
+    expect(await db.offerRedemption.count()).toBe(0)
+  })
+
+  /**
+   * Releasing used to move `used` alone. That was harmless only while `status` was
+   * written REDEEMED on every use; now that REDEEMED means "used up to the limit",
+   * leaving it behind would lock a gated offer out for good the first time somebody
+   * changed their mind about the item.
+   */
+  it("hands a gated offer back when its item is removed", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Changed my mind",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+        requirements: { create: [{ dessertId: dessert.id, quantity: 1 }] },
+      },
+    })
+    await db.offerRedemption.create({
+      data: { offerId: offer.id, userId: user.id, status: "AVAILABLE" },
+    })
+
+    const added = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    expect(added.status).toBe(201)
+
+    const res = await request(app)
+      .delete(`${REMOVE_ITEM}/${added.body.cartItem.id}`)
+      .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+
+    expect(res.status).toBe(200)
+
+    const released = await db.offerRedemption.findUnique({
+      where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+    })
+    expect(released?.used).toBe(0)
+    expect(released?.status).toBe("AVAILABLE")
+
+    // And it is genuinely usable again, not just recorded as such.
+    const again = await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    expect(again.status).toBe(201)
+  })
+
+  /**
+   * An offer can stop running while its item sits in a cart — the run ends, the admin
+   * archives it, or Close run switches it off. Nothing swept those items, so the cart
+   * kept the offer price right through the payment intent and into the order, because
+   * `calculateCartPrice` reads the discount stored on the row. Closing a run left every
+   * cart already holding the offer able to buy at its price.
+   */
+  describe.each([
+    { state: "ended", data: { endsAt: new Date(Date.now() - 60_000) } },
+    { state: "archived", data: { archivedAt: new Date() } },
+    { state: "switched off by Close run", data: { isActive: false } },
+  ])("an offer held in a cart that is then $state", ({ data }) => {
+    it("is removed from the cart, and its redemption handed back", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      const offer = await db.offer.create({
+        data: {
+          name: "Running, for now",
+          audience: "EVERYONE",
+          dessertId: dessert.id,
+          itemPriceInCents: 500,
+        },
+      })
+
+      const added = await addItem(user.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+        offerId: offer.id,
+      })
+      expect(added.status).toBe(201)
+
+      // The offer stops running underneath the cart.
+      await db.offer.update({ where: { id: offer.id }, data })
+
+      const res = await loadCart(user.id)
+
+      expect(res.status).toBe(200)
+      expect(res.body.cartItems).toHaveLength(0)
+      expect(res.body.warning).toMatch(/no longer available/i)
+
+      const redemption = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(redemption?.used).toBe(0)
+      expect(redemption?.status).toBe("AVAILABLE")
+    })
+  })
+
+  it("leaves an ordinary item alone when an offer item is swept", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const plain = await makeDessert(800)
+    const offer = await db.offer.create({
+      data: {
+        name: "About to end",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+      },
+    })
+
+    await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+    await addItem(user.id, { dessertId: plain.id, itemPriceInCents: 800 })
+
+    await db.offer.update({
+      where: { id: offer.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    })
+
+    const res = await loadCart(user.id)
+
+    expect(res.body.cartItems).toHaveLength(1)
+    expect(res.body.cartItems[0].dessert.id).toBe(plain.id)
+  })
+
+  it("says nothing when every offer in the cart is still running", async () => {
+    const user = await makeUser()
+    const dessert = await makeDessert(1200)
+    const offer = await db.offer.create({
+      data: {
+        name: "Still going",
+        audience: "EVERYONE",
+        dessertId: dessert.id,
+        itemPriceInCents: 500,
+        endsAt: new Date(Date.now() + 86_400_000),
+      },
+    })
+
+    await addItem(user.id, {
+      dessertId: dessert.id,
+      itemPriceInCents: 1200,
+      offerId: offer.id,
+    })
+
+    const res = await loadCart(user.id)
+
+    expect(res.body.cartItems).toHaveLength(1)
+    expect(res.body.warning).toBeNull()
   })
 
   it("writes nothing at all when the customer cannot afford the points", async () => {
