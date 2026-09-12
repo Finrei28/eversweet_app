@@ -39,12 +39,19 @@ const OfferCard = React.memo(function OfferCard({
 }: OfferCardProps) {
   const uri = offerImage(offer)
 
-  // Only ever the requirements case. AUDIENCE already shows an Unlock pill and
-  // LIMIT_REACHED already says "Redeemed"; this is the one that had no copy at all.
-  const unlockHint =
+  // AUDIENCE needs no line — it already shows an Unlock pill. The other two both
+  // rendered as a grey box with nothing to explain it: a gated offer nobody had
+  // earned looked identical to one already used up, and a weekly perk whose
+  // allowance was spent looked gone for good rather than back on Monday.
+  //
+  // "each Monday" rather than "on Monday" deliberately: the reset runs at Monday
+  // 00:00 NZ, so on a Monday "back on Monday" reads as today when it means next week.
+  const hint =
     unavailableReason === "REQUIREMENTS_NOT_MET"
       ? describeRequirements(offer)
-      : null
+      : unavailableReason === "LIMIT_REACHED" && offer.renewsWeekly
+        ? "Back again each Monday"
+        : null
 
   return (
     <View className="bg-white rounded-xl shadow-sm p-4 flex-row items-center">
@@ -123,9 +130,7 @@ const OfferCard = React.memo(function OfferCard({
           </Text>
         )}
 
-        {unlockHint && (
-          <Text className="text-gray-500 text-xs mt-1">{unlockHint}</Text>
-        )}
+        {hint && <Text className="text-gray-500 text-xs mt-1">{hint}</Text>}
       </View>
 
       {locked ? (

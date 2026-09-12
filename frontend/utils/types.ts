@@ -212,6 +212,11 @@ export type Offer = {
    */
   discountAmount: number | null
   limit: number
+  /**
+   * The allowance resets every Monday, so spending it is not the end of the offer --
+   * `renewWeeklyOffers` on the server is what resets it.
+   */
+  renewsWeekly: boolean
   dessert: Dessert | null
   category: DessertCategory | null
   requirements: OfferRequirement[]
