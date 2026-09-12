@@ -107,6 +107,18 @@ now **fail rather than skip** when the server is down, so check it is running
 `pg_ctl start` does not return in a tool-driven shell — the server inherits the pipe —
 so run it in the background and verify with `pg_isready` separately.
 
+**Rebuilding that database after a schema change needs care: `DATABASE_URL` in
+`backend/.env` is production Supabase.** `prisma db push` reads it, and `DIRECT_URL`
+alongside it, so running it from `backend/` pushes the schema at the live database.
+`setup.ts` only redirects `DATABASE_URL` for vitest; nothing protects a CLI invocation.
+Push from a throwaway directory holding a copy of `schema.prisma` and a `.env` carrying
+only the test URL for **both** variables, and check the "Datasource" line names
+`eversweet_test` before trusting it.
+
+The website repo has its own test database on this same cluster — `eversweet_web_test`,
+deliberately separate, because both suites truncate every table and would otherwise clear
+each other's rows mid-run.
+
 `SQL_TIMING=1` logs per-statement and per-operation timings (verbs only, never parameters
 or values) and enables the startup latency probe — safe to turn on in production for a
 few minutes.
@@ -217,6 +229,47 @@ with builds already on people's phones, but the server recomputes every figure f
 dessert, promo, membership and offer rows and ignores what was sent. GST is *extracted*
 from the inclusive price with `gstFromInclusive` (×3/23), never applied on top.
 
+**Offer rules live in three libs, and none of them is guessable from the rows.** Offers are
+authored in the website's `/admin` and only ever read here.
+
+- **`lib/offerAvailability`** — `isOfferLive(offer)` for a row you have, `liveOfferWhere()`
+  as a Prisma fragment for one you are fetching. Both bounds **inclusive**, `NULL` means
+  "no bound", archived is never live. It mirrors `isWithinActiveWindow` in the website
+  repo: if the two drift, the admin's status badge says LIVE on an offer this server
+  refuses. Every path that serves or prices an offer gates on it — three list queries and
+  three by-id fetches. The by-id ones had no active check at all until 2026-09-12, so a
+  paused offer repriced a cart.
+- **`lib/offerPricing.offerUnitPriceInCents`** — the one definition of what an offer unit
+  costs. `itemPriceInCents` is checked for null and never for truthiness, because **0 is a
+  real price**: it is how an offer gives an item away. `discountAmount` is **whole
+  percent** since the 2026-09-12 migration; it was a `Decimal` fraction before, and the
+  old `1 - x` reading priced a 20% offer at -19× list.
+
+  Since `20260914000000_offer_pricing_rules` the database enforces what was previously
+  only convention: `Offer_exactly_one_price` makes `itemPriceInCents` and `discountAmount`
+  mutually exclusive, and `discountAmount` must be 1–100. Both are invisible to Prisma and
+  **absent from the test databases**, which are built with `db push` — so the suites prove
+  the code, not the constraints.
+- **`lib/offerAudience`** — who an offer is for, plus the refusal wording.
+
+`OfferRedemption.status` becomes `REDEEMED` only when `used` reaches `limit`. Writing it on
+every use made `limit > 1` meaningless on any offer with requirements, because the gate
+keys off `status`. Two consequences, both load-bearing: `redeemOfferForUser`'s create
+branch must refuse an offer that has requirements (no row means nobody unlocked it — and
+the admin's **Close run** *deletes* rows, which is exactly that state), and all four
+release paths must write `status: "AVAILABLE"` alongside `used: { decrement: 1 }` or a
+gated offer is locked out for good. That is safe unconditionally: redeeming refuses at
+`used >= limit`, and every release is guarded by `used > 0`.
+
+**Never `include` an `Offer` or `OfferRedemption` — list the fields.** Prisma selects every
+scalar the generated client knows about, so a client built either side of an unapplied
+migration asks for a column the database lacks: Postgres `42703`, and on 2026-09-12 that
+took out the offers screen and offer add-to-cart over `renewsAt`, a column nothing read.
+The window columns are deliberately kept off the wire too — the server gates on them, and
+sending them invites the app to form a second, drifting opinion. `showOffers` asserts its
+exact response shape, because a hand-written select can drop a field the app needs in one
+line and the screen would just render blanks.
+
 **Order creation.** `POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
 keyed on the `Idempotency-Key` header and falling back to the payment intent for older
 builds. The card is charged *before* this endpoint is reached, so the controller's rule is
@@ -234,7 +287,8 @@ payment. A two-minute cron re-sweeps as a backstop for anything a restart droppe
 room membership is decided by the JWT role in `lib/socketAuth`.
 
 Cron (`index.ts`) all runs in `Pacific/Auckland`: kitchen sweep every 2 min, restaurant
-status every minute, weekly mochi offer, daily special, monthly leaderboard winner.
+status every minute, `renewWeeklyOffers` on Monday at 00:00, daily special, monthly
+leaderboard winner.
 
 ### frontend/ (customer app)
 
@@ -274,6 +328,24 @@ sync after a 500ms debounce, registered in a flush registry; checkout calls
 `flushPendingQuantitySyncs()` then awaits `whenCartWritesSettle()` before re-reading the
 cart, which is why the cart screen's checkout button stays live. Checkout mints its own
 `Crypto.randomUUID()` idempotency key and reuses it across payment retries.
+
+**`lib/offerHelpers.ts` mirrors the backend on purpose.** `canRedeemAudience` and
+`offerUnitPriceInCents` are deliberate copies of `lib/offerAudience` and `lib/offerPricing`
+on the server; if they drift, the app offers a Redeem button the server then refuses, or
+shows a price it then charges differently. `getOfferState` returns *why* an offer is
+unavailable, not just that it is, because a gated offer nobody has earned and one already
+used up otherwise render as the same grey box. The app does **not** gate on the offer
+window — the server does, and it does not send those columns.
+
+A cart response carries a `warning` when the server removed something (a members-only item
+after a membership lapsed, an offer that stopped running). Surface it; it used to be
+dropped, so items vanished with nothing said.
+
+**Toast wrapping has to be set in `toastConfig`, not at the call site.** `Toast.show`'s
+`props` object reaches `BaseToast` as a nested `props` key it never reads — it takes
+`text1NumberOfLines` from its own arguments, defaulting to one line. The
+`props: { text1NumberOfLines: 0 }` blocks dotted through the call sites are inert; those
+toasts only wrap because `app/_layout.tsx` sets it for that type.
 
 Customers have no socket connection — realtime for them is Expo push notifications
 (`services/notifications.ts`, token synced on launch and on every foreground).
