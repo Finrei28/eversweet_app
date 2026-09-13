@@ -21,6 +21,7 @@ import {
 import { calculateCartPrice } from "../lib/cartPricing"
 import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
+import { rankMonth } from "../lib/leaderboardRanking"
 
 //Helper function
 /**
@@ -1281,54 +1282,13 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
       return
     }
     // The New Zealand month, because that is what the app's copy promises and
-    // what calculateMonthlyWinner settles against. This filter spent a while
+    // what settleMonthlyWinners settles against. This filter spent a while
     // commented out, which quietly turned the board into an all-time ranking
     // that disagreed with its own description — and left the query summing every
     // positive loyalty record ever written, for every customer, on each view.
-    const { start, end } = nzMonthRange(new Date())
-
-    const leaderboard = await db.loyaltyRecord.groupBy({
-      by: ["loyaltyId"],
-      where: {
-        // Earnings only. `change > 0` alone is not enough: a refunded redemption
-        // is written back as a *positive* record, so redeeming points and then
-        // having the order cancelled left the points on the board — repeatably,
-        // with the balance restored. `reason` is a free-form string rather than
-        // an enum, so this pairs with the sign rather than replacing it.
-        change: { gt: 0 },
-        reason: "EARNED",
-        createdAt: {
-          gte: start,
-          lt: end,
-        },
-      },
-      _sum: {
-        change: true,
-      },
-      _max: {
-        createdAt: true,
-      },
-      orderBy: [
-        {
-          _sum: {
-            change: "desc",
-          },
-        },
-        // A tie goes to whoever got there first: of two customers level on
-        // points, the one whose last qualifying earning came earlier.
-        //
-        // Ties need *some* deterministic key or Postgres orders equal sums
-        // however the plan happens to emit them — three customers level across
-        // positions 9-11 meant one refresh put you at #10 and the next at #11.
-        // This particular key is the one settleMonthlyWinners uses to decide who
-        // is actually paid, and the two must not disagree: the board a customer
-        // watched all month has to be the board that pays out.
-        { _max: { createdAt: "asc" } },
-        // Last resort, for two customers whose final earning landed in the same
-        // millisecond. Arbitrary, but total — without it the order is undefined.
-        { loyaltyId: "asc" },
-      ],
-    })
+    //
+    // No `take`: a viewer outside the top ten still needs their position.
+    const leaderboard = await rankMonth(nzMonthRange(new Date()))
 
     // Read, not upsert: this is a GET, and the upsert it replaces created a
     // Loyalty row as a side effect of merely looking at the leaderboard. A
@@ -1365,10 +1325,28 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
     const loyaltyMap = new Map(loyalties.map((l) => [l.id, l]))
 
     const result = top10.map((entry) => {
-      const loyalty = loyaltyMap.get(entry.loyaltyId)
+      const user = loyaltyMap.get(entry.loyaltyId)?.User ?? null
 
       return {
-        user: loyalty?.User ?? null,
+        // Redacted here, not in the app. This used to send every top-ten
+        // customer's real first and last name with their `anonymousEnabled` flag
+        // and leave the hiding to the device — so an opted-out name reached every
+        // signed-in customer's phone, readable by anyone who looked at the
+        // response. The public banner was fixed the same way for the same reason;
+        // see lib/leaderboardDetails.
+        //
+        // `id` stays: the app compares it to highlight the viewer's own row. So
+        // does the flag, because builds already installed decide "Anonymous" from
+        // it — and null names read as "Anonymous" on those builds too, so nothing
+        // on anyone's screen changes.
+        user: user
+          ? {
+              id: user.id,
+              firstName: user.anonymousEnabled ? null : user.firstName,
+              lastName: user.anonymousEnabled ? null : user.lastName,
+              anonymousEnabled: user.anonymousEnabled,
+            }
+          : null,
         pointsEarned: entry._sum.change ?? 0,
       }
     })

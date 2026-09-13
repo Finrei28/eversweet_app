@@ -1,6 +1,10 @@
 import { Router } from "express"
 
-import { announceOrder } from "../controllers/internal.controller"
+import {
+  announceOrder,
+  assignRewardForService,
+  settleMonthForService,
+} from "../controllers/internal.controller"
 import { authenticateService } from "../middleware/serviceAuth"
 import { serviceLimiter } from "../middleware/rateLimiter"
 
@@ -15,6 +19,22 @@ router.post(
   serviceLimiter,
   authenticateService,
   announceOrder,
+)
+
+// The website's /admin/winners. Both write through the order server rather than
+// the database directly, so prize codes are minted and winners notified in one place.
+router.put(
+  "/winners/reward",
+  serviceLimiter,
+  authenticateService,
+  assignRewardForService,
+)
+
+router.post(
+  "/winners/settle",
+  serviceLimiter,
+  authenticateService,
+  settleMonthForService,
 )
 
 export default router

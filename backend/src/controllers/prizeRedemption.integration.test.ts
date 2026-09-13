@@ -200,6 +200,138 @@ describeIfDb("prize rewards", () => {
     })
   })
 
+  /**
+   * The website's /admin/winners. It used to write the reward row itself, with its own
+   * copy of the code generator and no way to push, so a prize assigned there reached the
+   * customer only if they happened to open the app.
+   */
+  describe("PUT /api/internal/winners/reward", () => {
+    const SECRET = "service-secret-for-prize-tests"
+
+    beforeEach(() => {
+      process.env.INTERNAL_SERVICE_SECRET = SECRET
+    })
+
+    // null for no header at all. Not undefined: passing undefined to a defaulted
+    // parameter takes the default, which is how this once sent the real secret.
+    const fromWebsite = (body: object, secret: string | null = SECRET) => {
+      const req = request(app).put("/api/internal/winners/reward")
+      if (secret !== null) req.set("x-service-secret", secret)
+      return req.send(body)
+    }
+
+    const inAFortnight = () => new Date(Date.now() + 14 * 24 * 3600 * 1000)
+
+    it("mints a code, keeps the chosen expiry, records who assigned it and tells the winner", async () => {
+      const { user, winner } = await makeWinner()
+      const expiresAt = inAFortnight()
+
+      const res = await fromWebsite({
+        winnerId: winner.id,
+        title: "A free mochi bowl",
+        adminId: "website-admin-1",
+        expiresAt: expiresAt.toISOString(),
+      })
+
+      expect(res.status).toBe(201)
+      expect(res.body.reward.code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/)
+      expect(res.body.notified).toBe(true)
+
+      const stored = await db.winnerReward.findFirstOrThrow()
+      expect(stored.expiresAt.toISOString()).toBe(expiresAt.toISOString())
+      expect(stored.assignedByAdminId).toBe("website-admin-1")
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(1)
+      expect(sendPushToUser.mock.calls[0][0]).toBe(user.id)
+      expect(sendPushToUser.mock.calls[0][3]).toMatchObject({ type: "PRIZE_READY" })
+    })
+
+    it("falls back to the fixed deadline when no expiry is sent", async () => {
+      const { winner } = await makeWinner()
+
+      await fromWebsite({ winnerId: winner.id, title: "A free mochi bowl" })
+
+      const stored = await db.winnerReward.findFirstOrThrow()
+      expect(stored.expiresAt.toISOString()).toBe(
+        nzMonthRange(new Date()).end.toISOString(),
+      )
+    })
+
+    it("refuses an expiry that has already passed, and mints nothing", async () => {
+      const { winner } = await makeWinner()
+
+      const res = await fromWebsite({
+        winnerId: winner.id,
+        title: "A free mochi bowl",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      })
+
+      expect(res.status).toBe(400)
+      expect(await db.winnerReward.count()).toBe(0)
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+
+    it("moves the deadline on an edit, keeps the code and does not push again", async () => {
+      const { winner, reward } = await makeWinner({ reward: {} })
+      const expiresAt = inAFortnight()
+
+      const res = await fromWebsite({
+        winnerId: winner.id,
+        title: "Two free mochi bowls",
+        expiresAt: expiresAt.toISOString(),
+      })
+
+      expect(res.status).toBe(200)
+      expect(res.body.reward.code).toBe(formatPrizeCode(reward!.code))
+
+      const stored = await db.winnerReward.findFirstOrThrow()
+      expect(stored.title).toBe("Two free mochi bowls")
+      expect(stored.expiresAt.toISOString()).toBe(expiresAt.toISOString())
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+
+    it("leaves the deadline alone on an edit that sends none", async () => {
+      const { winner, reward } = await makeWinner({ reward: {} })
+
+      await fromWebsite({ winnerId: winner.id, title: "Reworded" })
+
+      const stored = await db.winnerReward.findFirstOrThrow()
+      expect(stored.expiresAt.toISOString()).toBe(reward!.expiresAt.toISOString())
+    })
+
+    it("refuses a request without the service secret", async () => {
+      const { winner } = await makeWinner()
+
+      const res = await fromWebsite(
+        { winnerId: winner.id, title: "A free mochi bowl" },
+        null,
+      )
+
+      expect(res.status).toBe(401)
+      expect(await db.winnerReward.count()).toBe(0)
+    })
+
+    // The staff app's route keeps the fixed deadline whatever it is sent: the override
+    // exists for the website's date picker, and the staff app has never had one.
+    it("does not let the staff app's route set an expiry", async () => {
+      const { winner } = await makeWinner()
+
+      await request(app)
+        .put("/api/admin/assignWinnerReward")
+        .set("Authorization", asAdmin(adminId))
+        .send({
+          winnerId: winner.id,
+          title: "A free mochi bowl",
+          expiresAt: inAFortnight().toISOString(),
+        })
+
+      const stored = await db.winnerReward.findFirstOrThrow()
+      expect(stored.expiresAt.toISOString()).toBe(
+        nzMonthRange(new Date()).end.toISOString(),
+      )
+    })
+  })
+
   describe("GET /api/admin/getMonthlyWinners", () => {
     const podium = (period?: { month: number; year: number }) =>
       request(app)

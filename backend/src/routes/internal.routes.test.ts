@@ -2,9 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import express from "express"
 import request from "supertest"
 
-const { relayOrder } = vi.hoisted(() => ({ relayOrder: vi.fn() }))
+const { relayOrder, assignReward, settleCalendarMonth } = vi.hoisted(() => ({
+  relayOrder: vi.fn(),
+  assignReward: vi.fn(),
+  settleCalendarMonth: vi.fn(),
+}))
 
 vi.mock("../lib/orderRelay", () => ({ relayOrder }))
+
+// The prize cores are exercised against a real database in the prize and settle
+// suites. What is under test here is the routing and the secret in front of them.
+vi.mock("../controllers/prize.controller", () => ({
+  assignReward,
+  settleCalendarMonth,
+}))
 
 // Pass-through: the limiter needs Redis, and what is under test here is the
 // secret check and the handler behind it.
@@ -30,6 +41,8 @@ const announce = (secret?: string, body: unknown = { orderId: "order-1" }) => {
 
 beforeEach(() => {
   relayOrder.mockReset()
+  assignReward.mockReset()
+  settleCalendarMonth.mockReset()
   relayOrder.mockResolvedValue({ status: "delivered" })
   process.env.INTERNAL_SERVICE_SECRET = SECRET
 })
@@ -90,5 +103,78 @@ describe("POST /api/internal/orders/announce", () => {
 
     expect(res.status).toBe(500)
     expect(JSON.stringify(res.body)).not.toContain("connection terminated")
+  })
+})
+
+describe("PUT /api/internal/winners/reward", () => {
+  const assign = (secret?: string, body: object = { winnerId: "w-1", title: "Mochi" }) => {
+    const req = request(app).put("/api/internal/winners/reward")
+    if (secret !== undefined) req.set(SERVICE_SECRET_HEADER, secret)
+    return req.send(body)
+  }
+
+  it("passes the body through, adminId and expiry included, and answers with the outcome", async () => {
+    assignReward.mockResolvedValue({ status: 201, body: { notified: true } })
+
+    const res = await assign(SECRET, {
+      winnerId: "w-1",
+      title: "Mochi",
+      description: "Any flavour",
+      expiresAt: "2026-10-31T10:59:59.999Z",
+      adminId: "admin-9",
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body).toEqual({ notified: true })
+    expect(assignReward).toHaveBeenCalledWith({
+      winnerId: "w-1",
+      title: "Mochi",
+      description: "Any flavour",
+      expiresAt: "2026-10-31T10:59:59.999Z",
+      adminId: "admin-9",
+    })
+  })
+
+  it.each([["no secret", undefined], ["the wrong secret", "wrong-secret-value"]])(
+    "rejects a request with %s",
+    async (_label, secret) => {
+      expect((await assign(secret)).status).toBe(401)
+      expect(assignReward).not.toHaveBeenCalled()
+    },
+  )
+
+  it("reports a failure as a 500 without leaking the cause", async () => {
+    assignReward.mockRejectedValue(new Error("connection terminated"))
+
+    const res = await assign(SECRET)
+
+    expect(res.status).toBe(500)
+    expect(JSON.stringify(res.body)).not.toContain("connection terminated")
+  })
+})
+
+describe("POST /api/internal/winners/settle", () => {
+  const settle = (secret?: string) => {
+    const req = request(app).post("/api/internal/winners/settle")
+    if (secret !== undefined) req.set(SERVICE_SECRET_HEADER, secret)
+    return req.send({ month: 8, year: 2026 })
+  }
+
+  it("settles the month asked for and answers with the outcome", async () => {
+    settleCalendarMonth.mockResolvedValue({
+      status: 200,
+      body: { outcome: "RECORDED", recorded: 3 },
+    })
+
+    const res = await settle(SECRET)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ outcome: "RECORDED", recorded: 3 })
+    expect(settleCalendarMonth).toHaveBeenCalledWith(8, 2026)
+  })
+
+  it("rejects a request without the secret", async () => {
+    expect((await settle()).status).toBe(401)
+    expect(settleCalendarMonth).not.toHaveBeenCalled()
   })
 })

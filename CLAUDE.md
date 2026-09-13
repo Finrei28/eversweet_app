@@ -190,7 +190,7 @@ Route groups and how they authenticate:
 | `/api/auth`                                     | mixed — signup/signin are public and rate-limited, the rest take a bearer token |
 | `/api/cart`, `/api/notification`, `/api/stripe` | bearer token                            |
 | `/api/admin`                                    | bearer token + ADMIN role (`middleware/authorisation`) |
-| `/api/internal`                                 | server-to-server only; shared secret in `x-service-secret`, compared with `timingSafeEqual` over hashes. An unset `INTERNAL_SERVICE_SECRET` refuses everything. This is how the website announces its own paid orders to the kitchen. |
+| `/api/internal`                                 | server-to-server only; shared secret in `x-service-secret`, compared with `timingSafeEqual` over hashes. An unset `INTERNAL_SERVICE_SECRET` refuses everything. This is how the website announces its own paid orders to the kitchen, and how its `/admin/winners` assigns prizes and settles a missed month. |
 
 The Stripe webhook is mounted **before** `express.json()` with a raw body parser — a
 parsed body cannot be verified against Stripe's signature.
@@ -298,11 +298,13 @@ three are recorded permanently and the shop gives each of them a prize, which th
 in store by showing a code that staff type into the kitchen tablet. The point is a reason
 to come back within the month, and a public podium that makes winning visible.
 
-It spans four codebases: the order server owns the data, the customer app shows the board
-and the prizes, the staff app hands prizes over, and the **website's `/admin/winners`** is
-a second place to assign them. Models: `Loyalty` (a balance), `LoyaltyRecord` (the
-ledger — `change` is signed, `reason` is a free-form string, **not** an enum),
-`LoyaltyWinner` (one row per place per month) and `WinnerReward` (the prize and its code).
+It spans four codebases: the order server owns the data and is the **only writer of
+prizes**, the customer app shows the board and the prizes, the staff app hands prizes over,
+and the **website's `/admin/winners`** is a second screen for assigning them and settling a
+missed month — both of which it does by calling the order server, never the database.
+Models: `Loyalty` (a balance), `LoyaltyRecord` (the ledger — `change` is signed, `reason`
+is a free-form string, **not** an enum), `LoyaltyWinner` (one row per place per month) and
+`WinnerReward` (the prize and its code).
 
 **The lifecycle, in order**
 
@@ -310,25 +312,43 @@ ledger — `change` is signed, `reason` is a free-form string, **not** an enum),
    order. Per line: `floor(net dollars × rate × quantity × memberMultiplier)`, from
    `lib/loyaltyRates` (`rate` 6, `memberRate` 1.5 for an active membership). Written as
    `reason: "EARNED"`. **Website orders earn nothing** — only app orders reach the board.
-2. **Rank** — `GET /api/auth/getLeaderBoard`. A `groupBy` over `LoyaltyRecord` for the
-   month from `nzMonthRange`, top ten plus the viewer's own position. It filters on
+2. **Rank** — `GET /api/auth/getLeaderBoard`: top ten plus the viewer's own position, from
+   `lib/leaderboardRanking.rankMonth` over the month from `nzMonthRange`. It filters on
    `change > 0` **and** `reason: "EARNED"`: a refunded redemption is written back as a
    *positive* `REFUND` record, and the sign alone let a cancelled order's points climb the
    board. It reads the `Loyalty` row and never upserts one — this is a GET, and it used to
    create a row just for looking.
-3. **Settle** — `settleMonthlyWinners` at 00:00 NZ on the 1st. The same query with
+3. **Settle** — `settleMonthlyWinners` at 00:00 NZ on the 1st: the same `rankMonth` with
    `take: 3`, written in **one** `createMany` with `skipDuplicates` against
-   `@@unique([month, year, place])`: cron runs in every process, so instances race it, and
+   `@@unique([month, year, place])`. Cron runs in every process, so instances race it, and
    the loser writes nothing rather than half-settling a month. Settled once and never
    revisited — a March refund does not reopen February. It invalidates the banner cache.
-   **A month the cron misses is lost** unless backfilled with
-   `POST /api/admin/settleMonth` `{ month, year }`, which has **no UI**; call it directly.
+
+   It returns an `outcome`: `RECORDED`, `ALREADY_SETTLED` (earners existed but every place
+   was on file), `NO_EARNERS`, or `FAILED`. The cron ignores it and must never throw, so
+   the error is still swallowed there. **A month the cron misses is lost until settled by
+   hand** — the "Settle a missed month" button on the website's `/admin/winners`, which calls
+   `POST /api/internal/winners/settle`, or `POST /api/admin/settleMonth` with an admin token.
+   Both go through `settleCalendarMonth`, which refuses an unfinished month and answers
+   `FAILED` with a **500**: it used to answer 200, so a failed backfill read as a success.
 4. **Announce** — `GET /api/getLeaderboardDetails`: last month's podium for the in-app
    banner. Public, Redis-cached and sent `Cache-Control: public`, so names are redacted
    **on the server**, per winner (`lib/leaderboardDetails`). `lastMonthsWinner` is kept
    alongside `lastMonthsTopThree` because builds already installed read only the former.
-5. **Assign a prize** — staff decide what each winner gets; nothing is automatic. See the
-   table below: there are two surfaces and they differ.
+5. **Assign a prize** — staff decide what each winner gets; nothing is automatic. Two
+   screens, **one implementation**: `assignReward` in `prize.controller.ts`, reached by the
+   staff app through `PUT /api/admin/assignWinnerReward` and by the website through
+   `PUT /api/internal/winners/reward`. It mints the code, pushes `PRIZE_READY` on the first
+   assign (never on an edit — a second ping reads as a second prize), and holds every guard.
+   The website used to write the row itself, with its own code generator and no way to
+   push, so its prizes arrived in silence.
+
+   The one difference between the screens is the **expiry**. By default it is the end of the
+   month after the one won — derived from the month, so assigning late never extends it.
+   Only the internal route accepts `expiresAt`, which is the website's date picker: honoured
+   on the first assign if it is still in the future, and on an edit it moves the deadline
+   only when sent (into the past is how a prize is withdrawn). The staff app's route ignores
+   one, so its prizes always keep the fixed deadline.
 6. **Show** — `GET /api/auth/getMyPrizes`. The code is sent **only while it would be
    honoured**, so the app can never display a code the counter will refuse. Expired prizes
    drop out, collected ones stay for seven days, and a podium with no prize yet is shown
@@ -342,33 +362,27 @@ ledger — `change` is signed, `reason` is a free-form string, **not** an enum),
    win and no transaction is needed. An already-collected code is never reported as
    "invalid" — read as a typo, staff retype it and hand the prize over twice.
 
-**Two places assign prizes, and they do not behave the same**
-
-|                         | Staff app → `PUT /api/admin/assignWinnerReward` | Website → `winner.upsertReward` |
-| ----------------------- | ----------------------------------------------- | ------------------------------- |
-| Expiry on first assign  | Fixed: end of the month after the one won        | Admin picks a date, pinned to 23:59:59 NZ; the form defaults to the same rule |
-| Editing a prize         | Title and description only                       | Title, description **and expiry** |
-| Tells the customer      | Yes — `PRIZE_READY` push on first assign, never on an edit | **No** — the website cannot push |
-
-Both mint the code once and **never rotate it on an edit** (the customer may be holding a
-screenshot), both refuse a collected prize, and both refuse a winner whose account is
-closed — `LoyaltyWinner.userId` is `SetNull` on account deletion, so the podium row
-survives but there is nobody left to hand the prize to.
+A code is minted once and **never rotated on an edit** (the customer may be holding a
+screenshot). A collected prize cannot be changed, and a winner whose account is closed
+cannot be given one — `LoyaltyWinner.userId` is `SetNull` on account deletion, so the podium
+row survives with nobody left to hand the prize to. Two writers assigning the same winner at
+once get a 409 rather than a 500.
 
 **Things that must stay in step**
 
-- **The ranking query exists twice**, in `getLeaderBoard` and `settleMonthlyWinners`, and
-  both the filter and the ordering must stay identical — `_sum` desc, then
-  `_max(createdAt)` asc (a tie goes to whoever got there first), then `loyaltyId` asc so
-  the order is total. If they drift, the podium that pays is not the board customers
-  watched all month. `monthlyWinners.integration.test.ts` pins this.
-- **Prize codes are minted in two repos**: `backend/src/lib/prizeCode.ts` and the website's
-  `src/server/rewardCode.ts`. Eight characters from a 30-symbol alphabet with O/0, I/1/L
-  and U removed, stored bare and upper case, shown `XXXX-XXXX`. They must agree on alphabet
-  and length: `looksLikePrizeCode` rejects anything else before touching the database, so
-  a drift would make every website-assigned prize unredeemable at the counter. The staff
-  app's `lib/prizeCode.ts` mirrors the length and grouping only — deliberately not the
-  alphabet, so staff can always type what they see and the server answers "no such code".
+- **The ranking lives in one place**, `lib/leaderboardRanking.rankMonth`, and both the live
+  board and settlement call it. It used to be two copies of the same `groupBy`, and they
+  had already drifted once — settlement filtered on the sign alone after the board had
+  learned to filter on `reason`. The ordering is `_sum` desc, then `_max(createdAt)` asc (a
+  tie goes to whoever got there first), then `loyaltyId` asc so it is total. Do not
+  reintroduce a second copy.
+- **Prize codes are minted only here**, in `backend/src/lib/prizeCode.ts`: eight characters
+  from a 30-symbol alphabet with O/0, I/1/L and U removed, stored bare and upper case, shown
+  `XXXX-XXXX`. The website had its own generator that had to match this one exactly —
+  `looksLikePrizeCode` rejects anything else before touching the database, so a drift would
+  have made every website prize unredeemable. The staff app's `lib/prizeCode.ts` mirrors
+  the length and grouping only — deliberately not the alphabet, so staff can always type
+  what they see and the server answers "no such code".
 - **Every month boundary comes from `nzMonthRange`.** The host runs UTC; building months
   with `new Date(y, m - 1, 1)` settled the wrong month for a whole release, and a
   `getMonth()` lookup showed no winner for all of January.
@@ -380,13 +394,16 @@ survives but there is nobody left to hand the prize to.
   single-use claiming. Both code endpoints are rate limited at 30/minute and 300/day,
   **keyed on the staff account, not the IP** — every till shares one egress address — with
   their own Redis prefix so counter traffic cannot spend the sign-in budget.
+- The internal routes trust the `adminId` the website sends: the service secret is the
+  boundary, and the website has checked the admin's session before calling.
 - Staff surfaces deliberately see real names: they have to hand a prize to a person.
-- `anonymousEnabled` is the customer's own opt-out, toggled in the app's account details
-  (`app/account-details.tsx`). The public banner honours it on the
-  server. **The live board does not**: `getLeaderBoard` sends each top-ten customer's real
-  first and last name together with the flag, and `app/leaderboard.tsx` hides it on the
-  device. An opted-out name still reaches every signed-in customer's phone. The test only
-  asserts the flag is present. Treat this as a gap to close, not a pattern to copy.
+- **Customer-facing names are redacted on the server, never on the device.**
+  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx`.
+  The banner and the live board both withhold the name before it leaves the server —
+  `getLeaderBoard` sends `firstName`/`lastName` as `null` for an opted-out customer, keeping
+  the `id` (the app's "you" highlight compares it) and the flag (installed builds read
+  "Anonymous" off it). The live board used to send the real name and hide it in the app, so
+  it reached every signed-in phone.
 
 ### frontend/ (customer app)
 
