@@ -212,6 +212,22 @@ rather than storing "this token was revoked" where an eviction would silently ho
 retired token. Order idempotency is likewise belt-and-braces — Redis is the fast path, the
 unique constraint on `Order.paymentIntentId` is the guarantee.
 
+**The rate limiters fail to memory, not to open.** Every limiter in
+`middleware/rateLimiter` uses `ResilientStore` (`middleware/resilientRateLimitStore`):
+Redis while it answers, a per-process `MemoryStore` while it does not, with each command
+bounded at 500ms and a 10s cooldown before Redis is tried again. They used to talk to
+`RedisStore` directly, which made Redis a hard dependency of sign-in, sign-up, OTPs, prize
+codes and every `/api/internal` route — an unreachable Redis was a hung request and then a
+500 on all of them. Dropping the limit instead (`passOnStoreError`) would hand the outage to
+anyone brute-forcing a sign-in, so the limits stay in force, just counted per instance until
+Redis is back.
+
+One trap to know if you touch this: `rate-limit-redis` caches the *promise* of loading its
+Lua scripts in `init`, and a rejected promise stays rejected. With `RedisStore` alone a Redis
+blip at boot broke limiting until the process restarted, however soon Redis recovered.
+`ResilientStore` calls `init` again on recovery rather than trusting that promise — keep it
+doing so.
+
 **`lib/db.ts`** exports an extended client cast back to `PrismaClient`. Type signatures
 that accept a client must use the exported `Db` / `DbTransactionClient`, not Prisma's own
 `TransactionClient`, which describes an unextended client.

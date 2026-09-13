@@ -1,15 +1,13 @@
 import { Request } from "express"
 import { ipKeyGenerator, rateLimit } from "express-rate-limit"
-import { RedisReply, RedisStore } from "rate-limit-redis"
-import { redis as redisClient } from "../lib/redis"
+import { ResilientStore } from "./resilientRateLimitStore"
 
-const makeStore = (prefix: string) =>
-  new RedisStore({
-    prefix,
-    // Explicitly cast the promise to RedisReply
-    sendCommand: (...args: string[]) =>
-      redisClient.call(args[0], ...args.slice(1)) as Promise<RedisReply>,
-  })
+/**
+ * One store per limiter — express-rate-limit refuses to share an instance. Redis while it
+ * answers, memory while it does not: see `ResilientStore` for why these used to take
+ * sign-in down with Redis, and why the fallback keeps the limits rather than dropping them.
+ */
+const makeStore = (prefix: string) => new ResilientStore(prefix)
 
 // Track the email from the body instead of the IP, falling back to the IP
 // when the request doesn't carry one.
