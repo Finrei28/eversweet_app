@@ -287,8 +287,106 @@ payment. A two-minute cron re-sweeps as a backstop for anything a restart droppe
 room membership is decided by the JWT role in `lib/socketAuth`.
 
 Cron (`index.ts`) all runs in `Pacific/Auckland`: kitchen sweep every 2 min, restaurant
-status every minute, `renewWeeklyOffers` on Monday at 00:00, daily special, monthly
-leaderboard winner.
+status every minute, `renewWeeklyOffers` on Monday at 00:00, daily special, and
+`settleMonthlyWinners` at 00:00 on the 1st.
+
+### Loyalty points, the monthly leaderboard and prizes
+
+**What it is.** Customers earn *Sweet Points* on app orders. A monthly leaderboard ranks
+points **earned** in the current New Zealand calendar month. When the month ends, the top
+three are recorded permanently and the shop gives each of them a prize, which they collect
+in store by showing a code that staff type into the kitchen tablet. The point is a reason
+to come back within the month, and a public podium that makes winning visible.
+
+It spans four codebases: the order server owns the data, the customer app shows the board
+and the prizes, the staff app hands prizes over, and the **website's `/admin/winners`** is
+a second place to assign them. Models: `Loyalty` (a balance), `LoyaltyRecord` (the
+ledger — `change` is signed, `reason` is a free-form string, **not** an enum),
+`LoyaltyWinner` (one row per place per month) and `WinnerReward` (the prize and its code).
+
+**The lifecycle, in order**
+
+1. **Earn** — inside `createOrder`'s transaction, so points commit or roll back with the
+   order. Per line: `floor(net dollars × rate × quantity × memberMultiplier)`, from
+   `lib/loyaltyRates` (`rate` 6, `memberRate` 1.5 for an active membership). Written as
+   `reason: "EARNED"`. **Website orders earn nothing** — only app orders reach the board.
+2. **Rank** — `GET /api/auth/getLeaderBoard`. A `groupBy` over `LoyaltyRecord` for the
+   month from `nzMonthRange`, top ten plus the viewer's own position. It filters on
+   `change > 0` **and** `reason: "EARNED"`: a refunded redemption is written back as a
+   *positive* `REFUND` record, and the sign alone let a cancelled order's points climb the
+   board. It reads the `Loyalty` row and never upserts one — this is a GET, and it used to
+   create a row just for looking.
+3. **Settle** — `settleMonthlyWinners` at 00:00 NZ on the 1st. The same query with
+   `take: 3`, written in **one** `createMany` with `skipDuplicates` against
+   `@@unique([month, year, place])`: cron runs in every process, so instances race it, and
+   the loser writes nothing rather than half-settling a month. Settled once and never
+   revisited — a March refund does not reopen February. It invalidates the banner cache.
+   **A month the cron misses is lost** unless backfilled with
+   `POST /api/admin/settleMonth` `{ month, year }`, which has **no UI**; call it directly.
+4. **Announce** — `GET /api/getLeaderboardDetails`: last month's podium for the in-app
+   banner. Public, Redis-cached and sent `Cache-Control: public`, so names are redacted
+   **on the server**, per winner (`lib/leaderboardDetails`). `lastMonthsWinner` is kept
+   alongside `lastMonthsTopThree` because builds already installed read only the former.
+5. **Assign a prize** — staff decide what each winner gets; nothing is automatic. See the
+   table below: there are two surfaces and they differ.
+6. **Show** — `GET /api/auth/getMyPrizes`. The code is sent **only while it would be
+   honoured**, so the app can never display a code the counter will refuse. Expired prizes
+   drop out, collected ones stay for seven days, and a podium with no prize yet is shown
+   ("your prize is being prepared") until its default expiry passes. The app renders them on
+   the **Offers** page (`_components/prizeCard.tsx`, `prizeCodeModal.tsx`); the
+   `PRIZE_READY` push deep-links there.
+7. **Redeem** — staff app, Redeem tab. `GET /api/admin/verifyPrizeCode` reads **without
+   committing**, so staff see who is standing there before anything is spent; then
+   `POST /api/admin/redeemPrizeCode` claims it with a **single conditional `updateMany`**
+   whose `where` repeats every precondition, so two tablets racing one code cannot both
+   win and no transaction is needed. An already-collected code is never reported as
+   "invalid" — read as a typo, staff retype it and hand the prize over twice.
+
+**Two places assign prizes, and they do not behave the same**
+
+|                         | Staff app → `PUT /api/admin/assignWinnerReward` | Website → `winner.upsertReward` |
+| ----------------------- | ----------------------------------------------- | ------------------------------- |
+| Expiry on first assign  | Fixed: end of the month after the one won        | Admin picks a date, pinned to 23:59:59 NZ; the form defaults to the same rule |
+| Editing a prize         | Title and description only                       | Title, description **and expiry** |
+| Tells the customer      | Yes — `PRIZE_READY` push on first assign, never on an edit | **No** — the website cannot push |
+
+Both mint the code once and **never rotate it on an edit** (the customer may be holding a
+screenshot), both refuse a collected prize, and both refuse a winner whose account is
+closed — `LoyaltyWinner.userId` is `SetNull` on account deletion, so the podium row
+survives but there is nobody left to hand the prize to.
+
+**Things that must stay in step**
+
+- **The ranking query exists twice**, in `getLeaderBoard` and `settleMonthlyWinners`, and
+  both the filter and the ordering must stay identical — `_sum` desc, then
+  `_max(createdAt)` asc (a tie goes to whoever got there first), then `loyaltyId` asc so
+  the order is total. If they drift, the podium that pays is not the board customers
+  watched all month. `monthlyWinners.integration.test.ts` pins this.
+- **Prize codes are minted in two repos**: `backend/src/lib/prizeCode.ts` and the website's
+  `src/server/rewardCode.ts`. Eight characters from a 30-symbol alphabet with O/0, I/1/L
+  and U removed, stored bare and upper case, shown `XXXX-XXXX`. They must agree on alphabet
+  and length: `looksLikePrizeCode` rejects anything else before touching the database, so
+  a drift would make every website-assigned prize unredeemable at the counter. The staff
+  app's `lib/prizeCode.ts` mirrors the length and grouping only — deliberately not the
+  alphabet, so staff can always type what they see and the server answers "no such code".
+- **Every month boundary comes from `nzMonthRange`.** The host runs UTC; building months
+  with `new Date(y, m - 1, 1)` settled the wrong month for a whole release, and a
+  `getMonth()` lookup showed no winner for all of January.
+
+**Security and privacy**
+
+- Codes are stored readable, because the winner re-reads theirs every time they open the
+  app. What protects them is that only an ADMIN request can test one, 30⁸ of entropy, and
+  single-use claiming. Both code endpoints are rate limited at 30/minute and 300/day,
+  **keyed on the staff account, not the IP** — every till shares one egress address — with
+  their own Redis prefix so counter traffic cannot spend the sign-in budget.
+- Staff surfaces deliberately see real names: they have to hand a prize to a person.
+- `anonymousEnabled` is the customer's own opt-out, toggled in the app's account details
+  (`app/account-details.tsx`). The public banner honours it on the
+  server. **The live board does not**: `getLeaderBoard` sends each top-ten customer's real
+  first and last name together with the flag, and `app/leaderboard.tsx` hides it on the
+  device. An opted-out name still reaches every signed-in customer's phone. The test only
+  asserts the flag is present. Treat this as a gap to close, not a pattern to copy.
 
 ### frontend/ (customer app)
 
