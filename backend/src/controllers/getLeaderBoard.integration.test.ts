@@ -160,7 +160,15 @@ describeIfDb("GET /api/auth/getLeaderBoard", () => {
     ).resolves.toBeNull()
   })
 
-  it("carries the anonymity flag so the app can withhold a name", async () => {
+  /**
+   * The names are withheld on the server. This used to send them with the flag and leave
+   * the hiding to the app, so an opted-out customer's real name reached every signed-in
+   * phone — the same leak the public banner was fixed for in lib/leaderboardDetails.
+   *
+   * The flag and the id still come through: installed builds read "Anonymous" off the
+   * flag, and the app compares the id to highlight the viewer's own row.
+   */
+  it("withholds an opted-out customer's name, keeping the flag and the id", async () => {
     const { user } = await makeEarner([{ change: 200 }])
     await db.user.update({
       where: { id: user.id },
@@ -169,8 +177,24 @@ describeIfDb("GET /api/auth/getLeaderBoard", () => {
 
     const res = await fetchBoard(user.id)
 
-    expect(res.body.leaderboard[0].user).toMatchObject({
+    expect(res.body.leaderboard[0].user).toEqual({
+      id: user.id,
+      firstName: null,
+      lastName: null,
       anonymousEnabled: true,
+    })
+  })
+
+  it("still names a customer who has not opted out", async () => {
+    const { user } = await makeEarner([{ change: 200 }])
+
+    const res = await fetchBoard(user.id)
+
+    expect(res.body.leaderboard[0].user).toEqual({
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      anonymousEnabled: false,
     })
   })
 

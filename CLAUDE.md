@@ -107,6 +107,18 @@ now **fail rather than skip** when the server is down, so check it is running
 `pg_ctl start` does not return in a tool-driven shell — the server inherits the pipe —
 so run it in the background and verify with `pg_isready` separately.
 
+**Rebuilding that database after a schema change needs care: `DATABASE_URL` in
+`backend/.env` is production Supabase.** `prisma db push` reads it, and `DIRECT_URL`
+alongside it, so running it from `backend/` pushes the schema at the live database.
+`setup.ts` only redirects `DATABASE_URL` for vitest; nothing protects a CLI invocation.
+Push from a throwaway directory holding a copy of `schema.prisma` and a `.env` carrying
+only the test URL for **both** variables, and check the "Datasource" line names
+`eversweet_test` before trusting it.
+
+The website repo has its own test database on this same cluster — `eversweet_web_test`,
+deliberately separate, because both suites truncate every table and would otherwise clear
+each other's rows mid-run.
+
 `SQL_TIMING=1` logs per-statement and per-operation timings (verbs only, never parameters
 or values) and enables the startup latency probe — safe to turn on in production for a
 few minutes.
@@ -178,7 +190,7 @@ Route groups and how they authenticate:
 | `/api/auth`                                     | mixed — signup/signin are public and rate-limited, the rest take a bearer token |
 | `/api/cart`, `/api/notification`, `/api/stripe` | bearer token                            |
 | `/api/admin`                                    | bearer token + ADMIN role (`middleware/authorisation`) |
-| `/api/internal`                                 | server-to-server only; shared secret in `x-service-secret`, compared with `timingSafeEqual` over hashes. An unset `INTERNAL_SERVICE_SECRET` refuses everything. This is how the website announces its own paid orders to the kitchen. |
+| `/api/internal`                                 | server-to-server only; shared secret in `x-service-secret`, compared with `timingSafeEqual` over hashes. An unset `INTERNAL_SERVICE_SECRET` refuses everything. This is how the website announces its own paid orders to the kitchen, and how its `/admin/winners` assigns prizes and settles a missed month. |
 
 The Stripe webhook is mounted **before** `express.json()` with a raw body parser — a
 parsed body cannot be verified against Stripe's signature.
@@ -217,6 +229,47 @@ with builds already on people's phones, but the server recomputes every figure f
 dessert, promo, membership and offer rows and ignores what was sent. GST is *extracted*
 from the inclusive price with `gstFromInclusive` (×3/23), never applied on top.
 
+**Offer rules live in three libs, and none of them is guessable from the rows.** Offers are
+authored in the website's `/admin` and only ever read here.
+
+- **`lib/offerAvailability`** — `isOfferLive(offer)` for a row you have, `liveOfferWhere()`
+  as a Prisma fragment for one you are fetching. Both bounds **inclusive**, `NULL` means
+  "no bound", archived is never live. It mirrors `isWithinActiveWindow` in the website
+  repo: if the two drift, the admin's status badge says LIVE on an offer this server
+  refuses. Every path that serves or prices an offer gates on it — three list queries and
+  three by-id fetches. The by-id ones had no active check at all until 2026-09-12, so a
+  paused offer repriced a cart.
+- **`lib/offerPricing.offerUnitPriceInCents`** — the one definition of what an offer unit
+  costs. `itemPriceInCents` is checked for null and never for truthiness, because **0 is a
+  real price**: it is how an offer gives an item away. `discountAmount` is **whole
+  percent** since the 2026-09-12 migration; it was a `Decimal` fraction before, and the
+  old `1 - x` reading priced a 20% offer at -19× list.
+
+  Since `20260914000000_offer_pricing_rules` the database enforces what was previously
+  only convention: `Offer_exactly_one_price` makes `itemPriceInCents` and `discountAmount`
+  mutually exclusive, and `discountAmount` must be 1–100. Both are invisible to Prisma and
+  **absent from the test databases**, which are built with `db push` — so the suites prove
+  the code, not the constraints.
+- **`lib/offerAudience`** — who an offer is for, plus the refusal wording.
+
+`OfferRedemption.status` becomes `REDEEMED` only when `used` reaches `limit`. Writing it on
+every use made `limit > 1` meaningless on any offer with requirements, because the gate
+keys off `status`. Two consequences, both load-bearing: `redeemOfferForUser`'s create
+branch must refuse an offer that has requirements (no row means nobody unlocked it — and
+the admin's **Close run** *deletes* rows, which is exactly that state), and all four
+release paths must write `status: "AVAILABLE"` alongside `used: { decrement: 1 }` or a
+gated offer is locked out for good. That is safe unconditionally: redeeming refuses at
+`used >= limit`, and every release is guarded by `used > 0`.
+
+**Never `include` an `Offer` or `OfferRedemption` — list the fields.** Prisma selects every
+scalar the generated client knows about, so a client built either side of an unapplied
+migration asks for a column the database lacks: Postgres `42703`, and on 2026-09-12 that
+took out the offers screen and offer add-to-cart over `renewsAt`, a column nothing read.
+The window columns are deliberately kept off the wire too — the server gates on them, and
+sending them invites the app to form a second, drifting opinion. `showOffers` asserts its
+exact response shape, because a hand-written select can drop a field the app needs in one
+line and the screen would just render blanks.
+
 **Order creation.** `POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
 keyed on the `Idempotency-Key` header and falling back to the payment intent for older
 builds. The card is charged *before* this endpoint is reached, so the controller's rule is
@@ -234,7 +287,123 @@ payment. A two-minute cron re-sweeps as a backstop for anything a restart droppe
 room membership is decided by the JWT role in `lib/socketAuth`.
 
 Cron (`index.ts`) all runs in `Pacific/Auckland`: kitchen sweep every 2 min, restaurant
-status every minute, weekly mochi offer, daily special, monthly leaderboard winner.
+status every minute, `renewWeeklyOffers` on Monday at 00:00, daily special, and
+`settleMonthlyWinners` at 00:00 on the 1st.
+
+### Loyalty points, the monthly leaderboard and prizes
+
+**What it is.** Customers earn *Sweet Points* on app orders. A monthly leaderboard ranks
+points **earned** in the current New Zealand calendar month. When the month ends, the top
+three are recorded permanently and the shop gives each of them a prize, which they collect
+in store by showing a code that staff type into the kitchen tablet. The point is a reason
+to come back within the month, and a public podium that makes winning visible.
+
+It spans four codebases: the order server owns the data and is the **only writer of
+prizes**, the customer app shows the board and the prizes, the staff app hands prizes over,
+and the **website's `/admin/winners`** is a second screen for assigning them and settling a
+missed month — both of which it does by calling the order server, never the database.
+Models: `Loyalty` (a balance), `LoyaltyRecord` (the ledger — `change` is signed, `reason`
+is a free-form string, **not** an enum), `LoyaltyWinner` (one row per place per month) and
+`WinnerReward` (the prize and its code).
+
+**The lifecycle, in order**
+
+1. **Earn** — inside `createOrder`'s transaction, so points commit or roll back with the
+   order. Per line: `floor(net dollars × rate × quantity × memberMultiplier)`, from
+   `lib/loyaltyRates` (`rate` 6, `memberRate` 1.5 for an active membership). Written as
+   `reason: "EARNED"`. **Website orders earn nothing** — only app orders reach the board.
+2. **Rank** — `GET /api/auth/getLeaderBoard`: top ten plus the viewer's own position, from
+   `lib/leaderboardRanking.rankMonth` over the month from `nzMonthRange`. It filters on
+   `change > 0` **and** `reason: "EARNED"`: a refunded redemption is written back as a
+   *positive* `REFUND` record, and the sign alone let a cancelled order's points climb the
+   board. It reads the `Loyalty` row and never upserts one — this is a GET, and it used to
+   create a row just for looking.
+3. **Settle** — `settleMonthlyWinners` at 00:00 NZ on the 1st: the same `rankMonth` with
+   `take: 3`, written in **one** `createMany` with `skipDuplicates` against
+   `@@unique([month, year, place])`. Cron runs in every process, so instances race it, and
+   the loser writes nothing rather than half-settling a month. Settled once and never
+   revisited — a March refund does not reopen February. It invalidates the banner cache.
+
+   It returns an `outcome`: `RECORDED`, `ALREADY_SETTLED` (earners existed but every place
+   was on file), `NO_EARNERS`, or `FAILED`. The cron ignores it and must never throw, so
+   the error is still swallowed there. **A month the cron misses is lost until settled by
+   hand** — the "Settle a missed month" button on the website's `/admin/winners`, which calls
+   `POST /api/internal/winners/settle`, or `POST /api/admin/settleMonth` with an admin token.
+   Both go through `settleCalendarMonth`, which refuses an unfinished month and answers
+   `FAILED` with a **500**: it used to answer 200, so a failed backfill read as a success.
+4. **Announce** — `GET /api/getLeaderboardDetails`: last month's podium for the in-app
+   banner. Public, Redis-cached and sent `Cache-Control: public`, so names are redacted
+   **on the server**, per winner (`lib/leaderboardDetails`). `lastMonthsWinner` is kept
+   alongside `lastMonthsTopThree` because builds already installed read only the former.
+5. **Assign a prize** — staff decide what each winner gets; nothing is automatic. Two
+   screens, **one implementation**: `assignReward` in `prize.controller.ts`, reached by the
+   staff app through `PUT /api/admin/assignWinnerReward` and by the website through
+   `PUT /api/internal/winners/reward`. It mints the code, pushes `PRIZE_READY` on the first
+   assign (never on an edit — a second ping reads as a second prize), and holds every guard.
+   The website used to write the row itself, with its own code generator and no way to
+   push, so its prizes arrived in silence.
+
+   The one difference between the screens is the **expiry**. By default it is the end of the
+   month after the one won — derived from the month, so assigning late never extends it.
+   Only the internal route accepts `expiresAt`, which is the website's date picker: honoured
+   on the first assign if it is still in the future, and on an edit it moves the deadline
+   only when sent (into the past is how a prize is withdrawn). The staff app's route ignores
+   one, so its prizes always keep the fixed deadline.
+6. **Show** — `GET /api/auth/getMyPrizes`. The code is sent **only while it would be
+   honoured**, so the app can never display a code the counter will refuse. Expired prizes
+   drop out, collected ones stay for seven days, and a podium with no prize yet is shown
+   ("your prize is being prepared") until its default expiry passes. The app renders them on
+   the **Offers** page (`_components/prizeCard.tsx`, `prizeCodeModal.tsx`); the
+   `PRIZE_READY` push deep-links there.
+7. **Redeem** — staff app, Redeem tab. `GET /api/admin/verifyPrizeCode` reads **without
+   committing**, so staff see who is standing there before anything is spent; then
+   `POST /api/admin/redeemPrizeCode` claims it with a **single conditional `updateMany`**
+   whose `where` repeats every precondition, so two tablets racing one code cannot both
+   win and no transaction is needed. An already-collected code is never reported as
+   "invalid" — read as a typo, staff retype it and hand the prize over twice.
+
+A code is minted once and **never rotated on an edit** (the customer may be holding a
+screenshot). A collected prize cannot be changed, and a winner whose account is closed
+cannot be given one — `LoyaltyWinner.userId` is `SetNull` on account deletion, so the podium
+row survives with nobody left to hand the prize to. Two writers assigning the same winner at
+once get a 409 rather than a 500.
+
+**Things that must stay in step**
+
+- **The ranking lives in one place**, `lib/leaderboardRanking.rankMonth`, and both the live
+  board and settlement call it. It used to be two copies of the same `groupBy`, and they
+  had already drifted once — settlement filtered on the sign alone after the board had
+  learned to filter on `reason`. The ordering is `_sum` desc, then `_max(createdAt)` asc (a
+  tie goes to whoever got there first), then `loyaltyId` asc so it is total. Do not
+  reintroduce a second copy.
+- **Prize codes are minted only here**, in `backend/src/lib/prizeCode.ts`: eight characters
+  from a 30-symbol alphabet with O/0, I/1/L and U removed, stored bare and upper case, shown
+  `XXXX-XXXX`. The website had its own generator that had to match this one exactly —
+  `looksLikePrizeCode` rejects anything else before touching the database, so a drift would
+  have made every website prize unredeemable. The staff app's `lib/prizeCode.ts` mirrors
+  the length and grouping only — deliberately not the alphabet, so staff can always type
+  what they see and the server answers "no such code".
+- **Every month boundary comes from `nzMonthRange`.** The host runs UTC; building months
+  with `new Date(y, m - 1, 1)` settled the wrong month for a whole release, and a
+  `getMonth()` lookup showed no winner for all of January.
+
+**Security and privacy**
+
+- Codes are stored readable, because the winner re-reads theirs every time they open the
+  app. What protects them is that only an ADMIN request can test one, 30⁸ of entropy, and
+  single-use claiming. Both code endpoints are rate limited at 30/minute and 300/day,
+  **keyed on the staff account, not the IP** — every till shares one egress address — with
+  their own Redis prefix so counter traffic cannot spend the sign-in budget.
+- The internal routes trust the `adminId` the website sends: the service secret is the
+  boundary, and the website has checked the admin's session before calling.
+- Staff surfaces deliberately see real names: they have to hand a prize to a person.
+- **Customer-facing names are redacted on the server, never on the device.**
+  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx`.
+  The banner and the live board both withhold the name before it leaves the server —
+  `getLeaderBoard` sends `firstName`/`lastName` as `null` for an opted-out customer, keeping
+  the `id` (the app's "you" highlight compares it) and the flag (installed builds read
+  "Anonymous" off it). The live board used to send the real name and hide it in the app, so
+  it reached every signed-in phone.
 
 ### frontend/ (customer app)
 
@@ -274,6 +443,24 @@ sync after a 500ms debounce, registered in a flush registry; checkout calls
 `flushPendingQuantitySyncs()` then awaits `whenCartWritesSettle()` before re-reading the
 cart, which is why the cart screen's checkout button stays live. Checkout mints its own
 `Crypto.randomUUID()` idempotency key and reuses it across payment retries.
+
+**`lib/offerHelpers.ts` mirrors the backend on purpose.** `canRedeemAudience` and
+`offerUnitPriceInCents` are deliberate copies of `lib/offerAudience` and `lib/offerPricing`
+on the server; if they drift, the app offers a Redeem button the server then refuses, or
+shows a price it then charges differently. `getOfferState` returns *why* an offer is
+unavailable, not just that it is, because a gated offer nobody has earned and one already
+used up otherwise render as the same grey box. The app does **not** gate on the offer
+window — the server does, and it does not send those columns.
+
+A cart response carries a `warning` when the server removed something (a members-only item
+after a membership lapsed, an offer that stopped running). Surface it; it used to be
+dropped, so items vanished with nothing said.
+
+**Toast wrapping has to be set in `toastConfig`, not at the call site.** `Toast.show`'s
+`props` object reaches `BaseToast` as a nested `props` key it never reads — it takes
+`text1NumberOfLines` from its own arguments, defaulting to one line. The
+`props: { text1NumberOfLines: 0 }` blocks dotted through the call sites are inert; those
+toasts only wrap because `app/_layout.tsx` sets it for that type.
 
 Customers have no socket connection — realtime for them is Expo push notifications
 (`services/notifications.ts`, token synced on launch and on every foreground).

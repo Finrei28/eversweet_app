@@ -386,3 +386,47 @@ describeIfDb("POST /api/admin/settleMonth", () => {
     expect(res.status).toBe(403)
   })
 })
+
+/**
+ * A manual backfill has to say which of these happened. All three used to come back as
+ * `recorded: 0` with a 200 — including a settle that had failed outright.
+ */
+describeIfDb("settling a month reports what happened", () => {
+  let adminId: string
+
+  beforeEach(async () => {
+    await resetDatabase()
+    redis.clear()
+    redis.recover()
+    adminId = (await makeUser()).id
+    await db.user.update({ where: { id: adminId }, data: { role: "ADMIN" } })
+  })
+
+  const settle = (target: { month: number; year: number }) =>
+    request(app)
+      .post("/api/admin/settleMonth")
+      .set("Authorization", `Bearer ${tokenFor(adminId, "ADMIN")}`)
+      .send({ month: target.month, year: target.year })
+
+  it("reports a month with earners as recorded, and a second settle as already settled", async () => {
+    const target = nzMonthRange(new Date(), -2)
+    await makeEarner([
+      { change: 300, at: new Date(target.start.getTime() + 3600 * 1000) },
+    ])
+
+    const first = await settle(target)
+    expect(first.status).toBe(200)
+    expect(first.body).toMatchObject({ outcome: "RECORDED", recorded: 1 })
+
+    const second = await settle(target)
+    expect(second.status).toBe(200)
+    expect(second.body).toMatchObject({ outcome: "ALREADY_SETTLED", recorded: 0 })
+  })
+
+  it("reports a month nobody earned in as having no earners", async () => {
+    const res = await settle(nzMonthRange(new Date(), -3))
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ outcome: "NO_EARNERS", recorded: 0 })
+  })
+})

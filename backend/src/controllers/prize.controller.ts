@@ -108,96 +108,176 @@ export const getMonthlyWinners = async (req: Request, res: Response) => {
   }
 }
 
+/** What a shared core hands back for a handler to put on the wire. */
+export type Outcome = { status: number; body: Record<string, unknown> }
+
+/** Two admins, or a website retry overlapping its own first attempt, assigning
+ * one winner at once. The unique on `winnerId` is what stops a second prize. */
+const isWinnerAlreadyAssigned = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === "P2002" &&
+  String(error.meta?.target ?? "").includes("winnerId")
+
 /**
  * Sets or edits what a winner is owed, minting their code the first time.
  *
- * The code is minted once and never rotated on an edit: a customer may already
- * be holding a screenshot of it, and reissuing would strand them at the counter
- * with a code that no longer exists. Editing the wording of a prize is a
- * different thing from replacing it.
+ * Shared by the staff app's route and the website's, so there is one set of guards,
+ * one code minter and one push. The website used to write the reward itself with its
+ * own copy of the code generator and no way to notify anyone, so a prize assigned
+ * there arrived in silence and the two minters had to be kept identical by hand.
+ *
+ * The code is minted once and never rotated on an edit: a customer may already be
+ * holding a screenshot of it, and reissuing would strand them at the counter with a
+ * code that no longer exists. Editing the wording of a prize is a different thing
+ * from replacing it.
+ *
+ * `expiresAt` is the website's date picker. When it is absent the deadline is the end
+ * of the month after the one won; on an edit, the deadline moves only if one is sent.
+ * The staff app never sends one, so its behaviour is what it always was.
  */
-export const assignWinnerReward = async (req: Request, res: Response) => {
-  try {
-    const adminId = (req as Request & { userId?: string }).userId ?? null
-    const { winnerId, title, description } = req.body ?? {}
+export const assignReward = async (input: {
+  winnerId: unknown
+  title: unknown
+  description: unknown
+  expiresAt?: unknown
+  adminId: string | null
+}): Promise<Outcome> => {
+  const { winnerId, title, description, expiresAt, adminId } = input
 
-    if (typeof winnerId !== "string" || !winnerId) {
-      res.status(400).json({ message: "winnerId is required" })
-      return
-    }
-    if (typeof title !== "string" || !title.trim()) {
-      res.status(400).json({ message: "A reward title is required" })
-      return
-    }
-    if (description != null && typeof description !== "string") {
-      res.status(400).json({ message: "description must be text" })
-      return
-    }
+  if (typeof winnerId !== "string" || !winnerId) {
+    return { status: 400, body: { message: "winnerId is required" } }
+  }
+  if (typeof title !== "string" || !title.trim()) {
+    return { status: 400, body: { message: "A reward title is required" } }
+  }
+  if (description != null && typeof description !== "string") {
+    return { status: 400, body: { message: "description must be text" } }
+  }
 
-    const winner = await db.loyaltyWinner.findUnique({
-      where: { id: winnerId },
-      select: winnerSelect,
-    })
-
-    if (!winner) {
-      res.status(404).json({ message: "That winner does not exist" })
-      return
+  let override: Date | null = null
+  if (expiresAt != null) {
+    const parsed =
+      typeof expiresAt === "string" || expiresAt instanceof Date
+        ? new Date(expiresAt)
+        : null
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      return { status: 400, body: { message: "expiresAt must be a date" } }
     }
+    override = parsed
+  }
 
-    // Already handed over. Editing the wording now would rewrite what the shop
-    // gave someone after the fact, and the customer's own record of it too.
-    if (winner.reward?.redeemedAt) {
-      res.status(409).json({
+  const winner = await db.loyaltyWinner.findUnique({
+    where: { id: winnerId },
+    select: winnerSelect,
+  })
+
+  if (!winner) {
+    return { status: 404, body: { message: "That winner does not exist" } }
+  }
+
+  // Already handed over. Editing the wording now would rewrite what the shop
+  // gave someone after the fact, and the customer's own record of it too.
+  if (winner.reward?.redeemedAt) {
+    return {
+      status: 409,
+      body: {
         message: "This prize has already been collected and cannot be changed",
-      })
-      return
+      },
     }
+  }
 
-    if (winner.userId === null) {
-      res.status(409).json({
+  if (winner.userId === null) {
+    return {
+      status: 409,
+      body: {
         message: "This account has been closed, so the prize cannot be claimed",
-      })
-      return
+      },
     }
+  }
 
-    const cleanTitle = title.trim()
-    const cleanDescription = description?.trim() || null
+  const cleanTitle = title.trim()
+  const cleanDescription = description?.trim() || null
 
-    if (winner.reward) {
-      const reward = await db.winnerReward.update({
-        where: { id: winner.reward.id },
-        data: { title: cleanTitle, description: cleanDescription },
-      })
-      // No push on an edit: the customer has already been told, and a second
-      // ping for a reworded title reads as a second prize.
-      res.status(200).json({
+  if (winner.reward) {
+    // An edit may pull the deadline into the past: that is how a prize is withdrawn.
+    const reward = await db.winnerReward.update({
+      where: { id: winner.reward.id },
+      data: {
+        title: cleanTitle,
+        description: cleanDescription,
+        ...(override ? { expiresAt: override } : {}),
+      },
+    })
+    // No push on an edit: the customer has already been told, and a second
+    // ping for a reworded title reads as a second prize.
+    return {
+      status: 200,
+      body: {
         reward: { ...reward, code: formatPrizeCode(reward.code) },
         notified: false,
-      })
-      return
+      },
     }
+  }
 
-    const expiresAt = expiryFor(winner.month, winner.year)
-    const reward = await createRewardWithCode({
+  // Refused on the first assign only: minting a code that is dead on arrival sends the
+  // customer to the counter for nothing.
+  if (override && override <= new Date()) {
+    return {
+      status: 400,
+      body: { message: "That expiry date has already passed" },
+    }
+  }
+
+  let reward
+  try {
+    reward = await createRewardWithCode({
       winnerId: winner.id,
       title: cleanTitle,
       description: cleanDescription,
-      expiresAt,
+      expiresAt: override ?? expiryFor(winner.month, winner.year),
       adminId,
     })
+  } catch (error) {
+    // Used to surface as a 500. The prize exists; the second writer just lost.
+    if (isWinnerAlreadyAssigned(error)) {
+      return {
+        status: 409,
+        body: { message: "This prize was just assigned. Refresh to see it." },
+      }
+    }
+    throw error
+  }
 
-    // After the write, and never allowed to fail it — see sendPushToUser.
-    const notified = await sendPushToUser(
-      winner.userId,
-      "You won a prize!",
-      `You placed ${ordinal(winner.place)} on last month's leaderboard. Tap to see what you have won.`,
-      { type: "PRIZE_READY", prizeId: winner.id },
-    )
+  // After the write, and never allowed to fail it — see sendPushToUser.
+  const notified = await sendPushToUser(
+    winner.userId,
+    "You won a prize!",
+    `You placed ${ordinal(winner.place)} on last month's leaderboard. Tap to see what you have won.`,
+    { type: "PRIZE_READY", prizeId: winner.id },
+  )
 
-    res.status(201).json({
+  return {
+    status: 201,
+    body: {
       reward: { ...reward, code: formatPrizeCode(reward.code) },
       notified,
+    },
+  }
+}
+
+/**
+ * The staff app's route. Deliberately does not accept `expiresAt`: staff prizes keep the
+ * fixed deadline, which is exactly how this route has always behaved.
+ */
+export const assignWinnerReward = async (req: Request, res: Response) => {
+  try {
+    const { status, body } = await assignReward({
+      winnerId: req.body?.winnerId,
+      title: req.body?.title,
+      description: req.body?.description,
+      adminId: (req as Request & { userId?: string }).userId ?? null,
     })
+    res.status(status).json(body)
   } catch (error) {
     console.error("Failed to assign a reward:", error)
     res
@@ -383,36 +463,57 @@ export const redeemPrizeCode = async (req: Request, res: Response) => {
  * Settles a month the cron missed — an outage or a deploy across NZ midnight on
  * the 1st, which would otherwise lose that month's podium permanently, since
  * nothing else ever writes one.
+ *
+ * Shared by the admin route and the website's button. `outcome` says which of the
+ * four things happened, and a failure is a 500: settleMonthlyWinners swallows its own
+ * error for the cron's sake, and this used to answer 200 to that as well — a failed
+ * backfill reported as a success.
  */
+export const settleCalendarMonth = async (
+  month: unknown,
+  year: unknown,
+): Promise<Outcome> => {
+  if (
+    typeof month !== "number" ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    return { status: 400, body: { message: "A month from 1 to 12 is required" } }
+  }
+  if (typeof year !== "number" || !Number.isInteger(year) || year < 2000) {
+    return { status: 400, body: { message: "A valid year is required" } }
+  }
+
+  const current = nzMonthRange(new Date())
+  const requestedIndex = year * 12 + (month - 1)
+  const currentIndex = current.year * 12 + (current.month - 1)
+
+  if (requestedIndex >= currentIndex) {
+    return { status: 400, body: { message: "That month has not finished yet" } }
+  }
+
+  // settleMonthlyWinners counts backwards from now, and skipDuplicates makes
+  // running it again a no-op, so a month settled twice writes nothing.
+  const result = await settleMonthlyWinners(requestedIndex - currentIndex)
+
+  if (result.outcome === "FAILED") {
+    return {
+      status: 500,
+      body: { ...result, message: "Failed to settle that month" },
+    }
+  }
+
+  return { status: 200, body: result }
+}
+
 export const settleMonth = async (req: Request, res: Response) => {
   try {
-    const { month, year } = req.body ?? {}
-
-    if (!Number.isInteger(month) || month < 1 || month > 12) {
-      res.status(400).json({ message: "A month from 1 to 12 is required" })
-      return
-    }
-    if (!Number.isInteger(year) || year < 2000) {
-      res.status(400).json({ message: "A valid year is required" })
-      return
-    }
-
-    const current = nzMonthRange(new Date())
-    const requestedIndex = year * 12 + (month - 1)
-    const currentIndex = current.year * 12 + (current.month - 1)
-
-    if (requestedIndex >= currentIndex) {
-      res
-        .status(400)
-        .json({ message: "That month has not finished yet" })
-      return
-    }
-
-    // settleMonthlyWinners counts backwards from now, and skipDuplicates makes
-    // running it again a no-op, so a month settled twice writes nothing.
-    const result = await settleMonthlyWinners(requestedIndex - currentIndex)
-
-    res.status(200).json(result)
+    const { status, body } = await settleCalendarMonth(
+      req.body?.month,
+      req.body?.year,
+    )
+    res.status(status).json(body)
   } catch (error) {
     console.error("Failed to settle a month:", error)
     res.status(500).json({ message: "Failed to settle that month" })

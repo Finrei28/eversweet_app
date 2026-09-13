@@ -14,6 +14,7 @@ import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { isOfferLive } from "../lib/offerAvailability"
+import { rankMonth } from "../lib/leaderboardRanking"
 import { getErrorMessage } from "../utils/getError"
 import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
@@ -569,39 +570,12 @@ export async function settleMonthlyWinners(offset = -1) {
   const { start, end, month, year } = nzMonthRange(new Date(), offset)
 
   try {
-    const leaderboard = await db.loyaltyRecord.groupBy({
-      by: ["loyaltyId"],
-      where: {
-        // Matches getLeaderBoard exactly. This used to filter on the sign alone,
-        // so a refunded redemption — written back as a *positive* record — could
-        // crown someone the board never showed in front all month.
-        change: { gt: 0 },
-        reason: "EARNED",
-        createdAt: { gte: start, lt: end },
-      },
-      _sum: { change: true },
-      _max: { createdAt: true },
-      orderBy: [
-        { _sum: { change: "desc" } },
-        // A tie goes to whoever got there first: of two customers level on
-        // points, the one whose last qualifying earning came earlier.
-        //
-        // This used to be a bespoke loop that fetched each tied customer's latest
-        // record a query at a time, and it only ever resolved *first* place — a
-        // tie for second or third came out in whatever order Postgres happened to
-        // emit. Ordering on the aggregate settles every place inside this same
-        // query, and getLeaderBoard now orders identically, so the podium
-        // customers watched all month is the podium that pays.
-        { _max: { createdAt: "asc" } },
-        // Last resort, for two customers whose final earning landed in the same
-        // millisecond. Arbitrary, but total — without it the order is undefined.
-        { loyaltyId: "asc" },
-      ],
-      take: WINNING_PLACES,
-    })
+    // The same ranking the live board runs, so the podium customers watched all
+    // month is the podium that pays. See lib/leaderboardRanking.
+    const leaderboard = await rankMonth({ start, end }, WINNING_PLACES)
 
     if (leaderboard.length === 0) {
-      return { month, year, recorded: 0 }
+      return { month, year, recorded: 0, outcome: "NO_EARNERS" as const }
     }
 
     const loyalties = await db.loyalty.findMany({
@@ -629,12 +603,24 @@ export async function settleMonthlyWinners(offset = -1) {
     // the new podium appears minutes after the month turns over.
     await invalidate(CACHE_KEYS.leaderboardDetails)
 
-    return { month, year, recorded: count }
+    // Earners existed, so writing nothing means every place was already on file:
+    // skipDuplicates against the unique on (month, year, place). Told apart here
+    // because a manual backfill has to report which it was, where the cron has
+    // nobody to tell.
+    return {
+      month,
+      year,
+      recorded: count,
+      outcome: count > 0 ? ("RECORDED" as const) : ("ALREADY_SETTLED" as const),
+    }
   } catch (error) {
     // Naming the month matters — an unlabelled console.error here is what hid a
     // timezone bug for months, because what it logged looked like noise rather
     // than like "this job settled the wrong month".
     console.error(`Failed to settle the ${month}/${year} podium:`, error)
-    return { month, year, recorded: 0 }
+    // Still swallowed, because the cron must not throw. But it used to return
+    // exactly what "nobody earned" and "already settled" return, and the manual
+    // backfill answered 200 to all three — a failed settle reported as a success.
+    return { month, year, recorded: 0, outcome: "FAILED" as const }
   }
 }
