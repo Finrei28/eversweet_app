@@ -289,7 +289,12 @@ authored in the website's `/admin` and only ever read here.
   repo: if the two drift, the admin's status badge says LIVE on an offer this server
   refuses. Every path that serves or prices an offer gates on it — three list queries and
   three by-id fetches. The by-id ones had no active check at all until 2026-09-12, so a
-  paused offer repriced a cart.
+  paused offer repriced a cart. The dates are **whole Auckland days** as the website stores
+  them: `startsAt` midnight at the start of the first, `endsAt` 23:59:59.999 on the last, so
+  the plain inclusive comparison serves the whole end day. Until 2026-09-17 the website
+  stored midnight at the *start* of the end day and every offer stopped a day early; that
+  was fixed where the dates are written, plus a migration for existing rows. Don't add a day
+  here too.
 - **`lib/offerPricing.offerUnitPriceInCents`** — the one definition of what an offer unit
   costs. `itemPriceInCents` is checked for null and never for truthiness, because **0 is a
   real price**: it is how an offer gives an item away. `discountAmount` is **whole

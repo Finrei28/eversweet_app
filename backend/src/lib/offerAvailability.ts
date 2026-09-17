@@ -26,6 +26,15 @@ export type OfferWindow = {
  * Both bounds are **inclusive**, matching the website: an offer is live at the instant it
  * starts and at the instant it ends. A null bound means "no bound" — which is how every
  * offer written before those columns existed reads, and why they needed no backfill.
+ *
+ * The admin picks whole days, and the website stores them as whole Auckland days:
+ * `startsAt` is midnight at the start of the first day, `endsAt` the **last millisecond**
+ * of the last (23:59:59.999). So the plain comparison below serves an offer ending on the
+ * 31st for all of the 31st. Do not add a day here or round to a date. The website used to
+ * store midnight at the *start* of the end day, which stopped every offer a day early, and
+ * it fixed that where the dates are written: its 2026-09-17 migration
+ * `offer_ends_through_its_last_day` moved the rows stored the old way. Adjusting here as
+ * well would run every offer a day late.
  */
 export const isOfferLive = (
   offer: OfferWindow,
