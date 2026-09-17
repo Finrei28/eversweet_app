@@ -337,6 +337,11 @@ export type SavedCard = {
 
 export type PaymentStatusResult = {
   success: boolean
+  /**
+   * The server refunded this payment because the cart no longer matched it. Absent from
+   * servers that predate refunds.
+   */
+  refunded?: boolean
   pending: boolean
   orderId: string | null
 }

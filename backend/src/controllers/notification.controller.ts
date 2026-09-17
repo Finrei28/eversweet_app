@@ -1,7 +1,6 @@
 import { Request, Response } from "express"
 import { db } from "../lib/db"
 import { Expo } from "expo-server-sdk"
-import { getErrorMessage } from "../utils/getError"
 
 const expo = new Expo()
 
@@ -81,9 +80,9 @@ export const getPushToken = async (req: Request, res: Response) => {
     res.status(200).json({ pushToken })
     return
   } catch (error) {
+    console.error("Error getting push token:", error)
     res.status(500).json({
       message: "Error getting push token",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -124,7 +123,6 @@ export const pushToken = async (req: Request, res: Response) => {
     console.error("Error saving push token:", error)
     res.status(500).json({
       message: "Error saving push token",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -169,7 +167,6 @@ export const removePushToken = async (req: Request, res: Response) => {
     console.error("Error removing push token:", error)
     res.status(500).json({
       message: "Error removing push token",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -233,7 +230,6 @@ export const sendNotification = async (req: Request, res: Response) => {
     console.error("Error sending notification:", error)
     res.status(500).json({
       message: "Error sending notification",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -330,7 +326,6 @@ export const orderStatusChange = async (req: Request, res: Response) => {
     console.error("Error sending order status notification:", error)
     res.status(500).json({
       message: "Error sending order status notification",
-      error: getErrorMessage(error),
     })
     return
   }

@@ -1,4 +1,4 @@
-import express from "express"
+import express, { NextFunction, Request, Response } from "express"
 import cors from "cors"
 import bodyParser from "body-parser"
 import authRoutes from "./routes/auth.routes"
@@ -32,7 +32,12 @@ const corsOptions: CorsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true) // Allow
     } else {
-      callback(new Error(`Not allowed by CORS ${origin}`)) // Block
+      // A refusal, not a fault: without the status the error handler below answered every
+      // such request with a 500 and logged it as a server error, so any page pointed at this
+      // API could fill the error log.
+      callback(
+        Object.assign(new Error(`Not allowed by CORS ${origin}`), { status: 403 }),
+      ) // Block
     }
   }, // maintains a whitelist of approved clients, which is vital for security and reliability
   methods: "GET,POST,PATCH,PUT",
@@ -79,5 +84,40 @@ app.use("/api/admin", adminRoutes)
 app.use("/api/cart", cartRoutes)
 // Server-to-server. Guarded by a shared secret, not a user session.
 app.use("/api/internal", internalRoutes)
+
+/**
+ * The last word on anything a route threw without catching.
+ *
+ * Several handlers do work outside their try — pollMembershipStatus has none at all, and
+ * adminSignIn and signUp both query before theirs — and Express hands those failures to
+ * its default handler, which answers with an HTML page and, whenever NODE_ENV is not
+ * "production", the whole stack trace. A malformed JSON body arrives here the same way.
+ * The detail goes to the log; the client gets a status and a sentence. Four parameters,
+ * because that arity is how Express recognises an error handler.
+ */
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(error)
+    return
+  }
+
+  // body-parser and friends attach the status they mean (400 bad JSON, 413 too large).
+  const status = (error as { status?: unknown } | null)?.status
+  const code =
+    typeof status === "number" && status >= 400 && status < 600 ? status : 500
+
+  if (code >= 500) {
+    console.error(`Unhandled error on ${req.method} ${req.originalUrl}:`, error)
+  }
+
+  res.status(code).json({
+    message:
+      code >= 500
+        ? "Internal server error"
+        : code === 403
+          ? "Forbidden"
+          : "Bad request",
+  })
+})
 
 export default app

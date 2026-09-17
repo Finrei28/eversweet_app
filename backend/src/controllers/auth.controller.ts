@@ -3,7 +3,7 @@ import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import { Prisma } from "@prisma/client"
 import { db, DbTransactionClient } from "../lib/db"
-import { CreateOrderSchema } from "../utils/schema"
+import { CreateOrderSchema, readProfileFields } from "../utils/schema"
 import { z } from "zod"
 import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
@@ -22,6 +22,8 @@ import { calculateCartPrice } from "../lib/cartPricing"
 import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
+import { generateOtp } from "../lib/otp"
+import { PaymentRefusal, settleOrderPayment } from "../lib/orderPayment"
 
 //Helper function
 /**
@@ -67,30 +69,26 @@ const incrementLoyaltyPoints = async (
 }
 
 export const signUp = async (req: Request, res: Response) => {
-  const { email, password, firstName, lastName, phoneNumber } =
-    req.body ?? {}
-  if (!email) {
-    res.status(400).json({ message: "Email is required" })
+  const { password } = req.body ?? {}
+  const fields = readProfileFields({
+    email: req.body?.email,
+    firstName: req.body?.firstName,
+    lastName: req.body?.lastName,
+    phone: req.body?.phoneNumber,
+  })
+  if (!fields.ok) {
+    res.status(400).json({ message: fields.message })
     return
   }
-  if (!password) {
+  // A string check as well as a presence one: bcrypt throws on anything else, and this
+  // runs before the try.
+  if (typeof password !== "string" || !password) {
     res.status(400).json({ message: "Password is required" })
     return
   }
-  if (!firstName) {
-    res.status(400).json({ message: "First name is required" })
-    return
-  }
-  if (!lastName) {
-    res.status(400).json({ message: "Last name is required" })
-    return
-  }
-  if (!phoneNumber) {
-    res.status(400).json({ message: "Phone number is required" })
-    return
-  }
 
-  const normalisedEmail = email.trim().toLowerCase()
+  const { email, firstName, lastName, phone } = fields.values
+  const normalisedEmail = email.toLowerCase()
 
   const existUser = await db.user.findFirst({
     where: { email: normalisedEmail },
@@ -100,7 +98,7 @@ export const signUp = async (req: Request, res: Response) => {
     return
   }
   const hashed = await bcrypt.hash(password, 10)
-  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const otp = generateOtp()
   const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
   try {
     const newUser = await db.user.create({
@@ -111,7 +109,7 @@ export const signUp = async (req: Request, res: Response) => {
           firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
         lastName:
           lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase(),
-        phone: phoneNumber,
+        phone,
         role: "USER",
         otp,
         otpExpiresAt,
@@ -129,7 +127,8 @@ export const signUp = async (req: Request, res: Response) => {
       .json({ message: "User created", firstName: newUser.firstName ?? "" })
     return
   } catch (error) {
-    res.status(500).json({ message: getErrorMessage(error) })
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -157,7 +156,7 @@ export const signIn = async (req: Request, res: Response) => {
         user.otpExpiresAt &&
         new Date() < new Date(user.otpExpiresAt)
       if (!hasLiveOtp) {
-        const otp = Math.floor(100000 + Math.random() * 900000).toString()
+        const otp = generateOtp()
         const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
         await db.user.update({
           where: { id: user.id },
@@ -211,7 +210,9 @@ export const signIn = async (req: Request, res: Response) => {
       return
     }
 
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -238,7 +239,7 @@ export const resendVerificationCode = async (req: Request, res: Response) => {
       return
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const otp = generateOtp()
     await db.user.update({
       where: { id: user.id },
       data: { otp, otpExpiresAt: new Date(Date.now() + 15 * 60 * 1000) },
@@ -252,7 +253,8 @@ export const resendVerificationCode = async (req: Request, res: Response) => {
     res.status(200).json({ success: true })
     return
   } catch (error) {
-    res.status(500).json({ message: getErrorMessage(error) })
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -336,7 +338,9 @@ export const checkVerificationCode = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -406,28 +410,51 @@ export const updateUser = async (req: Request, res: Response) => {
       res.status(401).json({ message: "Unauthorised" })
       return
     }
-    const { email, firstName, lastName, phone } = req.body ?? {}
-    if (!email || !firstName || !lastName || !phone) {
+    const { email } = req.body ?? {}
+    if (!req.body?.firstName || !req.body?.lastName || !req.body?.phone) {
       res.status(400).json({
-        message: "Email, first name, last name and phone are required",
+        message: "First name, last name and phone are required",
       })
       return
     }
-    // Sign-in and password reset both look up by trim().toLowerCase(), so
-    // storing it any other way locks the account out of both.
-    const normalisedEmail = email.trim().toLowerCase()
-    const existing = await db.user.findUnique({
-      where: { email: normalisedEmail },
-      select: { id: true },
+    const fields = readProfileFields({
+      firstName: req.body.firstName,
+      lastName: req.body.lastName,
+      phone: req.body.phone,
     })
-    if (existing && existing.id !== userId) {
-      res.status(409).json({ message: "Email already registered" })
+    if (!fields.ok) {
+      res.status(400).json({ message: fields.message })
       return
     }
+    const { firstName, lastName, phone } = fields.values
+
+    // The email address can't be changed here. It used to be written straight from the
+    // request with nothing sent to the new address, so an account could claim an inbox
+    // its owner had never seen — keeping its "verified" mark, taking that address away
+    // from whoever really owns it, and mailing order confirmations there. The app shows
+    // the field read-only and sends back the address it was given, so only a request
+    // naming a different one is refused. Changing it properly needs the new address
+    // verified first.
+    if (typeof email === "string" && email.trim()) {
+      const current = await db.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      })
+      // Normalised on both sides: sign-in looks up by trim().toLowerCase(), and the
+      // website shares this table, so a stored address is not guaranteed to be in that
+      // form already — comparing it raw would refuse every save for such an account.
+      const normalise = (address: string) => address.trim().toLowerCase()
+      if (current && normalise(email) !== normalise(current.email)) {
+        res
+          .status(400)
+          .json({ message: "Your email address can't be changed here" })
+        return
+      }
+    }
+
     const user = await db.user.update({
       where: { id: userId },
       data: {
-        email: normalisedEmail,
         firstName:
           firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
         lastName:
@@ -503,7 +530,9 @@ export const getOrder = async (req: Request, res: Response) => {
     res.status(200).json({ order })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -589,7 +618,9 @@ export const getUserOrders = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -611,7 +642,9 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
     res.status(200).json({ points: loyaltyPoints?.points ?? 0 })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -697,9 +730,13 @@ export const createOrder = async (req: Request, res: Response) => {
     // whose card was charged that their order failed — at which point they
     // pay again. Checked before the trading-hours gate: an order that exists
     // is an order, whatever the clock says now.
+    //
+    // Only the caller's own order. This lookup used to match the payment id
+    // alone, so anyone who sent another customer's payment id was handed that
+    // customer's order — their name, email and phone number with it.
     if (paymentIntentId) {
       const existing = await db.order.findUnique({
-        where: { paymentIntentId },
+        where: { paymentIntentId, appUserId: userId },
         select: orderSelect,
       })
 
@@ -714,23 +751,17 @@ export const createOrder = async (req: Request, res: Response) => {
       daysOffKeys: await getDaysOffKeys(),
     })
 
-    if (!pickUpCheck.ok) {
-      // Refusing a paid order would strand the customer's money: the card is
-      // charged before this endpoint is reached and nothing here can refund it.
-      // `createPaymentIntent` is the gate that stops a bad time before the
-      // charge, so reaching this branch with a payment attached means the store
-      // closed in the seconds since. Take the order and make the problem
-      // visible instead of taking the money and dropping it.
-      if (parsedBody.paymentIntentId) {
-        console.error(
-          `Order accepted with an invalid pick up time (${pickUpCheck.message}) ` +
-            `because payment ${parsedBody.paymentIntentId} was already taken. ` +
-            `User ${userId}, requested ${parsedBody.pickUpTime.toISOString()}.`,
-        )
-      } else {
-        res.status(400).json({ message: pickUpCheck.message })
-        return
-      }
+    // Refusing a paid order would strand the customer's money: the card is
+    // charged before this endpoint is reached. `createPaymentIntent` is the gate
+    // that stops a bad time before the charge, so reaching this with a payment
+    // attached means the store closed in the seconds since. The order is taken
+    // and the problem made visible — but only once the payment has been checked
+    // below. Any payment id at all used to be enough to skip this refusal.
+    const lateForHours = pickUpCheck.ok ? null : pickUpCheck.message
+
+    if (lateForHours && !paymentIntentId) {
+      res.status(400).json({ message: lateForHours })
+      return
     }
 
     const cart = await db.cart.findUnique({
@@ -752,7 +783,7 @@ export const createOrder = async (req: Request, res: Response) => {
       // than an empty cart.
       if (paymentIntentId) {
         const justCreated = await db.order.findUnique({
-          where: { paymentIntentId },
+          where: { paymentIntentId, appUserId: userId },
           select: orderSelect,
         })
 
@@ -775,6 +806,22 @@ export const createOrder = async (req: Request, res: Response) => {
       return
     }
 
+    // Same helper `createPaymentIntent` prices the charge with, so the order
+    // recorded here and the amount taken can never disagree.
+    const {
+      beforeDiscountInCents: totalPriceInCentsBeforeDiscount,
+      discountInCents: discountedAmountInCents,
+      payableInCents,
+      gstInCents,
+    } = calculateCartPrice(cart.cartItems)
+
+    // Only an order paid entirely in loyalty points comes to nothing. Anything
+    // else needs a payment, and the payment is checked inside the transaction.
+    if (payableInCents > 0 && !paymentIntentId) {
+      res.status(400).json({ message: "Payment is required for this order" })
+      return
+    }
+
     const pickUpNZDate = formatInTimeZone(
       new Date(parsedBody.pickUpTime),
       "Pacific/Auckland",
@@ -790,14 +837,9 @@ export const createOrder = async (req: Request, res: Response) => {
       update: { counter: { increment: 1 } },
     })
 
-    // Same helper `createPaymentIntent` prices the charge with, so the order
-    // recorded here and the amount taken can never disagree.
-    const {
-      beforeDiscountInCents: totalPriceInCentsBeforeDiscount,
-      discountInCents: discountedAmountInCents,
-      payableInCents,
-      gstInCents,
-    } = calculateCartPrice(cart.cartItems)
+    type OrderOutcome =
+      | { order: Prisma.OrderGetPayload<{ select: typeof orderSelect }>; refusal?: never }
+      | { refusal: PaymentRefusal; order?: never }
 
     // One transaction for every write this order makes: the order row, the
     // points it earns, the offers it unlocks, and the cart it empties. The
@@ -805,11 +847,24 @@ export const createOrder = async (req: Request, res: Response) => {
     // two committed an order and left the cart full — leaving the customer
     // able to pay for the same items a second time.
     //
+    // The payment is settled first, inside it, so the lock it takes is held
+    // until the order commits. See settleOrderPayment.
+    //
     // The confirmation email and the socket emit stay outside it. Both are
     // external and slow, and neither should be able to roll back an order
     // the customer has already paid for.
-    newOrder = await db.$transaction(
-      async (tx) => {
+    const outcome = await db.$transaction(
+      async (tx): Promise<OrderOutcome> => {
+        if (paymentIntentId) {
+          const refusal = await settleOrderPayment(tx, {
+            paymentIntentId,
+            userId,
+            stripeCustomerId: user.stripeCustomerId,
+            payableInCents,
+          })
+          if (refusal) return { refusal }
+        }
+
         const order = await tx.order.create({
           data: {
             tempOrderId: counter.counter.toString(),
@@ -999,12 +1054,27 @@ export const createOrder = async (req: Request, res: Response) => {
 
         // The cart goes with the order, in the same commit.
         await tx.cart.delete({ where: { userId } })
-        return order
+        return { order }
       },
       // The nested order create plus the loyalty and offer writes run past
       // Prisma's 5s default when the connection is cold.
       { timeout: 20_000, maxWait: 10_000 },
     )
+
+    if (outcome.refusal) {
+      res.status(outcome.refusal.status).json(outcome.refusal.body)
+      return
+    }
+
+    newOrder = outcome.order
+
+    if (lateForHours) {
+      console.error(
+        `Order ${newOrder.id} accepted with an invalid pick up time (${lateForHours}) ` +
+          `because payment ${paymentIntentId} was already taken. ` +
+          `User ${userId}, requested ${parsedBody.pickUpTime.toISOString()}.`,
+      )
+    }
 
     // Past this point the order is committed and paid for. Anything that
     // fails below is reported as a follow-up failure carrying the order id,
@@ -1032,7 +1102,7 @@ export const createOrder = async (req: Request, res: Response) => {
       paymentIntentId
     ) {
       const winner = await db.order.findUnique({
-        where: { paymentIntentId },
+        where: { paymentIntentId, appUserId: (req as any).userId },
         select: orderSelect,
       })
 
@@ -1096,20 +1166,13 @@ export const orderStatus = async (req: Request, res: Response) => {
       },
     })
 
-    // If order doesn't exist or doesn't belong to this user
-    if (!order) {
+    // One answer for an order that does not exist and one that is someone else's, as
+    // getOrder gives. This answered the second with a 403, which confirmed the id was a real
+    // order to anyone who asked.
+    if (!order || order.appUserId !== userId) {
       res.status(404).json({
         success: false,
         message: "Order not found",
-      })
-      return
-    }
-
-    // If order exists but belongs to another user
-    if (order.appUserId !== userId) {
-      res.status(403).json({
-        success: false,
-        message: "You don't have permission to view this order",
       })
       return
     }
@@ -1126,7 +1189,6 @@ export const orderStatus = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error checking order status",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -1269,7 +1331,9 @@ export const showOffers = async (req: Request, res: Response) => {
     res.status(200).json({ offers: serializedOffers, viewer })
     return
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -1363,8 +1427,7 @@ export const getLeaderBoard = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error getting leaderboard: " + getErrorMessage(error),
-    })
+    console.error("Error getting leaderboard:", error)
+    res.status(500).json({ message: "Error getting leaderboard" })
   }
 }

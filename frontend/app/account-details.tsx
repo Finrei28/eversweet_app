@@ -17,6 +17,7 @@ import BouncingLoader from "@/_components/loader"
 import { updateAnonymousStatus, updateUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
 import parsePhoneNumberFromString from "libphonenumber-js"
+import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
 
 const FormField = ({
   label,
@@ -40,6 +41,11 @@ const FormField = ({
       {isEditing && editable ? (
         <TextInput
           value={value}
+          maxLength={
+            PROFILE_FIELD_MAX_LENGTH[
+              field as keyof typeof PROFILE_FIELD_MAX_LENGTH
+            ]
+          }
           keyboardType={field === "phone" ? "phone-pad" : "default"}
           onChangeText={(text) => handleChange(field, text)}
           className="border border-gray-300 rounded-lg p-3 bg-white"

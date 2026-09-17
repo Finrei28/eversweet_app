@@ -87,6 +87,31 @@ unit suites still run. `setup.ts` copies it over `DATABASE_URL`, so `lib/db` con
 the test database with no injection. `fileParallelism` is off because the suites share
 one database.
 
+**Tests must never reach Stripe or Redis.** `setup.ts` runs `dotenv.config()` first and only
+fills in placeholders for what is *missing*, so on a developer machine `STRIPE_SECRET_KEY`
+and `REDIS_URL` are the real ones from `backend/.env`. The doubles:
+
+- **Stripe:** `test/stripeStub.ts`. Mock the SDK with
+  `vi.mock("stripe", async (importOriginal) => (await import("../test/stripeStub.js")).fakeStripeModule(await importOriginal()))`
+  (the `.js` is required: NodeNext resolution needs an extension, and Vite maps it to the
+  `.ts`). Then program the `stripeApi` spies and call `resetStripeStub()` in `beforeEach`.
+  The SDK's real error classes stay available, so `resourceMissing(actual)` builds a genuine
+  `resource_missing`. Webhooks are verified for real: sign the payload with
+  `Stripe.webhooks.generateTestHeaderString` and set `STRIPE_WEBHOOK_SECRET`.
+- **Redis:** `test/redisStub.ts`, mocked through a getter,
+  `vi.mock("../lib/redis", () => ({ get redis() { return redis.redis } }))`, because
+  `vi.mock` is hoisted above the imports.
+- **Auth:** `tokenFor(userId)` (`test/db.ts`) mints a token, but the user row has to exist.
+  Authentication reads the role and password-change time from the database, not the token.
+- A test that mocks `lib/db` without stubbing `lib/sessionCache` will reach for the real
+  `REDIS_URL`; see `lib/orderAnnounce.integration.test.ts`.
+
+**Times in the local test database.** The `C:\pg16test` cluster's session time zone is New
+Zealand, while Prisma stores `DateTime` columns as UTC `timestamp(3)`. A raw `now()`, or a
+JS `Date` passed through `$executeRaw`, is converted to the session zone and lands 12–13
+hours out. Set times through the Prisma model API instead: it accepts an explicit
+`updatedAt`.
+
 **The local test Postgres lives at `C:\pg16test`.** This machine has no Docker — WSL2
 cannot start, so the container route is unavailable — and the test database is instead a
 standalone PostgreSQL 16.4 cluster there: binaries in `pgsql\`, data in `data\`, log in
@@ -207,10 +232,20 @@ cutting rows.
 **Redis is an accelerator, never a dependency.** `lib/cache`, `lib/sessionCache` and
 `middleware/idempotency` all bound every call and fall through to Postgres on timeout or
 error. Keep new cache code in that shape, and note the direction it fails in: the session
-cache stores "this user's password-change time" so a miss falls through to a *check*,
-rather than storing "this token was revoked" where an eviction would silently honour a
-retired token. Order idempotency is likewise belt-and-braces — Redis is the fast path, the
-unique constraint on `Order.paymentIntentId` is the guarantee.
+cache stores "this user's password-change time **and role**" so a miss falls through to a
+*check*, rather than storing "this token was revoked" where an eviction would silently
+honour a retired token. Order idempotency is likewise belt-and-braces — Redis is the fast
+path, the unique constraint on `Order.paymentIntentId` is the guarantee.
+
+**Sessions.** `lib/session.verifySession` is the one token check, shared by
+`middleware/authentication` and the socket handshake. It does three things:
+- verifies the JWT;
+- reads `{ passwordChangedAt, role }` from the cache or the user row;
+- rejects tokens issued before the last password change, and tokens for deleted accounts.
+
+`req.role` is the role **on record**, not the token's. Tokens live 90 days (180 for staff),
+so the token's role would outlive a demotion. A role change made outside this API reaches
+requests within the cache's 60s TTL. A failure to check answers 500, never a pass.
 
 **The rate limiters fail to memory, not to open.** Every limiter in
 `middleware/rateLimiter` uses `ResilientStore` (`middleware/resilientRateLimitStore`):
@@ -289,9 +324,47 @@ line and the screen would just render blanks.
 **Order creation.** `POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
 keyed on the `Idempotency-Key` header and falling back to the payment intent for older
 builds. The card is charged *before* this endpoint is reached, so the controller's rule is
-that a paid order is never refused: a pick-up time that has become invalid is logged loudly
-and accepted, and a retry that lost a race returns the existing order rather than "cart is
-empty".
+that a **verified** paid order is never refused: a pick-up time that has become invalid is
+logged loudly and accepted, and a retry that lost a race returns the customer's own existing
+order rather than "cart is empty".
+
+Verification is `lib/orderPayment.settleOrderPayment`, run first inside the order
+transaction. The payment intent must be the caller's Stripe customer's, carry the
+`purpose: "app_order"` metadata `createPaymentIntent` writes (membership invoices share the
+customer, so the customer check alone would let one pay for, or be refunded as, an order),
+be `succeeded`, not refunded (a refund leaves the status at `succeeded`), and equal the
+cart's `payableInCents` in NZD. A real payment that doesn't match is **refunded in full**
+and the order refused — never accepted at the amount paid. A Postgres advisory lock on the
+payment intent id is held from the Stripe read to the order's commit, so a concurrent
+attempt cannot both make the order and refund it. Hold-then-capture would avoid refunds
+altogether, but installed builds treat anything but `Succeeded` as a failed payment, so it
+needs an app release first.
+
+A refusal comes back as `409 { refunded: true }`, which the app turns into a "Payment
+refunded" alert (`PaymentRefundedError`, `services/api.ts`). `checkPaymentStatus` reports a
+refunded payment as `success: false, refunded: true`, so older builds say "Payment Failed"
+rather than "paid but no order". Payment intents created before `createPaymentIntent`
+started tagging them are refused and logged, so **deploy changes here while nobody is
+mid-checkout**.
+
+**Stripe.** One client, `lib/stripeClient` (with `idOf` for fields Stripe may send
+expanded); `lib/stripeErrors` has `orNullIfMissing`, which turns `resource_missing` into
+null. Rules the endpoints follow:
+- A card, setup intent or payment intent must belong to the caller's `stripeCustomerId`.
+  One that belongs to someone else answers exactly like a missing one (404).
+- `removeCard` refuses the card a membership renews on (409). That card is
+  `membershipPaymentMethodId`: the subscription's own default, else the customer's invoice
+  default, which is the one `createMembership` sets.
+- `getOrCreateCustomerId` creates a customer only when the stored one is
+  `resource_missing`. Any other Stripe error is rethrown: a blip used to replace the
+  customer and orphan a member's cards and subscription.
+- `createPaymentIntent` always charges NZD, whatever `currency` says.
+- `createMembership` always uses the plan's own price; a different `stripePriceId` gets 409.
+
+**Versions:** the SDK pins `2025-08-27.basil`. The webhook endpoint (and the account
+default) is `2025-02-24.acacia`. The `2020-08-27` traffic is the ephemeral key minted for
+the mobile payment sheet. Don't upgrade the account default: it would change webhook
+payload shapes.
 
 **Order lifecycle to the kitchen.** `lib/orderTiming` + `lib/prepTimes` are the one place
 prep durations live (item count → prep minutes → kitchen lead time → customer quote); this
@@ -300,11 +373,53 @@ announcement, and two socket events go to `ADMIN_ROOM` and only `ADMIN_ROOM`:
 `order-received` is silent and populates the Upcoming list, `new-order` is the alarm and
 fires when preparation is actually due — which for a scheduled order can be hours after
 payment. A two-minute cron re-sweeps as a backstop for anything a restart dropped. Socket
-room membership is decided by the JWT role in `lib/socketAuth`.
+room membership is decided by the role **on record**, not the JWT's: `lib/socketAuth` runs
+the same `lib/session.verifySession` as the HTTP middleware at the handshake, a one-minute
+cron (`recheckAdminSockets`) sends away any kitchen socket whose session no longer holds
+(demoted, password reset, token expired), and `resetPassword` disconnects that user's
+sockets at once. A check that cannot be made (database down) keeps the socket rather than
+silence the kitchen.
 
-Cron (`index.ts`) all runs in `Pacific/Auckland`: kitchen sweep every 2 min, restaurant
-status every minute, `renewWeeklyOffers` on Monday at 00:00, daily special, and
-`settleMonthlyWinners` at 00:00 on the 1st.
+**Membership.** Stripe owns the truth; the webhook writes what it reads back from Stripe
+rather than adjusting the row, so a redelivered or out-of-order event changes nothing.
+`Membership.totalMonths` is the run of monthly invoices **paid in a row** on the current
+subscription — the member discount is `min(plan.maxDiscount, totalMonths ×
+plan.membershipDiscount)`, so a month never paid starts the customer at the first step
+again. A renewal declined and then paid on a retry keeps the run. The Stripe Dashboard is
+set to cancel a subscription whose retries all fail (keep it so — with "unpaid" or "past
+due" a lapsed member stays `isActive`, can only retry, and `createMembership` refuses them),
+and rejoining creates a new subscription counted from one.
+
+Because event payloads are in acacia shape and SDK responses in basil (see **Stripe**
+above), handlers read events defensively and re-read live state through the SDK. The
+handlers:
+- **`invoice.payment_succeeded`:** the renewal date is the subscription item's
+  `current_period_end`. `invoice.period_end` looks back one period.
+- **`invoice.payment_failed`:** only an invoice still `open` counts; a late decline must not
+  put a paid member on hold. A first payment sets FAILED; a renewal sets PENDING while
+  Stripe retries.
+- **`customer.subscription.updated`:** records a scheduled cancellation from the live
+  subscription.
+- **`customer.subscription.deleted`:** sets FAILED only when `cancellation_details.reason`
+  is a failed or disputed payment. An ordinary end sets SUCCESS ("nothing owed"). The enum
+  has no ENDED, and PENDING would offer to retry a payment for a dead subscription.
+- **Unknown subscriptions:** logged and acknowledged with 200. A throw makes Stripe
+  redeliver for days.
+- **First-payment race:** `createMembership` writes the subscription id only after Stripe
+  has attempted the first invoice, so either outcome can arrive first. Those events claim
+  the row by `subscription.metadata.userId` while it is `isActive: false, PENDING`.
+
+`createMembership` claims the join atomically before touching Stripe: an inactive row that
+is not already PENDING (or PENDING for over 2 minutes), or a fresh create (P2002 means
+someone beat you). A second concurrent join gets 409. Without that, a double tap created
+two subscriptions. If Stripe refuses before the subscription exists, the claim is released.
+
+Cron (`index.ts`) all runs in `Pacific/Auckland`:
+- kitchen sweep every 2 minutes;
+- restaurant status every minute;
+- admin socket re-check every minute;
+- `renewWeeklyOffers` on Monday at 00:00, the daily special, and `settleMonthlyWinners` at
+  00:00 on the 1st.
 
 ### Loyalty points, the monthly leaderboard and prizes
 
@@ -490,7 +605,9 @@ weekly hours and still be shut.
 ### admin/ (staff app)
 
 Expo Router with the same `@/*` alias and NativeWind conventions. `AuthProvider` wraps
-everything and gates on decoded JWT `role === "ADMIN"`; order fetching and the socket
+everything and gates on decoded JWT `role === "ADMIN"` — for the UI only; the server
+authorises on the role on record, and drops a kitchen socket within a minute of a
+demotion or password reset. Order fetching and the socket
 connection are started and stopped from an `authenticated`-keyed effect in
 `app/_layout.tsx` — never connect the socket or fetch orders before auth is confirmed.
 Order and socket state live in zustand stores (`store/order-store.ts`,
@@ -514,6 +631,18 @@ For permission reviews: the audio library is used only to play new-order alert t
   before changing the code near it, and write in the same register rather than restating
   what the line does.
 - Money is always integer cents (`*InCents`), and prices are GST-inclusive.
+- **Responses never carry internal error detail.** Log with `console.error`, then send a
+  fixed message. A serialised Prisma error names models, arguments and queries.
+  - `app.ts` ends with an error handler that does the same for anything thrown outside a
+    try: a 4xx keeps its status, anything else becomes "Internal server error".
+  - The one pass-through is a Stripe card decline, via `lib/stripeErrors.stripeErrorMessage`.
+- **Something that belongs to someone else answers exactly like something missing** (same
+  status, same body), so ids can't be probed. This covers orders, order status, cards,
+  setup and payment intents, and cart lines.
+- One-time codes come from `lib/otp.generateOtp` (crypto `randomInt`), never `Math.random`.
+- Profile field limits live in `backend/src/utils/schema.ts` (`PROFILE_FIELD_LIMITS`: names
+  50, phone 20, email 254). They are mirrored as input `maxLength`s in
+  `frontend/lib/profileFields.ts`; change both together.
 - Commit subjects are imperative sentences describing the behaviour change, not
   conventional-commit prefixes ("Stop a quantity tap from blocking the checkout button").
   Branches use `fix/`, `perf/`, `diag/`, `feat/` prefixes and land on `main` via PR.
@@ -522,7 +651,9 @@ For permission reviews: the audio library is used only to play new-order alert t
 
 - `backend/`: `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `REDIS_URL`, `STRIPE_SECRET_KEY`,
   `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `ALLOWED_ORIGINS` (CORS whitelist, comma
-  separated), `INTERNAL_SERVICE_SECRET`, `CLOUDINARY_*`, `SERVER_URL`; plus
+  separated; requests with no `Origin` — the native apps — are always allowed, and a
+  browser from anywhere else gets a 403), `INTERNAL_SERVICE_SECRET`, `CLOUDINARY_*`,
+  `SERVER_URL`; plus
   `TEST_DATABASE_URL` and optional `SQL_TIMING` for development.
 - `frontend/`: `EXPO_PUBLIC_URL` (API base), `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
   `EXPO_PUBLIC_EXPO_PROJECT_ID`, `EXPO_PUBLIC_CLOUDINARY_*`, `EXPO_PUBLIC_FILLER_IMAGE_URL`.

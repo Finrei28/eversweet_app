@@ -22,6 +22,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js"
 // is used.
 import isEmail from "validator/lib/isEmail"
 import { getErrorMessage } from "@/utils/getError"
+import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
@@ -124,6 +125,7 @@ export default function SignUp() {
                     <TextInput
                       className="border border-gray-300 rounded-lg p-4"
                       keyboardType="default"
+                      maxLength={PROFILE_FIELD_MAX_LENGTH.firstName}
                       value={signupForm.firstName}
                       onChangeText={(text) =>
                         setSignupForm((prev) => ({ ...prev, firstName: text }))
@@ -136,6 +138,7 @@ export default function SignUp() {
                     <TextInput
                       className="border border-gray-300 rounded-lg p-4"
                       keyboardType="default"
+                      maxLength={PROFILE_FIELD_MAX_LENGTH.lastName}
                       value={signupForm.lastName}
                       onChangeText={(text) =>
                         setSignupForm((prev) => ({ ...prev, lastName: text }))
@@ -148,6 +151,7 @@ export default function SignUp() {
                     <TextInput
                       className="border border-gray-300 rounded-lg p-4"
                       keyboardType="email-address"
+                      maxLength={PROFILE_FIELD_MAX_LENGTH.email}
                       value={signupForm.email}
                       onChangeText={(text) =>
                         setSignupForm((prev) => ({ ...prev, email: text }))
@@ -161,6 +165,7 @@ export default function SignUp() {
                       className="border border-gray-300 rounded-lg p-4"
                       keyboardType="phone-pad"
                       placeholder="+64 21 123 4567"
+                      maxLength={PROFILE_FIELD_MAX_LENGTH.phone}
                       value={signupForm.phoneNumber}
                       onChangeText={(text) =>
                         setSignupForm((prev) => ({

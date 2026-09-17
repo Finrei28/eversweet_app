@@ -26,7 +26,6 @@ export default function CurrentOrders() {
   const currentOrders = useOrderStore((state) => state.currentOrders)
   const pendingOrders = useOrderStore((state) => state.pendingOrders)
   const fetchOrders = useOrderStore((state) => state.fetchOrders)
-  const isLoading = useOrderStore((state) => state.isLoading)
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const { authenticated, loading } = useAuth()
@@ -54,8 +53,13 @@ export default function CurrentOrders() {
 
   const onRefresh = async () => {
     setRefreshing(true)
-    await Promise.all([fetchOrders(), syncPendingOrders()])
-    if (!isLoading) {
+    // Unconditional, and in a finally. This used to clear only `if
+    // (!isLoading)`, but that was the `isLoading` this closure rendered with,
+    // not the store's value once the fetch had finished — so pulling to refresh
+    // while a load was already running left the spinner up for good.
+    try {
+      await Promise.all([fetchOrders(), syncPendingOrders()])
+    } finally {
       setRefreshing(false)
     }
   }
