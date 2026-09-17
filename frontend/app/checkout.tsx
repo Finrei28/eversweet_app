@@ -35,6 +35,7 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker"
 import {
   PaymentRefundedError,
+  PaymentReleasedError,
   createOrder,
   checkOrderStatus,
   getEstimatedPickUpTime,
@@ -67,6 +68,26 @@ import { TickAnimation } from "@/_components/tickAnimation"
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 
+/**
+ * Everything an order needs once its payment has been confirmed, kept so the same order —
+ * same payment, same idempotency key — can be placed again if the first attempt is lost.
+ */
+type PendingOrder = {
+  paymentMethodId: string | null
+  pickupNow: boolean
+  pickUpTime: Date
+  eatIn: boolean
+  paymentIntentId: string | null
+  idempotencyKey: string
+}
+
+/**
+ * Stripe could not confirm the card — a decline, or 3D Secure abandoned. Nothing is held and
+ * nothing is charged, so it is reported as the card's problem, not as a payment that "may
+ * have been processed".
+ */
+class CardNotConfirmedError extends Error {}
+
 // Helper functions
 
 function CheckoutContent() {
@@ -83,6 +104,9 @@ function CheckoutContent() {
   const [showAddCard, setShowAddCard] = useState(false)
   const [loadingPaymentSheet, setLoadingPaymentSheet] = useState(false)
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null)
+  // The order a confirmed payment was for, until that order is placed or the payment
+  // settled some other way. A ref: recovery reads it from callbacks built on older renders.
+  const pendingOrderRef = useRef<PendingOrder | null>(null)
   const [orderInProgress, setOrderInProgress] = useState<string | null>(null)
   const [isCheckingStatus, setIsCheckingStatus] = useState(false)
   const appState = useRef(AppState.currentState)
@@ -329,10 +353,14 @@ function CheckoutContent() {
   }
 
   const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-    // App has come back to the foreground
+    // App has come back to the foreground. Not while the checkout itself is still
+    // running: coming back from a bank's 3D Secure app lands here mid-payment, and that
+    // checkout reports its own outcome. Checking then offered to place an order that was
+    // already on its way.
     if (
       appState.current.match(/inactive|background/) &&
-      nextAppState === "active"
+      nextAppState === "active" &&
+      !isProcessingPayment
     ) {
       // Check if we have a payment intent or order in progress
       if (paymentIntentId) {
@@ -397,30 +425,43 @@ function CheckoutContent() {
           "Payment refunded",
           "Your cart changed while you were paying, so this payment was refunded. Please check your cart and try again.",
         )
+        pendingOrderRef.current = null
         setPaymentIntentId(null)
-      } else if (status.success) {
-        // Payment was successful, check if order was created
-        if (status.orderId) {
-          setOrderInProgress(status.orderId)
-          await verifyOrderStatus(status.orderId)
-        } else {
-          // Payment succeeded but no order was created
-          // This is an edge case - we should retry order creation
-          Alert.alert(
-            "Payment Processed",
-            "Your payment was processed, but we couldn't send your order to the kitchen. Please check your orders or contact support.",
-            [
-              {
-                text: "Check Orders",
-                onPress: () => router.replace("/orders"),
-              },
-              {
-                text: "Try Again",
-                style: "cancel",
-              },
-            ],
-          )
-        }
+      } else if (status.released) {
+        Alert.alert(
+          "You haven't been charged",
+          "This payment was let go without being taken. Please check your cart and try again.",
+        )
+        pendingOrderRef.current = null
+        setPaymentIntentId(null)
+      } else if ((status.success || status.authorised) && status.orderId) {
+        setOrderInProgress(status.orderId)
+        await verifyOrderStatus(status.orderId)
+      } else if (status.success || status.authorised) {
+        // Paid for, or held for, an order that never reached the server. This used to end
+        // at "contact support" with a Try Again that did nothing. The same order can simply
+        // be placed again: the server settles the payment under a lock and never takes it
+        // twice.
+        const pending = pendingOrderRef.current
+        const retry =
+          pending && pending.paymentIntentId === intentId ? pending : null
+
+        Alert.alert(
+          "Your order hasn't reached us yet",
+          status.authorised
+            ? "Your card is on hold for this order, but the order didn't come through. If it isn't placed, the hold is released within the hour and you won't be charged."
+            : "Your payment went through, but the order didn't come through. If it isn't placed, the payment is refunded within the hour.",
+          [
+            ...(retry
+              ? [{ text: "Place order", onPress: () => void retryPendingOrder(retry) }]
+              : []),
+            {
+              text: "Check Orders",
+              onPress: () => router.replace("/orders"),
+            },
+            { text: "Not now", style: "cancel" as const },
+          ],
+        )
       } else if (status.pending) {
         // Payment is still processing
         setIsProcessingPayment(true)
@@ -430,6 +471,7 @@ function CheckoutContent() {
           "Payment Failed",
           "Your payment could not be processed. Please try again.",
         )
+        pendingOrderRef.current = null
         setPaymentIntentId(null)
       }
     } catch (error) {
@@ -760,17 +802,15 @@ function CheckoutContent() {
 
     setIsProcessingPayment(true)
 
-    try {
-      // Create order object
+    let paymentIntentId: string | null = null
 
-      // One key for this checkout attempt, minted before the card is charged
-      // so every send of this order carries the same one. A later attempt
-      // gets a fresh key, because that is a genuinely new order.
+    try {
+      // One key for this checkout attempt, minted before the card is held so
+      // every send of this order carries the same one. A later attempt gets a
+      // fresh key, because that is a genuinely new order.
       const orderIdempotencyKey = Crypto.randomUUID()
 
       const paymentMethodId = totalAmount > 0 ? selectedCardId : null
-
-      let paymentIntentId: string | null = null
 
       if (totalAmount > 0) {
         if (!selectedCardId || showAddCard) {
@@ -822,99 +862,136 @@ function CheckoutContent() {
             declineCode: error.declineCode,
           })
 
-          throw new Error(
+          throw new CardNotConfirmedError(
             error.message ?? "Your card was declined. Please try another one.",
           )
         }
 
-        if (paymentIntent.status !== "Succeeded") {
+        // A hold is what this build asks for: the server takes the money once the
+        // order is written. "Succeeded" is still accepted, from a server that
+        // predates holds and charges at once.
+        if (
+          paymentIntent.status !== "RequiresCapture" &&
+          paymentIntent.status !== "Succeeded"
+        ) {
           throw new Error(`Payment failed with status: ${paymentIntent.status}`)
         }
 
         paymentIntentId = paymentIntent.id
       }
 
-      // Payment succeeded, now create the order in the database
-      setPaymentSuccess(true)
-      // Start order creation immediately
-      const orderPromise =
-        totalAmount > 0
-          ? createOrder(
-              paymentMethodId,
-              pickupNow,
-              requestedPickUpTime,
-              eatIn,
-              paymentIntentId,
-              orderIdempotencyKey,
-            )
-          : createOrder(
-              null,
-              pickupNow,
-              requestedPickUpTime,
-              eatIn,
-              null,
-              orderIdempotencyKey,
-            )
-
-      // Delay showing loading UI
-      const loadingTimeout = setTimeout(() => {
-        setCreatingOrderLoading(true)
-      }, 1500) // enough time for tick animation to feel smooth
-
-      const orderResponse = await orderPromise
-
-      // Stop delayed loading if it hasn’t shown yet
-      clearTimeout(loadingTimeout)
-      if (!orderResponse) {
-        throw new Error("Failed to create order")
+      const pending: PendingOrder = {
+        paymentMethodId,
+        pickupNow,
+        pickUpTime: requestedPickUpTime,
+        eatIn,
+        paymentIntentId,
+        idempotencyKey: orderIdempotencyKey,
       }
-      setCreatingOrderLoading(false)
+      pendingOrderRef.current = pending
+
+      await placePendingOrder(pending)
+    } catch (error) {
+      reportOrderFailure(error, paymentIntentId)
+    } finally {
+      setIsProcessingPayment(false)
+    }
+  }
+
+  /**
+   * Places the order a confirmed payment (or a points-only cart) is for. Shared by the
+   * checkout itself and by recovery, so a retried order is exactly the one first sent —
+   * same payment, same idempotency key.
+   */
+  const placePendingOrder = async (pending: PendingOrder) => {
+    setPaymentSuccess(true)
+    // Held back so the tick animation has time to feel finished.
+    const loadingTimeout = setTimeout(() => {
+      setCreatingOrderLoading(true)
+    }, 1500)
+
+    try {
+      const orderResponse = await createOrder(
+        pending.paymentMethodId,
+        pending.pickupNow,
+        pending.pickUpTime,
+        pending.eatIn,
+        pending.paymentIntentId,
+        pending.idempotencyKey,
+      )
+      if (!orderResponse) throw new Error("Failed to create order")
+
+      pendingOrderRef.current = null
       setOrderInProgress(orderResponse.id)
 
-      // If total amount is 0, refresh loyalty points
-      if (totalAmount === 0) {
+      // Paid entirely in points, so the balance has changed.
+      if (!pending.paymentIntentId) {
         useLoyaltyStore.getState().fetchPoints()
       }
 
-      // Clear cart
       processOrder()
-
       router.replace("/orders")
-    } catch (error) {
-      setPaymentSuccess(false)
+    } finally {
+      clearTimeout(loadingTimeout)
       setCreatingOrderLoading(false)
-      if (error instanceof PaymentRefundedError) {
-        // Settled, not in doubt: no order, and the money is on its way back. The cart is
-        // what changed, so it is re-read to show what would be charged now.
+    }
+  }
+
+  const reportOrderFailure = (error: unknown, intentId: string | null) => {
+    setPaymentSuccess(false)
+
+    if (error instanceof PaymentReleasedError || error instanceof PaymentRefundedError) {
+      // Settled, not in doubt: no order, and either nothing was taken or it is on its
+      // way back. The cart is usually what changed, so it is re-read to show what the
+      // customer would pay now.
+      pendingOrderRef.current = null
+      setPaymentIntentId(null)
+      Alert.alert(
+        error instanceof PaymentReleasedError
+          ? "You haven't been charged"
+          : "Payment refunded",
+        error.message,
+      )
+      void useCartStore.getState().fetchCart()
+    } else if (intentId && !(error instanceof CardNotConfirmedError)) {
+      Alert.alert(
+        "Connection Issue",
+        "Your payment may have gone through, but we couldn't confirm your order. Would you like to check the status?",
+        [
+          {
+            text: "Check Status",
+            onPress: () => verifyPaymentStatus(intentId),
+          },
+          {
+            text: "View Orders",
+            onPress: () => router.replace("/orders"),
+          },
+        ],
+      )
+    } else {
+      if (error instanceof CardNotConfirmedError) {
+        pendingOrderRef.current = null
         setPaymentIntentId(null)
-        Alert.alert("Payment refunded", error.message)
-        void useCartStore.getState().fetchCart()
-      } else if (paymentIntentId) {
-        Alert.alert(
-          "Connection Issue",
-          "Your payment may have been processed, but we couldn't confirm your order. Would you like to check the status?",
-          [
-            {
-              text: "Check Status",
-              onPress: () => verifyPaymentStatus(paymentIntentId),
-            },
-            {
-              text: "View Orders",
-              onPress: () => router.replace("/orders"),
-            },
-          ],
-        )
-      } else {
-        console.error(getErrorMessage(error))
-        Toast.show({
-          type: "error",
-          text1: `${getErrorMessage(error)}`,
-          position: "bottom",
-          visibilityTime: undefined,
-          autoHide: false,
-          bottomOffset: 90,
-        })
       }
+      console.error(getErrorMessage(error))
+      Toast.show({
+        type: "error",
+        text1: `${getErrorMessage(error)}`,
+        position: "bottom",
+        visibilityTime: undefined,
+        autoHide: false,
+        bottomOffset: 90,
+      })
+    }
+  }
+
+  /** Places, again, an order whose payment went through but whose order did not. */
+  const retryPendingOrder = async (pending: PendingOrder) => {
+    setIsProcessingPayment(true)
+    try {
+      await placePendingOrder(pending)
+    } catch (error) {
+      reportOrderFailure(error, pending.paymentIntentId)
     } finally {
       setIsProcessingPayment(false)
     }

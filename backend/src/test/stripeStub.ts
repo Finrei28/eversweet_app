@@ -24,7 +24,13 @@ export const stripeApi = {
     attach: vi.fn(),
     list: vi.fn(),
   },
-  paymentIntents: { create: vi.fn(), retrieve: vi.fn() },
+  paymentIntents: {
+    create: vi.fn(),
+    retrieve: vi.fn(),
+    capture: vi.fn(),
+    cancel: vi.fn(),
+    search: vi.fn(),
+  },
   setupIntents: { create: vi.fn(), retrieve: vi.fn() },
   subscriptions: {
     list: vi.fn(),

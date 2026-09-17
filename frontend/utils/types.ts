@@ -342,6 +342,10 @@ export type PaymentStatusResult = {
    * servers that predate refunds.
    */
   refunded?: boolean
+  /** On hold and waiting for its order, which can be placed again. Absent from older servers. */
+  authorised?: boolean
+  /** Let go without being taken: nothing was charged. Absent from older servers. */
+  released?: boolean
   pending: boolean
   orderId: string | null
 }
