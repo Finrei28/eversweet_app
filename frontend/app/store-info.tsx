@@ -211,19 +211,23 @@ export default function StoreInfo() {
                 We couldn&apos;t load our hours just now.
               </Text>
             )}
-            {Object.entries(storeHours).map(([day, hours], index) => (
-              <View key={index} className="flex-row justify-between py-1">
-                <Text className="text-gray-700">{day}</Text>
-                <Text className="text-gray-700">
-                  {hours ? `${hours[0]} - ${hours[1]}` : "Closed"}
-                </Text>
-              </View>
-            ))}
+            {/* Only hours that loaded: under "couldn't load our hours" a list would read as
+                current. */}
             {storeHoursStatus === "ready" && (
-              <Text className="text-gray-500 text-sm mt-2">
-                Last pick up is {LAST_ORDER_OFFSET_MINUTES.pickup} minutes before
-                closing.
-              </Text>
+              <>
+                {Object.entries(storeHours).map(([day, hours], index) => (
+                  <View key={index} className="flex-row justify-between py-1">
+                    <Text className="text-gray-700">{day}</Text>
+                    <Text className="text-gray-700">
+                      {hours ? `${hours[0]} - ${hours[1]}` : "Closed"}
+                    </Text>
+                  </View>
+                ))}
+                <Text className="text-gray-500 text-sm mt-2">
+                  Last pick up is {LAST_ORDER_OFFSET_MINUTES.pickup} minutes
+                  before closing.
+                </Text>
+              </>
             )}
           </View>
         </View>

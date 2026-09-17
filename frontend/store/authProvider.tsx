@@ -113,10 +113,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const loaded = await fetchTradingCalendar({ getStoreHours, getDaysOff })
 
-    if (loaded.status === "ready") {
-      setStoreHours(loaded.storeHours)
-      setDaysOff(loaded.daysOff)
-    }
+    // A failed load clears what an earlier one left, rather than keeping it: hours still in
+    // the calendar after an "error" can be shown or used as though they were current.
+    setStoreHours(loaded.status === "ready" ? loaded.storeHours : {})
+    setDaysOff(loaded.status === "ready" ? loaded.daysOff : new Set<string>())
     setStoreHoursStatus(loaded.status)
   }, [])
 
