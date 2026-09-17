@@ -86,6 +86,29 @@ const CASES: { name: string; window: OfferWindow; live: boolean }[] = [
     },
     live: false,
   },
+  // Dates as the website stores them since 2026-09-17: whole Auckland days, the end day
+  // through its last millisecond. NOW is midnight at the start of 13 September in
+  // Auckland (NZST, +12), so these pin both edges of a day.
+  {
+    name: "on the only day of its run, as the website stores it",
+    window: {
+      isActive: true,
+      startsAt: at("2026-09-12T12:00:00.000Z"), // 13 September 00:00 NZST
+      endsAt: at("2026-09-13T11:59:59.999Z"), // 13 September 23:59:59.999 NZST
+      archivedAt: null,
+    },
+    live: true,
+  },
+  {
+    name: "the day after its run ended, as the website stores it",
+    window: {
+      isActive: true,
+      startsAt: null,
+      endsAt: at("2026-09-12T11:59:59.999Z"), // 12 September 23:59:59.999 NZST
+      archivedAt: null,
+    },
+    live: false,
+  },
   {
     name: "archived but still inside its window",
     window: {
