@@ -87,6 +87,11 @@ unit suites still run. `setup.ts` copies it over `DATABASE_URL`, so `lib/db` con
 the test database with no injection. `fileParallelism` is off because the suites share
 one database.
 
+`resetDatabase` also **puts the shop's hours back** (`test/shopHours.ts`, the rows the
+`TradingHours` migration seeds) and clears the hours cache. Without that, every weekday
+reads as closed and every order a test places is refused. A test that changes the hours
+calls `invalidateTradingHours()`.
+
 **Tests must never reach Stripe or Redis.** `setup.ts` runs `dotenv.config()` first and only
 fills in placeholders for what is *missing*, so on a developer machine `STRIPE_SECRET_KEY`
 and `REDIS_URL` are the real ones from `backend/.env`. The doubles:
@@ -162,6 +167,16 @@ npx jest _components/prizeCard   # one file
 npm run verify:lock              # see below
 ```
 
+- **Device timezones:** the pick-up time tests in `lib/checkoutHelpers.test.ts` must pass
+  with the device anywhere. Jest fixes the zone when its workers start, so each zone is its
+  own run, and the file checks that the zone took. **Don't set `TZ` in Git Bash**
+  (`TZ=America/Los_Angeles npx jest`): it drops a `TZ` value containing a slash on its way
+  to Windows programs, so that silently runs in the machine's own zone. Let node set it,
+  which works from any shell:
+
+  ```bash
+  node -e 'for (const tz of ["UTC","America/Los_Angeles","Asia/Kolkata"]) require("child_process").execSync("npx jest lib", { stdio: "inherit", shell: true, env: { ...process.env, TZ: tz } })'
+  ```
 - `npm test` is `jest` (exits) and `npm run test:watch` is `jest --watchAll`, matching
   `admin/`. It used to be `--watchAll` with no test files, which never exited; Frontend CI
   now runs `npm test -- --ci`.
@@ -421,6 +436,37 @@ cron (`recheckAdminSockets`) sends away any kitchen socket whose session no long
 sockets at once. A check that cannot be made (database down) keeps the socket rather than
 silence the kitchen.
 
+**Pick-up times.** One rule, implemented in the website (`src/lib/pickUpTimes.ts`), here
+(`lib/tradingHours.ts`) and in the customer app (`frontend/lib/checkoutHelpers.ts`,
+`businessHours.ts`). The three deploy separately and share no package.
+- **Clock:** `Pacific/Auckland` wall clock (NZST/NZDT), never the server's or the device's.
+- **Hours:** the `TradingHours` table (website repo owns it): one row per weekday,
+  0 = Sunday, minutes past midnight, both null = closed. Days off are `DaysOff`, matched
+  by Auckland calendar day.
+- **Last pick-up is closing − 10 minutes**, inclusive and to the minute. A 9:30 PM close
+  takes 9:20, so a late customer still lets the shop close on time. Eat-in stops at
+  closing − 30.
+- **ASAP** (worked out in the app) is the later of now + the quote (rounded up to the
+  minute) and opening, if that is no later than the last order; otherwise the next trading
+  day's opening.
+
+`pickUpTimeCases.json` holds the rule as data, copied **byte-for-byte** into
+`backend/src/lib/`, `frontend/lib/` and the website's `src/lib/`. All three suites run it.
+Change the cases first, then `cmp -s` the copies.
+
+**Here:**
+- `checkPickUpTime` takes the weekly hours as an argument. Callers load them with
+  `getTradingHours()` (a 60-second in-memory cache, `invalidateTradingHours()` to clear).
+- There is **no fallback**: unreadable hours fail the request rather than guess.
+- It answers `{ ok: false, reason, message }`. The messages name the time: "Our last pick up
+  that day is 9:20 PM."
+- `GET /api/getStoreHours` serves the table in the **exact shape it always has**
+  (`{ Monday: ["12:30 PM", "9:30 PM"] | null, ... }`, Monday first), because installed
+  app builds parse it.
+- `GET /api/getStoreInfo` computes `isOpen` per request, days off included. It used to be
+  computed once when the server started, so the app's "Open Now" badge showed whatever the
+  shop had been at the last deploy.
+
 **Membership.** Stripe owns the truth; the webhook writes what it reads back from Stripe
 rather than adjusting the row, so a redelivered or out-of-order event changes nothing.
 `Membership.totalMonths` is the run of monthly invoices **paid in a row** on the current
@@ -640,9 +686,29 @@ Customers have no socket connection — realtime for them is Expo push notificat
 
 **NZ time.** `lib/nzTime.ts` is the only place weekday names, calendar days and time-of-day
 comparisons come from; never use the device clock or locale for trading hours.
-`lib/businessHours.ts` normalises the API's lower-case day keys and pairs weekly hours with
-one-off days off in a single `TradingCalendar` value, because a day can be within the
-weekly hours and still be shut.
+- **It reads `Intl.DateTimeFormat` parts directly.** `formatInTimeZone` and `toZonedTime`
+  build a device-local `Date`, so an Auckland time inside the device's own daylight saving
+  gap comes back an hour out (2:30 AM Auckland on 8 March 2026 read as 3:30 on a phone in
+  Los Angeles).
+- `lib/businessHours.ts` normalises the API's lower-case day keys and pairs weekly hours
+  with one-off days off in a single `TradingCalendar` value, because a day can be within
+  the weekly hours and still be shut.
+
+**Pick-up times in the app** (the rule is under **Pick-up times** in the backend section):
+- **Place-order guard:** `isOutsideOrderingHours(date, calendar, lastOrderOffsetMinutes)`
+  bounds a time by the last order, not closing. It used to let 9:21-9:30 PM through, for
+  the server to refuse after pay.
+- **Messages:** `describePickUpProblem` tells "too soon" apart from "before opening" and
+  "after the last order", and `pickUpTimeAlert` words the alert, so it gives the real
+  reason. When checkout has already moved the time, every alert names the new one, a
+  closed day included.
+- **No fallback hours:** there is no hard-coded copy of the hours. `AuthProvider` reports
+  `storeHoursStatus` ("loading" | "ready" | "error"). It is **"ready" only when the hours
+  and the days off both loaded** (`fetchTradingCalendar`). A missing days-off list is an
+  error, not an empty list, which would have shown "Open Now" on a day off for the whole
+  session. Checkout waits for "ready" and offers a retry on "error"
+  (`reloadTradingCalendar`). The store screen works out "Open Now" on the device with
+  `isOpenNow`.
 
 **Hook dependencies.** `react-hooks/exhaustive-deps` is a warning, and CI fails only on
 errors. Before "fixing" one, check whether the value is stable:

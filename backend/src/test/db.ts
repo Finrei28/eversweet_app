@@ -1,6 +1,8 @@
 import { describe } from "vitest"
 import jwt from "jsonwebtoken"
 import { db } from "../lib/db"
+import { invalidateTradingHours } from "../lib/tradingHours"
+import { SHOP_HOURS_ROWS } from "./shopHours"
 
 /**
  * Integration tests need a real Postgres: the things they prove — that a
@@ -50,6 +52,12 @@ export const resetDatabase = async () => {
   await db.$executeRawUnsafe(
     `TRUNCATE TABLE ${targets.join(", ")} RESTART IDENTITY CASCADE`,
   )
+
+  // The migration seeds the shop's hours; without them every weekday reads as closed and
+  // every order a test places is refused. The cache would otherwise keep answering from
+  // whatever the previous test left.
+  await db.tradingHours.createMany({ data: SHOP_HOURS_ROWS })
+  invalidateTradingHours()
 }
 
 /** A token the real `authenticateToken` middleware will accept. */

@@ -1,5 +1,11 @@
 import { getEstimatedPickUpTime } from "@/services/api"
-import { isDayOff, TradingCalendar } from "./businessHours"
+import {
+  isDayOff,
+  orderingHoursProblem,
+  type OrderingHoursProblem,
+  TradingCalendar,
+} from "./businessHours"
+import { formatDayMonthTime, formatTime, formatWeekdayDate } from "./formatters"
 import { addNZDays, getNZDayName, nzTimeOnSameDay } from "./nzTime"
 
 /**
@@ -78,6 +84,19 @@ export function getLastOrderTime(
   return new Date(closeTime.getTime() - lastOrderOffsetMinutes * 60 * 1000)
 }
 
+const MINUTE_MS = 60 * 1000
+
+/** Rounded up to the whole minute, as every implementation of the rule does. */
+export const ceilToMinute = (date: Date) =>
+  new Date(Math.ceil(date.getTime() / MINUTE_MS) * MINUTE_MS)
+
+/**
+ * The soonest valid time at or after `selected`: now for "as soon as possible", or the
+ * time a customer picked. The rule - shared with the website and the order server, and
+ * pinned by `pickUpTimeCases.json` - is the later of the kitchen's earliest (rounded up to
+ * the whole minute) and opening, if that is no later than the last order; otherwise the
+ * next trading day's opening time. Null when nothing opens in the next 60 days.
+ */
 export async function getNextValidPickupTime(
   selected: Date,
   totalItems: number,
@@ -87,9 +106,12 @@ export async function getNextValidPickupTime(
     lastOrderOffsetMinutes = LAST_ORDER_OFFSET_MINUTES.pickup,
   }: PickupTimeOptions = {},
 ) {
-  const minTime = earliestReadyTime ?? (await getEstimatedPickUpTime(totalItems))
+  const minTime = ceilToMinute(
+    earliestReadyTime ?? (await getEstimatedPickUpTime(totalItems)),
+  )
 
-  const date = new Date(selected)
+  // Compared to the minute, so any second of the last-order minute is still in time.
+  const date = new Date(Math.floor(selected.getTime() / MINUTE_MS) * MINUTE_MS)
 
   const nextOpeningFrom = (from: Date) => {
     const nextOpenDay = getNextOpenDay(from, calendar)
@@ -126,5 +148,117 @@ export async function getNextValidPickupTime(
     return nextOpeningFrom(addNZDays(date, 1))
   }
 
-  return earliest
+  // Keeps the seconds of a picked time: a time already on the minute is returned as is,
+  // so callers comparing it with what was picked see no change.
+  return earliest.getTime() === date.getTime() ? new Date(selected) : earliest
+}
+
+export type PickUpTimeProblem = OrderingHoursProblem | "too-soon"
+
+/**
+ * What to tell a customer whose time cannot stand, and what it became.
+ *
+ * `movedTo` is the time checkout has already put in its place. When there is one the
+ * message has to say so: the day-off and closed-day wording said "please choose another
+ * day" while checkout had quietly committed the next valid time, so the customer was told
+ * to change something that had already been changed for them.
+ */
+export function pickUpTimeAlert(
+  date: Date | null,
+  calendar: TradingCalendar,
+  {
+    problem = null,
+    movedTo = null,
+    eatIn,
+    lastOrderOffsetMinutes,
+  }: {
+    problem?: PickUpTimeProblem | null
+    movedTo?: Date | null
+    eatIn: boolean
+    lastOrderOffsetMinutes: number
+  },
+): { title: string; message: string } {
+  const orderKind = eatIn ? "eat-in order" : "pick up"
+  const moved = movedTo
+    ? ` We've changed it to ${formatDayMonthTime(movedTo)}.`
+    : ""
+
+  if (date === null) {
+    return {
+      title: "Invalid Time",
+      message: "Please select a valid pickup time during our business hours.",
+    }
+  }
+
+  // Named by date, not weekday. A day off is a one-off closure, so "we are open 12:00 PM
+  // to 10:00 PM on a Tuesday" would be actively misleading.
+  if (isDayOff(date, calendar.daysOff)) {
+    return {
+      title: "We're closed that day",
+      message: `We are closed on ${formatWeekdayDate(date)}.${
+        moved || " Please choose another day."
+      }`,
+    }
+  }
+
+  const { openTime, closeTime, dayName } = getOpenCloseTime(date, calendar)
+
+  if (!openTime || !closeTime) {
+    return {
+      title: "We're closed that day",
+      message: `We are not open on ${formatWeekdayDate(date)}.${
+        moved || " Please choose another day."
+      }`,
+    }
+  }
+
+  if (problem === "before-open") {
+    return {
+      title: "Sorry, we're not open yet at that time",
+      message: `We open at ${formatTime(openTime)} on a ${dayName}.${moved}`,
+    }
+  }
+
+  if (problem === "after-last-pick-up") {
+    return {
+      title: `Sorry, that's after our last ${orderKind}`,
+      message: `Our last ${orderKind} on a ${dayName} is ${formatTime(
+        getLastOrderTime(closeTime, lastOrderOffsetMinutes),
+      )}, so we can close at ${formatTime(closeTime)}.${moved}`,
+    }
+  }
+
+  // Open, just sooner than the kitchen can have the order ready.
+  return {
+    title: "That's a little too soon",
+    message: movedTo
+      ? `The earliest we can have your order ready is ${formatDayMonthTime(movedTo)}, so we've changed it to that.`
+      : "Please choose a later time.",
+  }
+}
+
+/**
+ * Why a picked time cannot stand, so the customer is told the actual reason: a time the
+ * kitchen cannot make yet is not "closed at that time", which is what every refusal used
+ * to say.
+ */
+export function describePickUpProblem(
+  picked: Date,
+  calendar: TradingCalendar,
+  {
+    earliestReadyTime,
+    lastOrderOffsetMinutes,
+  }: { earliestReadyTime: Date | null; lastOrderOffsetMinutes: number },
+): PickUpTimeProblem | null {
+  const hoursProblem = orderingHoursProblem(
+    picked,
+    calendar,
+    lastOrderOffsetMinutes,
+  )
+  if (hoursProblem) return hoursProblem
+
+  return earliestReadyTime &&
+    picked.getTime() < ceilToMinute(earliestReadyTime).getTime()
+    ? "too-soon"
+    : null
 }

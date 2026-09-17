@@ -9,7 +9,11 @@ import {
   orNullIfMissing,
   stripeErrorMessage,
 } from "../lib/stripeErrors"
-import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
+import {
+  checkPickUpTime,
+  getDaysOffKeys,
+  getTradingHours,
+} from "../lib/tradingHours"
 import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 import { isOfferLive } from "../lib/offerAvailability"
 import { idOf, stripe } from "../lib/stripeClient"
@@ -445,9 +449,14 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     // Optional only because older builds did not send it; every build past the
     // hold gate above does.
     if (pickUpTime !== undefined) {
+      const [daysOffKeys, hours] = await Promise.all([
+        getDaysOffKeys(),
+        getTradingHours(),
+      ])
       const check = checkPickUpTime(new Date(pickUpTime), {
         eatIn: Boolean(eatIn),
-        daysOffKeys: await getDaysOffKeys(),
+        daysOffKeys,
+        hours,
       })
 
       if (!check.ok) {

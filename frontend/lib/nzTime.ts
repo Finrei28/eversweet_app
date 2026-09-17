@@ -1,4 +1,4 @@
-import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz"
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 
 /**
  * The store trades in one place, so opening hours are always New Zealand wall
@@ -9,26 +9,57 @@ import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz"
 export const NZ_TIMEZONE = "Pacific/Auckland"
 
 /**
+ * The Auckland calendar and clock at `date`, read straight from `Intl`.
+ *
+ * Not `formatInTimeZone` or `toZonedTime`: both build a Date whose *device-local* fields
+ * spell the Auckland time, and an Auckland time that does not exist on the device's own
+ * clock - inside its daylight saving gap - comes back an hour out. On a phone in Los
+ * Angeles, 2:30 AM Auckland time on 8 March 2026 read as 3:30. `Intl` with a `timeZone`
+ * never passes through the device's zone.
+ */
+const nzPartsFormat = new Intl.DateTimeFormat("en-US", {
+  timeZone: NZ_TIMEZONE,
+  hourCycle: "h23",
+  weekday: "long",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+
+function nzParts(date: Date) {
+  const parts: Record<string, string> = {}
+  for (const part of nzPartsFormat.formatToParts(date)) {
+    parts[part.type] = part.value
+  }
+  return {
+    dayKey: `${parts.year}-${parts.month}-${parts.day}`,
+    weekday: parts.weekday,
+    // Some engines write midnight as 24 even in a 23-hour cycle.
+    minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
+  }
+}
+
+/**
  * The weekday name at `date` as it is in New Zealand, e.g. "Monday".
  *
- * `formatInTimeZone`, not `format` with a `timeZone` option: that option only
- * feeds the timezone tokens (z/X/O/x) and parsing, so every other token was
- * still rendered off the device clock. A phone set outside New Zealand read
- * the wrong weekday, and with it the wrong day's trading hours.
+ * Never `format` with a `timeZone` option: that option only feeds the timezone tokens
+ * (z/X/O/x) and parsing, so every other token was still rendered off the device clock. A
+ * phone set outside New Zealand read the wrong weekday, and with it the wrong day's hours.
  */
 export function getNZDayName(date: Date): string {
-  return formatInTimeZone(date, NZ_TIMEZONE, "EEEE")
+  return nzParts(date).weekday
 }
 
 /** The calendar date at `date` as it is in New Zealand, as "yyyy-MM-dd". */
 export function getNZCalendarDay(date: Date): string {
-  return formatInTimeZone(date, NZ_TIMEZONE, "yyyy-MM-dd")
+  return nzParts(date).dayKey
 }
 
-/** How many minutes past New Zealand midnight `date` falls. */
+/** How many minutes past New Zealand midnight `date` falls, ignoring seconds. */
 export function getNZMinutesOfDay(date: Date): number {
-  const zoned = toZonedTime(date, NZ_TIMEZONE)
-  return zoned.getHours() * 60 + zoned.getMinutes()
+  return nzParts(date).minutes
 }
 
 /**

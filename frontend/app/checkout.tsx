@@ -41,21 +41,26 @@ import {
   getEstimatedPickUpTime,
 } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
-import { isDayOff, isOutsideBusinessHours } from "@/lib/businessHours"
+import {
+  isDayOff,
+  isOutsideOrderingHours,
+  orderingHoursProblem,
+} from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
 import {
+  describePickUpProblem,
   getLastOrderTime,
   getNextValidPickupTime,
   getOpenCloseTime,
   LAST_ORDER_OFFSET_MINUTES,
+  pickUpTimeAlert,
+  type PickUpTimeProblem,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
 import {
   formatCurrency,
   formatDayMonthTime,
   formatShortDate,
-  formatTime,
-  formatWeekdayDate,
   roundToNearest5,
 } from "@/lib/formatters"
 import { addNZMonths, NZ_TIMEZONE, withNZTimeOfDay } from "@/lib/nzTime"
@@ -93,8 +98,15 @@ class CardNotConfirmedError extends Error {}
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
-  const { token, authLoading, dataLoading, usersMembership, tradingCalendar } =
-    useAuth()
+  const {
+    token,
+    authLoading,
+    dataLoading,
+    usersMembership,
+    tradingCalendar,
+    storeHoursStatus,
+    reloadTradingCalendar,
+  } = useAuth()
   const { data: restaurantStatus, isLoading: loadingRestaurantStatus } =
     useRestaurantStatusQuery()
   const [savedCards, setSavedCards] = useState<any[]>([])
@@ -584,49 +596,25 @@ function CheckoutContent() {
     }
   }
 
-  const alertTimeChange = (date: Date | null) => {
-    if (date === null) {
-      Alert.alert(
-        "Invalid Time",
-        "Please select a valid pickup time during our business hours.",
-      )
-      // Without this the function carries on and stacks a second alert on top:
-      // getOpenCloseTime(null) reports no opening hours, so the branch below
-      // fires "Sorry, we are closed on that day..." as well.
-      return
-    }
-
-    // Named by date, not weekday. A day off is a one-off closure, so "we are
-    // open 12:00 PM to 10:00 PM on a Tuesday" would be actively misleading —
-    // the store keeps those hours on a Tuesday, just not on this one.
-    if (isDayOff(date, tradingCalendar.daysOff)) {
-      Alert.alert(
-        "We're closed that day",
-        `We are closed on ${formatWeekdayDate(date)}. Please choose another day.`,
-      )
-      return
-    }
-
-    const { openTime, closeTime, dayName } = getOpenCloseTime(
-      date,
-      tradingCalendar,
-    )
-
-    // No hours for that weekday at all, so quoting hours is impossible anyway.
-    if (!openTime || !closeTime) {
-      Alert.alert(
-        "We're closed that day",
-        `We are not open on ${formatWeekdayDate(date)}. Please choose another day.`,
-      )
-      return
-    }
-
-    Alert.alert(
-      "Sorry, we are closed at that time",
-      `Please choose a time during store hours. We are open ${formatTime(
-        openTime,
-      )} to ${formatTime(closeTime)} on a ${dayName}.`,
-    )
+  /**
+   * Tells the customer why a time cannot stand, and what it became - the wording is
+   * `pickUpTimeAlert`, so it can be tested. Every refusal used to read "Sorry, we are
+   * closed at that time" quoting opening to closing, including a time the kitchen only
+   * needed a few more minutes for; and a closed day said "choose another day" after the
+   * next valid time had already been put in its place.
+   */
+  const alertTimeChange = (
+    date: Date | null,
+    problem: PickUpTimeProblem | null = null,
+    movedTo: Date | null = null,
+  ) => {
+    const { title, message } = pickUpTimeAlert(date, tradingCalendar, {
+      problem,
+      movedTo,
+      eatIn,
+      lastOrderOffsetMinutes,
+    })
+    Alert.alert(title, message)
   }
 
   const setChosenDate = (date: Date) => {
@@ -664,7 +652,13 @@ function CheckoutContent() {
     }
 
     if (validTime.getTime() !== picked.getTime()) {
-      alertTimeChange(picked)
+      // A time moved for no hours reason was moved because the kitchen cannot make it yet.
+      const problem =
+        describePickUpProblem(picked, tradingCalendar, {
+          earliestReadyTime: estimatedReadyTime,
+          lastOrderOffsetMinutes,
+        }) ?? "too-soon"
+      alertTimeChange(picked, problem, validTime)
       return { status: "moved", time: validTime }
     }
 
@@ -786,11 +780,23 @@ function CheckoutContent() {
     // gated on `pickupNow`, so for a hand-picked slot the answer was worked out
     // and then thrown away: a day off added while the screen was open, or a
     // slot that fell out of hours as the evening wore on, went through.
-    if (isOutsideBusinessHours(requestedPickUpTime, tradingCalendar)) {
-      Alert.alert(
-        pickupNow
-          ? "We're closed or are not open yet. Please pick a suitable pick up time."
-          : "We're closed at that time. Please pick a suitable pick up time.",
+    //
+    // Bounded by the last order, not by closing: this used to let 9:21-9:30 PM through
+    // on a 9:30 day, for the order server to refuse after the customer pressed pay.
+    if (
+      isOutsideOrderingHours(
+        requestedPickUpTime,
+        tradingCalendar,
+        lastOrderOffsetMinutes,
+      )
+    ) {
+      alertTimeChange(
+        requestedPickUpTime,
+        orderingHoursProblem(
+          requestedPickUpTime,
+          tradingCalendar,
+          lastOrderOffsetMinutes,
+        ),
       )
       return
     }
@@ -1098,7 +1104,10 @@ function CheckoutContent() {
     loadingCards ||
     cartOperations > 0 ||
     loading ||
-    loadingRestaurantStatus
+    loadingRestaurantStatus ||
+    // Until the real hours arrive every day reads as closed; offering nothing is better
+    // than flashing "we are currently closed" at a customer who can order.
+    storeHoursStatus === "loading"
   ) {
     return (
       <View className="flex-1 bg-background">
@@ -1118,6 +1127,28 @@ function CheckoutContent() {
   if (!token) {
     router.replace("/signin")
     return null
+  }
+
+  // The app used to fall back to a hard-coded copy of the hours here, and offer times
+  // from it that the server - reading the real ones - could refuse.
+  if (storeHoursStatus === "error") {
+    return (
+      <View className="flex-1 bg-background">
+        <CustomHeader />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text className="text-center text-gray-600">
+            We couldn&apos;t load our opening hours, so we can&apos;t offer a
+            pick up time just now.
+          </Text>
+          <TouchableOpacity
+            onPress={() => void reloadTradingCalendar()}
+            className="mt-6 bg-primary py-3 px-6 rounded-lg"
+          >
+            <Text className="text-white font-semibold">Try again</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    )
   }
 
   if (cartItems?.length === 0) {

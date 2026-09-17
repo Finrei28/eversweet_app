@@ -3,7 +3,7 @@ import { db } from "../lib/db"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import crypto from "crypto"
-import { storeHours, storeInfo } from "../lib/storeInfo"
+import { storeInfo } from "../lib/storeInfo"
 import { quoteMinutes } from "../lib/orderTiming"
 import { getPrepTimes } from "../lib/prepTimes"
 import { loyaltyRates } from "../lib/loyaltyRates"
@@ -19,7 +19,13 @@ import { generateOtp } from "../lib/otp"
 import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
 import { disconnectUserSockets } from "../lib/socketAuth"
-import { nzMonthRange } from "../lib/tradingHours"
+import {
+  getDaysOffKeys,
+  getTradingHours,
+  isOpenAt,
+  nzMonthRange,
+  storeHoursByDayName,
+} from "../lib/tradingHours"
 import { Prisma } from "@prisma/client"
 
 /*
@@ -325,14 +331,34 @@ export const resetPassword = async (req: Request, res: Response) => {
   }
 }
 
-export const getStoreHours = (req: Request, res: Response) => {
-  res.status(200).json(storeHours)
-  return
+/**
+ * The weekly hours, from the `TradingHours` table, in the shape this has always served:
+ * `{ Monday: ["12:30 PM", "9:30 PM"] | null, ... }`, Monday first. App builds already
+ * installed read exactly this.
+ */
+export const getStoreHours = async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(storeHoursByDayName(await getTradingHours()))
+  } catch (error) {
+    console.error("Error reading store hours:", error)
+    res.status(500).json({ message: "Could not load the store hours" })
+  }
 }
 
-export const getStoreInfo = (req: Request, res: Response) => {
-  res.status(200).json(storeInfo)
-  return
+/** The shop's details, with whether it is open right now worked out per request. */
+export const getStoreInfo = async (req: Request, res: Response) => {
+  try {
+    const [hours, daysOffKeys] = await Promise.all([
+      getTradingHours(),
+      getDaysOffKeys(),
+    ])
+    res
+      .status(200)
+      .json({ ...storeInfo, isOpen: isOpenAt(new Date(), hours, daysOffKeys) })
+  } catch (error) {
+    console.error("Error reading store info:", error)
+    res.status(500).json({ message: "Could not load the store details" })
+  }
 }
 
 export const restaurantStatus = async (req: Request, res: Response) => {

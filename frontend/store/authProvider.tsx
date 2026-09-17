@@ -25,7 +25,11 @@ import {
   getStoreHours,
   getUserProfile,
 } from "@/services/api"
-import { DaysOff, toDaysOff, TradingCalendar } from "@/lib/businessHours"
+import {
+  DaysOff,
+  fetchTradingCalendar,
+  TradingCalendar,
+} from "@/lib/businessHours"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
 import { queryClient } from "@/services/queryClient"
@@ -58,19 +62,19 @@ interface AuthContextType {
    * whether the store is actually open, since that also honours days off. */
   storeHours: StoreHours
   tradingCalendar: TradingCalendar
+  /**
+   * Whether the hours and the days off have both arrived. Until they are "ready",
+   * `storeHours` is empty and reads as closed every day, so anything offering a pick-up
+   * time or saying whether the shop is open waits on this.
+   */
+  storeHoursStatus: StoreHoursStatus
+  /** Fetches the hours and days off again, after a failed load. */
+  reloadTradingCalendar: () => Promise<void>
 }
+
+export type StoreHoursStatus = "loading" | "ready" | "error"
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
-
-const fallbackHours: StoreHours = {
-  Monday: ["12:30 PM", "9:30 PM"],
-  Tuesday: ["12:30 PM", "9:30 PM"],
-  Wednesday: ["12:30 PM", "9:30 PM"],
-  Thursday: ["12:30 PM", "9:30 PM"],
-  Friday: ["12:00 PM", "10:00 PM"],
-  Saturday: ["12:00 PM", "10:00 PM"],
-  Sunday: ["12:00 PM", "10:00 PM"],
-}
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null)
@@ -83,7 +87,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     useState<UsersMembership | null>(null)
   const [membershipDetails, setMembershipDetails] =
     useState<MembershipDetails | null>(null)
-  const [storeHours, setStoreHours] = useState<StoreHours>(fallbackHours)
+  // No stand-in hours. The app used to start from a hard-coded copy, which offered times
+  // from hours the shop may since have changed - and the server, reading the real ones,
+  // then refused them. Checkout waits for `storeHoursStatus` instead.
+  const [storeHours, setStoreHours] = useState<StoreHours>({})
+  const [storeHoursStatus, setStoreHoursStatus] =
+    useState<StoreHoursStatus>("loading")
   const [daysOff, setDaysOff] = useState<DaysOff>(() => new Set<string>())
   const signingOut = useRef(false)
 
@@ -93,6 +102,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     () => ({ storeHours, daysOff }),
     [storeHours, daysOff],
   )
+
+  /**
+   * Public data, loaded once at launch and again on request. It is "ready" only when both
+   * the hours and the days off arrived; either missing is "error", for checkout to offer a
+   * retry, rather than a guess that reads as ready (see `fetchTradingCalendar`).
+   */
+  const loadTradingCalendar = useCallback(async () => {
+    setStoreHoursStatus("loading")
+
+    const loaded = await fetchTradingCalendar({ getStoreHours, getDaysOff })
+
+    // A failed load clears what an earlier one left, rather than keeping it: hours still in
+    // the calendar after an "error" can be shown or used as though they were current.
+    setStoreHours(loaded.status === "ready" ? loaded.storeHours : {})
+    setDaysOff(loaded.status === "ready" ? loaded.daysOff : new Set<string>())
+    setStoreHoursStatus(loaded.status)
+  }, [])
 
   useEffect(() => {
     // Everything signOutProvider touches is either a state setter or a module
@@ -133,29 +159,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
-    // Public data, and nothing waits on it: fallbackHours stands in until it
-    // lands, which is the same contract the fallback already had.
-    const loadTradingCalendar = async () => {
-      const [storeHoursResult, daysOffResult] = await Promise.all([
-        getStoreHours().catch((error) => {
-          console.error("Failed to fetch store hours:", error)
-          return fallbackHours
-        }),
-        // An empty list on failure keeps the store on its weekly hours
-        // rather than shutting ordering down over a dropped request. The
-        // order endpoint is the backstop for a day off missed this way.
-        getDaysOff().catch((error) => {
-          console.error("Failed to fetch days off:", error)
-          return [] as Date[]
-        }),
-      ])
-
-      setStoreHours(storeHoursResult)
-      setDaysOff(toDaysOff(daysOffResult))
-    }
-
     void resolveSession()
     void loadTradingCalendar()
+    // loadTradingCalendar is stable: it only calls state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -341,6 +348,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       dataLoading,
       storeHours,
       tradingCalendar,
+      storeHoursStatus,
+      reloadTradingCalendar: loadTradingCalendar,
     }),
     [
       token,
@@ -356,6 +365,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       dataLoading,
       storeHours,
       tradingCalendar,
+      storeHoursStatus,
+      loadTradingCalendar,
     ],
   )
 

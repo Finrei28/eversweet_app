@@ -1,50 +1,13 @@
-import { parse, isAfter, isBefore, isEqual } from "date-fns"
-import { DateTime } from "luxon"
-
-type StoreHours = {
-  [key: string]: [string, string] | null
-}
-
-const isStoreOpenNow = (storeHours: StoreHours): boolean => {
-  const now = DateTime.now().setZone("Pacific/Auckland")
-
-  const dayName = now.toFormat("cccc") // Monday, Tuesday...
-
-  const hours = storeHours[dayName]
-  if (!hours) return false
-
-  const [startStr, endStr] = hours
-
-  const start = DateTime.fromFormat(startStr, "h:mm a", {
-    zone: "Pacific/Auckland",
-  })
-
-  const end = DateTime.fromFormat(endStr, "h:mm a", {
-    zone: "Pacific/Auckland",
-  })
-
-  if (!start.isValid || !end.isValid) return false
-
-  if (end < start) {
-    return now >= start || now <= end
-  }
-
-  return now >= start && now <= end
-}
-
-export const storeHours: StoreHours = {
-  Monday: ["12:30 PM", "9:30 PM"],
-  Tuesday: ["12:30 PM", "9:30 PM"],
-  Wednesday: ["12:30 PM", "9:30 PM"],
-  Thursday: ["12:30 PM", "9:30 PM"],
-  Friday: ["12:00 PM", "10:00 PM"],
-  Saturday: ["12:00 PM", "10:00 PM"],
-  Sunday: ["12:00 PM", "10:00 PM"],
-}
-
+/**
+ * The shop's fixed details, as `/api/getStoreInfo` serves them.
+ *
+ * The weekly hours used to live here too, hard-coded, with `isOpen` worked out from them
+ * once - when the module loaded - and then served unchanged until the server restarted,
+ * whatever the time. Hours are now the `TradingHours` table (see `lib/tradingHours`), and
+ * `getStoreInfo` works out `isOpen` on every request, days off included.
+ */
 export const storeInfo = {
   name: "Eversweet",
-  isOpen: isStoreOpenNow(storeHours),
   address: "5D/119 Meadowland Drive, Somerville",
   city: "Auckland",
   state: "Auckland",
@@ -53,13 +16,3 @@ export const storeInfo = {
   email: "eversweet@eversweet.co.nz",
   website: "https://eversweet.co.nz",
 }
-
-// export const storeHours = {
-//   Monday: [null],
-//   Tuesday: [null],
-//   Wednesday: null,
-//   Thursday: [null],
-//   Friday: [null],
-//   Saturday: [null],
-//   Sunday: [null],
-// }
