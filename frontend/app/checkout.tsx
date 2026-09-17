@@ -53,6 +53,7 @@ import {
   getNextValidPickupTime,
   getOpenCloseTime,
   LAST_ORDER_OFFSET_MINUTES,
+  pickUpTimeAlert,
   type PickUpTimeProblem,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
@@ -60,8 +61,6 @@ import {
   formatCurrency,
   formatDayMonthTime,
   formatShortDate,
-  formatTime,
-  formatWeekdayDate,
   roundToNearest5,
 } from "@/lib/formatters"
 import { addNZMonths, NZ_TIMEZONE, withNZTimeOfDay } from "@/lib/nzTime"
@@ -598,82 +597,24 @@ function CheckoutContent() {
   }
 
   /**
-   * Tells the customer why a time cannot stand, and what it became. Every refusal used to
-   * read "Sorry, we are closed at that time" quoting opening to closing - including a
-   * time the kitchen only needed a few more minutes for, and a time after the last order
-   * but before closing, which the message itself said was open.
+   * Tells the customer why a time cannot stand, and what it became - the wording is
+   * `pickUpTimeAlert`, so it can be tested. Every refusal used to read "Sorry, we are
+   * closed at that time" quoting opening to closing, including a time the kitchen only
+   * needed a few more minutes for; and a closed day said "choose another day" after the
+   * next valid time had already been put in its place.
    */
   const alertTimeChange = (
     date: Date | null,
     problem: PickUpTimeProblem | null = null,
     movedTo: Date | null = null,
   ) => {
-    const movedNote = movedTo
-      ? ` We've changed it to ${formatDayMonthTime(movedTo)}.`
-      : ""
-    const orderKind = eatIn ? "eat-in order" : "pick up"
-
-    if (date === null) {
-      Alert.alert(
-        "Invalid Time",
-        "Please select a valid pickup time during our business hours.",
-      )
-      // Without this the function carries on and stacks a second alert on top:
-      // getOpenCloseTime(null) reports no opening hours, so the branch below
-      // fires "Sorry, we are closed on that day..." as well.
-      return
-    }
-
-    // Named by date, not weekday. A day off is a one-off closure, so "we are
-    // open 12:00 PM to 10:00 PM on a Tuesday" would be actively misleading —
-    // the store keeps those hours on a Tuesday, just not on this one.
-    if (isDayOff(date, tradingCalendar.daysOff)) {
-      Alert.alert(
-        "We're closed that day",
-        `We are closed on ${formatWeekdayDate(date)}. Please choose another day.`,
-      )
-      return
-    }
-
-    const { openTime, closeTime, dayName } = getOpenCloseTime(
-      date,
-      tradingCalendar,
-    )
-
-    // No hours for that weekday at all, so quoting hours is impossible anyway.
-    if (!openTime || !closeTime) {
-      Alert.alert(
-        "We're closed that day",
-        `We are not open on ${formatWeekdayDate(date)}. Please choose another day.`,
-      )
-      return
-    }
-
-    if (problem === "before-open") {
-      Alert.alert(
-        "Sorry, we're not open yet at that time",
-        `We open at ${formatTime(openTime)} on a ${dayName}.${movedNote}`,
-      )
-      return
-    }
-
-    if (problem === "after-last-pick-up") {
-      Alert.alert(
-        `Sorry, that's after our last ${orderKind}`,
-        `Our last ${orderKind} on a ${dayName} is ${formatTime(
-          getLastOrderTime(closeTime, lastOrderOffsetMinutes),
-        )}, so we can close at ${formatTime(closeTime)}.${movedNote}`,
-      )
-      return
-    }
-
-    // Open, just sooner than the kitchen can have the order ready.
-    Alert.alert(
-      "That's a little too soon",
-      movedTo
-        ? `The earliest we can have your order ready is ${formatDayMonthTime(movedTo)}, so we've changed it to that.`
-        : "Please choose a later time.",
-    )
+    const { title, message } = pickUpTimeAlert(date, tradingCalendar, {
+      problem,
+      movedTo,
+      eatIn,
+      lastOrderOffsetMinutes,
+    })
+    Alert.alert(title, message)
   }
 
   const setChosenDate = (date: Date) => {

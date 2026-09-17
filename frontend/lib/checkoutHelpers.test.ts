@@ -1,5 +1,6 @@
 import cases from "./pickUpTimeCases.json"
 import {
+  fetchTradingCalendar,
   isOpenNow,
   isOutsideOrderingHours,
   orderingHoursProblem,
@@ -10,6 +11,7 @@ import {
   describePickUpProblem,
   getNextValidPickupTime,
   LAST_ORDER_OFFSET_MINUTES,
+  pickUpTimeAlert,
 } from "./checkoutHelpers"
 import { getNZCalendarDay, getNZDayName, getNZMinutesOfDay } from "./nzTime"
 
@@ -202,6 +204,136 @@ describe("describePickUpProblem", () => {
     expect(describeAt(thu("12:00"))).toBe("before-open")
     expect(describeAt(thu("21:25"))).toBe("after-last-pick-up")
     expect(describeAt(thu("21:10"), EAT_IN)).toBe("after-last-pick-up")
+  })
+})
+
+describe("pickUpTimeAlert", () => {
+  const alertFor = (
+    date: Date | null,
+    calendar: TradingCalendar,
+    over: Partial<Parameters<typeof pickUpTimeAlert>[2]> = {},
+  ) =>
+    pickUpTimeAlert(date, calendar, {
+      eatIn: false,
+      lastOrderOffsetMinutes: PICKUP,
+      ...over,
+    })
+
+  const fridayNoon = new Date("2026-03-06T12:00:00+13:00")
+  const closedThursday = calendarFor(undefined, ["2026-03-05"])
+  const closedThursdays = calendarFor(
+    cases.hours.map((day, weekday) => (weekday === 4 ? null : day)),
+    [],
+  )
+
+  /**
+   * Checkout commits the next valid time when a picked day is shut. These said "please
+   * choose another day" regardless, so the customer was told to change a time that had
+   * already been changed for them - and never told what it now was.
+   */
+  it.each([
+    ["a day off", closedThursday, "We are closed on Thursday 5 March."],
+    ["a closed weekday", closedThursdays, "We are not open on Thursday 5 March."],
+  ])(
+    "names the replacement time for %s",
+    (_, calendar, closedSentence) => {
+      const { title, message } = alertFor(thu("14:00"), calendar, {
+        problem: "closed-day",
+        movedTo: fridayNoon,
+      })
+
+      expect(title).toBe("We're closed that day")
+      expect(message).toBe(`${closedSentence} We've changed it to 6/3 12:00 PM.`)
+      expect(message).not.toContain("choose another day")
+    },
+  )
+
+  it.each([
+    ["a day off", closedThursday],
+    ["a closed weekday", closedThursdays],
+  ])(
+    "asks for another day on %s only when nothing was changed",
+    (_, calendar) => {
+      expect(alertFor(thu("14:00"), calendar).message).toContain(
+        "Please choose another day.",
+      )
+    },
+  )
+
+  it("names the last pick-up and the new time after the cut-off", () => {
+    expect(
+      alertFor(thu("21:25"), SHOP, {
+        problem: "after-last-pick-up",
+        movedTo: fridayNoon,
+      }),
+    ).toEqual({
+      title: "Sorry, that's after our last pick up",
+      message:
+        "Our last pick up on a Thursday is 9:20 PM, so we can close at 9:30 PM. We've changed it to 6/3 12:00 PM.",
+    })
+  })
+
+  it("names the last eat-in order for an eat-in order", () => {
+    expect(
+      alertFor(thu("21:10"), SHOP, {
+        problem: "after-last-pick-up",
+        eatIn: true,
+        lastOrderOffsetMinutes: EAT_IN,
+      }).message,
+    ).toContain("Our last eat-in order on a Thursday is 9:00 PM")
+  })
+
+  it("says a time is too soon rather than closed", () => {
+    expect(
+      alertFor(thu("18:05"), SHOP, { problem: "too-soon", movedTo: thu("18:10") }),
+    ).toEqual({
+      title: "That's a little too soon",
+      message:
+        "The earliest we can have your order ready is 5/3 6:10 PM, so we've changed it to that.",
+    })
+  })
+})
+
+describe("fetchTradingCalendar", () => {
+  const hours = SHOP.storeHours
+  const ok = <T,>(value: T) => () => Promise.resolve(value)
+  const fail = () => Promise.reject(new Error("offline"))
+
+  beforeEach(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it("is ready with both, days off keyed by Auckland calendar day", async () => {
+    const loaded = await fetchTradingCalendar({
+      getStoreHours: ok(hours),
+      getDaysOff: ok([new Date("2026-03-06T00:00:00+13:00")]),
+    })
+
+    expect(loaded).toEqual({
+      status: "ready",
+      storeHours: hours,
+      daysOff: new Set(["2026-03-06"]),
+    })
+  })
+
+  /**
+   * Days off that failed used to become an empty list while the hours still read as ready,
+   * so "Open Now" said open on a day the shop had closed, for the rest of the session.
+   */
+  it.each([
+    ["the days off", ok(hours), fail],
+    ["the hours", fail, ok([] as Date[])],
+    ["both", fail, fail],
+  ])("is an error when %s fail to load", async (_, getStoreHours, getDaysOff) => {
+    expect(
+      await fetchTradingCalendar({
+        getStoreHours: getStoreHours as () => Promise<typeof hours>,
+        getDaysOff: getDaysOff as () => Promise<Date[]>,
+      }),
+    ).toEqual({ status: "error" })
   })
 })
 

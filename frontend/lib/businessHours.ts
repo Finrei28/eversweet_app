@@ -56,6 +56,42 @@ export function toDaysOff(dates: Date[]): DaysOff {
   return new Set(dates.map(getNZCalendarDay))
 }
 
+export type LoadedTradingCalendar =
+  | ({ status: "ready" } & TradingCalendar)
+  | { status: "error" }
+
+/**
+ * Fetches the weekly hours and the days off together, and reports them as ready only when
+ * both arrived. Either one missing is an error, for the caller to offer a retry.
+ *
+ * Days off that failed to load used to become an empty list while the hours still read as
+ * ready. "Open Now" then showed the shop open on a day it had closed, checkout offered
+ * times on that day, and nothing ever tried again for the rest of the session - the same
+ * guess-instead-of-fail the hours' hard-coded fallback made.
+ */
+export async function fetchTradingCalendar({
+  getStoreHours,
+  getDaysOff,
+}: {
+  getStoreHours: () => Promise<StoreHours>
+  getDaysOff: () => Promise<Date[]>
+}): Promise<LoadedTradingCalendar> {
+  const [storeHours, daysOff] = await Promise.all([
+    getStoreHours().catch((error) => {
+      console.error("Failed to fetch store hours:", error)
+      return null
+    }),
+    getDaysOff().catch((error) => {
+      console.error("Failed to fetch days off:", error)
+      return null
+    }),
+  ])
+
+  return storeHours && daysOff
+    ? { status: "ready", storeHours, daysOff: toDaysOff(daysOff) }
+    : { status: "error" }
+}
+
 /** Whether `date` falls on a day the store has closed outright. */
 export function isDayOff(date: Date, daysOff: DaysOff): boolean {
   return daysOff.has(getNZCalendarDay(date))

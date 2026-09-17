@@ -25,7 +25,11 @@ import {
   getStoreHours,
   getUserProfile,
 } from "@/services/api"
-import { DaysOff, toDaysOff, TradingCalendar } from "@/lib/businessHours"
+import {
+  DaysOff,
+  fetchTradingCalendar,
+  TradingCalendar,
+} from "@/lib/businessHours"
 import { useLoyaltyStore } from "./points"
 import { useCartStore } from "./cart"
 import { queryClient } from "@/services/queryClient"
@@ -59,8 +63,9 @@ interface AuthContextType {
   storeHours: StoreHours
   tradingCalendar: TradingCalendar
   /**
-   * Whether the hours have arrived. Until they are "ready", `storeHours` is empty and
-   * reads as closed every day, so anything offering a pick-up time waits on this.
+   * Whether the hours and the days off have both arrived. Until they are "ready",
+   * `storeHours` is empty and reads as closed every day, so anything offering a pick-up
+   * time or saying whether the shop is open waits on this.
    */
   storeHoursStatus: StoreHoursStatus
   /** Fetches the hours and days off again, after a failed load. */
@@ -99,33 +104,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   )
 
   /**
-   * Public data, loaded once at launch and again on request. Hours that fail to load are
-   * reported as "error" rather than replaced with a guess.
+   * Public data, loaded once at launch and again on request. It is "ready" only when both
+   * the hours and the days off arrived; either missing is "error", for checkout to offer a
+   * retry, rather than a guess that reads as ready (see `fetchTradingCalendar`).
    */
   const loadTradingCalendar = useCallback(async () => {
     setStoreHoursStatus("loading")
 
-    const [storeHoursResult, daysOffResult] = await Promise.all([
-      getStoreHours().catch((error) => {
-        console.error("Failed to fetch store hours:", error)
-        return null
-      }),
-      // An empty list on failure keeps the store on its weekly hours
-      // rather than shutting ordering down over a dropped request. The
-      // order endpoint is the backstop for a day off missed this way.
-      getDaysOff().catch((error) => {
-        console.error("Failed to fetch days off:", error)
-        return [] as Date[]
-      }),
-    ])
+    const loaded = await fetchTradingCalendar({ getStoreHours, getDaysOff })
 
-    setDaysOff(toDaysOff(daysOffResult))
-    if (storeHoursResult) {
-      setStoreHours(storeHoursResult)
-      setStoreHoursStatus("ready")
-    } else {
-      setStoreHoursStatus("error")
+    if (loaded.status === "ready") {
+      setStoreHours(loaded.storeHours)
+      setDaysOff(loaded.daysOff)
     }
+    setStoreHoursStatus(loaded.status)
   }, [])
 
   useEffect(() => {

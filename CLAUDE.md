@@ -169,12 +169,13 @@ npm run verify:lock              # see below
 
 - **Device timezones:** the pick-up time tests in `lib/checkoutHelpers.test.ts` must pass
   with the device anywhere. Jest fixes the zone when its workers start, so each zone is its
-  own run, and the file checks that the zone took. **Run these from PowerShell**: Git Bash
-  drops a `TZ` value containing a slash on its way to Windows programs, so
-  `TZ=America/Los_Angeles npx jest` silently runs in the machine's own zone.
+  own run, and the file checks that the zone took. **Don't set `TZ` in Git Bash**
+  (`TZ=America/Los_Angeles npx jest`): it drops a `TZ` value containing a slash on its way
+  to Windows programs, so that silently runs in the machine's own zone. Let node set it,
+  which works from any shell:
 
-  ```powershell
-  foreach ($tz in "UTC", "America/Los_Angeles", "Asia/Kolkata") { $env:TZ = $tz; npx jest lib }; Remove-Item Env:TZ
+  ```bash
+  node -e 'for (const tz of ["UTC","America/Los_Angeles","Asia/Kolkata"]) require("child_process").execSync("npx jest lib", { stdio: "inherit", shell: true, env: { ...process.env, TZ: tz } })'
   ```
 - `npm test` is `jest` (exits) and `npm run test:watch` is `jest --watchAll`, matching
   `admin/`. It used to be `--watchAll` with no test files, which never exited; Frontend CI
@@ -698,11 +699,16 @@ comparisons come from; never use the device clock or locale for trading hours.
   bounds a time by the last order, not closing. It used to let 9:21-9:30 PM through, for
   the server to refuse after pay.
 - **Messages:** `describePickUpProblem` tells "too soon" apart from "before opening" and
-  "after the last order", so the alert gives the real reason.
+  "after the last order", and `pickUpTimeAlert` words the alert, so it gives the real
+  reason. When checkout has already moved the time, every alert names the new one, a
+  closed day included.
 - **No fallback hours:** there is no hard-coded copy of the hours. `AuthProvider` reports
-  `storeHoursStatus` ("loading" | "ready" | "error"). Checkout waits for "ready" and offers
-  a retry on "error" (`reloadTradingCalendar`). The store screen works out "Open Now" on
-  the device with `isOpenNow`.
+  `storeHoursStatus` ("loading" | "ready" | "error"). It is **"ready" only when the hours
+  and the days off both loaded** (`fetchTradingCalendar`). A missing days-off list is an
+  error, not an empty list, which would have shown "Open Now" on a day off for the whole
+  session. Checkout waits for "ready" and offers a retry on "error"
+  (`reloadTradingCalendar`). The store screen works out "Open Now" on the device with
+  `isOpenNow`.
 
 **Hook dependencies.** `react-hooks/exhaustive-deps` is a warning, and CI fails only on
 errors. Before "fixing" one, check whether the value is stable:

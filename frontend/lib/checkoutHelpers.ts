@@ -5,6 +5,7 @@ import {
   type OrderingHoursProblem,
   TradingCalendar,
 } from "./businessHours"
+import { formatDayMonthTime, formatTime, formatWeekdayDate } from "./formatters"
 import { addNZDays, getNZDayName, nzTimeOnSameDay } from "./nzTime"
 
 /**
@@ -153,6 +154,88 @@ export async function getNextValidPickupTime(
 }
 
 export type PickUpTimeProblem = OrderingHoursProblem | "too-soon"
+
+/**
+ * What to tell a customer whose time cannot stand, and what it became.
+ *
+ * `movedTo` is the time checkout has already put in its place. When there is one the
+ * message has to say so: the day-off and closed-day wording said "please choose another
+ * day" while checkout had quietly committed the next valid time, so the customer was told
+ * to change something that had already been changed for them.
+ */
+export function pickUpTimeAlert(
+  date: Date | null,
+  calendar: TradingCalendar,
+  {
+    problem = null,
+    movedTo = null,
+    eatIn,
+    lastOrderOffsetMinutes,
+  }: {
+    problem?: PickUpTimeProblem | null
+    movedTo?: Date | null
+    eatIn: boolean
+    lastOrderOffsetMinutes: number
+  },
+): { title: string; message: string } {
+  const orderKind = eatIn ? "eat-in order" : "pick up"
+  const moved = movedTo
+    ? ` We've changed it to ${formatDayMonthTime(movedTo)}.`
+    : ""
+
+  if (date === null) {
+    return {
+      title: "Invalid Time",
+      message: "Please select a valid pickup time during our business hours.",
+    }
+  }
+
+  // Named by date, not weekday. A day off is a one-off closure, so "we are open 12:00 PM
+  // to 10:00 PM on a Tuesday" would be actively misleading.
+  if (isDayOff(date, calendar.daysOff)) {
+    return {
+      title: "We're closed that day",
+      message: `We are closed on ${formatWeekdayDate(date)}.${
+        moved || " Please choose another day."
+      }`,
+    }
+  }
+
+  const { openTime, closeTime, dayName } = getOpenCloseTime(date, calendar)
+
+  if (!openTime || !closeTime) {
+    return {
+      title: "We're closed that day",
+      message: `We are not open on ${formatWeekdayDate(date)}.${
+        moved || " Please choose another day."
+      }`,
+    }
+  }
+
+  if (problem === "before-open") {
+    return {
+      title: "Sorry, we're not open yet at that time",
+      message: `We open at ${formatTime(openTime)} on a ${dayName}.${moved}`,
+    }
+  }
+
+  if (problem === "after-last-pick-up") {
+    return {
+      title: `Sorry, that's after our last ${orderKind}`,
+      message: `Our last ${orderKind} on a ${dayName} is ${formatTime(
+        getLastOrderTime(closeTime, lastOrderOffsetMinutes),
+      )}, so we can close at ${formatTime(closeTime)}.${moved}`,
+    }
+  }
+
+  // Open, just sooner than the kitchen can have the order ready.
+  return {
+    title: "That's a little too soon",
+    message: movedTo
+      ? `The earliest we can have your order ready is ${formatDayMonthTime(movedTo)}, so we've changed it to that.`
+      : "Please choose a later time.",
+  }
+}
 
 /**
  * Why a picked time cannot stand, so the customer is told the actual reason: a time the
