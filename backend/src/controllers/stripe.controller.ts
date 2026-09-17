@@ -404,7 +404,22 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       pickUpTime,
       eatIn,
       confirmDuplicate,
+      authoriseOnly,
     } = req.body ?? {}
+
+    // Every card order is now a hold, captured only once its order has been written (see
+    // settleOrderPayment). A build that predates this treats anything but a completed
+    // payment as a failure: it would put a hold on the card, report the payment as failed
+    // and place no order. So a build has to say it expects a hold, and one that does not is
+    // asked to update before its customer's card is touched. Orders paid entirely in points
+    // never come here and keep working on every build.
+    if (authoriseOnly !== true) {
+      res.status(426).json({
+        code: "APP_UPDATE_REQUIRED",
+        message: "Please update the Eversweet app to pay by card.",
+      })
+      return
+    }
 
     if (!amount) {
       res.status(400).json({ message: "Amount is required" })
@@ -424,11 +439,11 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       return
     }
 
-    // Checked here rather than only at order creation because this runs before
-    // the card is charged. `createOrder` runs after and accepts a verified
-    // payment whatever the clock says, because refusing there would take the
-    // customer's money and give them no order. Optional for now so a build that
-    // predates this still checks out; make it required once those are gone.
+    // Checked here as well as at order creation because this runs before the
+    // card is touched: a time refused here never puts a hold on it. `createOrder`
+    // checks again and lets the hold go if the store has closed in the meantime.
+    // Optional only because older builds did not send it; every build past the
+    // hold gate above does.
     if (pickUpTime !== undefined) {
       const check = checkPickUpTime(new Date(pickUpTime), {
         eatIn: Boolean(eatIn),
@@ -475,10 +490,10 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 
     // Loading the cart sweeps out an offer that has stopped running, but an offer
     // can end between that load and this call - and this is the last point before
-    // the card is charged where it can still be caught. `calculateCartPrice` reads
-    // the discount stored on the row, so without this the customer pays the old
-    // offer price and `createOrder` is then obliged to honour it: past this line
-    // the money has moved, and a paid order is never refused.
+    // the card is held where it can still be caught. `calculateCartPrice` reads
+    // the discount stored on the row, so without this the customer is held for the
+    // old offer price, and `createOrder`, which checks the hold against those same
+    // rows, then captures it at that price.
     //
     // Refused rather than silently repriced, for the same reason as the amount
     // mismatch below: the total on their screen must be the total they are charged.
@@ -552,6 +567,9 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       payment_method: paymentMethodId,
       confirm: false, // We'll confirm on the client side
       setup_future_usage: "off_session", // This allows the card to be used for future payments
+      // Authorised when the app confirms, taken only when createOrder has written the
+      // order. Until then a changed cart or a closed store just lets the hold go.
+      capture_method: "manual",
       // What createOrder requires before it will place, or refund, an order against this
       // payment. See ORDER_PAYMENT_PURPOSE.
       metadata: { purpose: ORDER_PAYMENT_PURPOSE, userId },
@@ -623,9 +641,11 @@ export const checkPaymentStatus = async (req: Request, res: Response) => {
     res.status(200).json({
       success: paymentIntent.status === "succeeded" && !refunded,
       refunded,
-      pending:
-        paymentIntent.status === "processing" ||
-        paymentIntent.status === "requires_capture",
+      // On hold and waiting for its order — the app can place that order again.
+      authorised: paymentIntent.status === "requires_capture",
+      // Let go without being taken: the cart changed, the store closed, or it was abandoned.
+      released: paymentIntent.status === "canceled",
+      pending: paymentIntent.status === "processing",
       orderId: order?.id ?? null,
     })
     return

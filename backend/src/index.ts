@@ -16,6 +16,7 @@ import {
 } from "./controllers/admin.controller"
 import { settleMonthlyWinners } from "./controllers/client.controller"
 import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
+import { sweepStrandedPayments } from "./lib/strandedPayments"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -66,6 +67,11 @@ try {
   // A socket is checked once, at its handshake; this is what stops one staying in the
   // kitchen room after a demotion, a password reset or its token running out.
   cron.schedule("* * * * *", () => recheckAdminSockets(io), {
+    timezone: "Pacific/Auckland",
+  })
+  // Holds whose order never came, and payments taken without one. Wrapped for the same
+  // reason as settleMonthlyWinners below: node-cron's TaskContext would arrive as `now`.
+  cron.schedule("*/5 * * * *", () => sweepStrandedPayments(), {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * 1", renewWeeklyOffers, {

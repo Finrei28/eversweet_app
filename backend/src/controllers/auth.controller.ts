@@ -23,7 +23,20 @@ import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
 import { generateOtp } from "../lib/otp"
-import { PaymentRefusal, settleOrderPayment } from "../lib/orderPayment"
+import {
+  captureOrderPayment,
+  EXPIRED_HOLD,
+  HoldReleasedError,
+  PaymentRefusal,
+  settleOrderPayment,
+} from "../lib/orderPayment"
+
+/** Carries a payment refusal out of the order transaction, rolling back what it wrote. */
+class PaymentOutcome extends Error {
+  constructor(readonly refusal: PaymentRefusal) {
+    super(refusal.body.message)
+  }
+}
 
 //Helper function
 /**
@@ -751,12 +764,12 @@ export const createOrder = async (req: Request, res: Response) => {
       daysOffKeys: await getDaysOffKeys(),
     })
 
-    // Refusing a paid order would strand the customer's money: the card is
-    // charged before this endpoint is reached. `createPaymentIntent` is the gate
-    // that stops a bad time before the charge, so reaching this with a payment
-    // attached means the store closed in the seconds since. The order is taken
-    // and the problem made visible — but only once the payment has been checked
-    // below. Any payment id at all used to be enough to skip this refusal.
+    // `createPaymentIntent` stops a bad time before the card is touched, so
+    // reaching this with a payment attached means the store closed in the
+    // seconds since. What happens then is the payment's to decide, below: a hold
+    // is released and the order refused, while money already taken (the rare
+    // capture-to-commit gap) buys the order anyway and the problem is logged.
+    // Any payment id at all used to be enough to skip this refusal.
     const lateForHours = pickUpCheck.ok ? null : pickUpCheck.message
 
     if (lateForHours && !paymentIntentId) {
@@ -848,21 +861,26 @@ export const createOrder = async (req: Request, res: Response) => {
     // able to pay for the same items a second time.
     //
     // The payment is settled first, inside it, so the lock it takes is held
-    // until the order commits. See settleOrderPayment.
+    // until the order commits, and a hold is captured last, so a capture that
+    // fails takes the order down with it. See settleOrderPayment.
     //
     // The confirmation email and the socket emit stay outside it. Both are
     // external and slow, and neither should be able to roll back an order
     // the customer has already paid for.
     const outcome = await db.$transaction(
       async (tx): Promise<OrderOutcome> => {
+        let capture: string | null = null
+
         if (paymentIntentId) {
-          const refusal = await settleOrderPayment(tx, {
+          const settled = await settleOrderPayment(tx, {
             paymentIntentId,
             userId,
             stripeCustomerId: user.stripeCustomerId,
             payableInCents,
+            lateForHours,
           })
-          if (refusal) return { refusal }
+          if (settled.refusal) return { refusal: settled.refusal }
+          capture = settled.capture
         }
 
         const order = await tx.order.create({
@@ -1054,6 +1072,22 @@ export const createOrder = async (req: Request, res: Response) => {
 
         // The cart goes with the order, in the same commit.
         await tx.cart.delete({ where: { userId } })
+
+        // The money is taken last. A capture that fails throws, and the order,
+        // its points and the emptied cart all roll back with it. If the capture
+        // succeeds and the commit then fails, the retry finds the payment taken
+        // and places the order without capturing again.
+        if (capture) {
+          try {
+            await captureOrderPayment(capture)
+          } catch (error) {
+            if (error instanceof HoldReleasedError) {
+              throw new PaymentOutcome(EXPIRED_HOLD)
+            }
+            throw error
+          }
+        }
+
         return { order }
       },
       // The nested order create plus the loyalty and offer writes run past
@@ -1093,6 +1127,13 @@ export const createOrder = async (req: Request, res: Response) => {
     res.status(201).json({ order: newOrder })
     return
   } catch (error) {
+    // A refusal that had to roll back writes already made — the hold was gone
+    // by the time its order came to capture it.
+    if (error instanceof PaymentOutcome) {
+      res.status(error.refusal.status).json(error.refusal.body)
+      return
+    }
+
     // Two attempts ran at once and this one lost the unique constraint on
     // paymentIntentId. The other created the order; return that rather than
     // reporting a failure for an order that exists and is paid for.

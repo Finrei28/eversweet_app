@@ -54,7 +54,7 @@ describeIfDb("Stripe endpoints", () => {
       request(app)
         .post("/api/stripe/createPaymentIntent")
         .set("Authorization", as(userId))
-        .send({ amount: 1200, ...body })
+        .send({ amount: 1200, authoriseOnly: true, ...body })
 
     beforeEach(() => {
       stripeApi.paymentIntents.create.mockResolvedValue({
@@ -94,6 +94,43 @@ describeIfDb("Stripe endpoints", () => {
         )
       },
     )
+
+    /**
+     * Every card order is a hold now. A build that predates holds reads one as a failed
+     * payment, so it is asked to update before its customer's card is touched.
+     */
+    it.each([[undefined], [false], ["true"]])(
+      "asks a build that sends authoriseOnly %j to update, without touching Stripe",
+      async (authoriseOnly) => {
+        const { user } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+        await db.user.update({
+          where: { id: user.id },
+          data: { stripeCustomerId: null },
+        })
+
+        const res = await pay(user.id, { authoriseOnly })
+
+        expect(res.status).toBe(426)
+        expect(res.body).toEqual({
+          code: "APP_UPDATE_REQUIRED",
+          message: "Please update the Eversweet app to pay by card.",
+        })
+        expect(stripeApi.paymentIntents.create).not.toHaveBeenCalled()
+        expect(stripeApi.customers.create).not.toHaveBeenCalled()
+      },
+    )
+
+    it("holds the card rather than charging it", async () => {
+      const { user } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+      await withStripeCustomer(user.id)
+
+      const res = await pay(user.id, {})
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ capture_method: "manual" }),
+      )
+    })
 
     // createOrder will only place, or refund, an order against a payment carrying this.
     it("marks the payment as one made for this customer's order", async () => {
@@ -447,8 +484,54 @@ describeIfDb("Stripe endpoints", () => {
       expect(res.body).toEqual({
         success: true,
         refunded: false,
+        authorised: false,
+        released: false,
         pending: false,
         orderId: null,
+      })
+    })
+
+    /**
+     * A hold waiting for its order. It used to be reported as "pending", which the app took
+     * as a payment still processing — so a customer whose order had dropped was left watching
+     * a spinner with nothing to retry.
+     */
+    it("reports a hold as authorised, so the app can place its order again", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_held",
+        customer: OWN_CUSTOMER,
+        status: "requires_capture",
+      })
+
+      const res = await check(user.id, "pi_held")
+
+      expect(res.body).toEqual({
+        success: false,
+        refunded: false,
+        authorised: true,
+        released: false,
+        pending: false,
+        orderId: null,
+      })
+    })
+
+    it("reports a hold that was let go as released", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_released",
+        customer: OWN_CUSTOMER,
+        status: "canceled",
+      })
+
+      const res = await check(user.id, "pi_released")
+
+      expect(res.body).toMatchObject({
+        success: false,
+        authorised: false,
+        released: true,
       })
     })
 
@@ -473,6 +556,8 @@ describeIfDb("Stripe endpoints", () => {
       expect(res.body).toEqual({
         success: false,
         refunded: true,
+        authorised: false,
+        released: false,
         pending: false,
         orderId: null,
       })
@@ -497,6 +582,8 @@ describeIfDb("Stripe endpoints", () => {
       expect(res.body).toEqual({
         success: false,
         refunded: false,
+        authorised: false,
+        released: false,
         pending: true,
         orderId: order.id,
       })

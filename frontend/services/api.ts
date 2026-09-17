@@ -262,6 +262,19 @@ export class PaymentRefundedError extends Error {
   }
 }
 
+/**
+ * The server refused the order and let the card's hold go without taking anything — the
+ * cart changed during payment, the store closed for that time, or the hold had already been
+ * released. Nothing was charged, which is worth saying plainly: a customer who has just
+ * confirmed a payment assumes the money has gone.
+ */
+export class PaymentReleasedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PaymentReleasedError"
+  }
+}
+
 export async function createOrder(
   paymentMethodId: string | null,
   pickupNow: boolean,
@@ -294,6 +307,17 @@ export async function createOrder(
   if (res.status === 409 && data?.inProgress) {
     throw new Error(
       "Your order is already being placed. Check your orders in a moment.",
+    )
+  }
+
+  // Before the generic 400 below: a store that closed during payment answers 400 with
+  // `released`, and that customer needs to hear they were not charged.
+  if ((res.status === 400 || res.status === 409) && data?.released) {
+    throw new PaymentReleasedError(
+      getErrorMessage(
+        data,
+        "We didn't take your payment. Please check your cart and try again.",
+      ),
     )
   }
 

@@ -19,6 +19,7 @@ import {
   resourceMissing,
   stripeApi,
 } from "../test/stripeStub"
+import { sweepStrandedPayments } from "../lib/strandedPayments"
 
 // Reached through a getter because vi.mock is hoisted above the imports.
 vi.mock("../lib/redis", () => ({
@@ -70,9 +71,9 @@ const intents = new Map<string, Record<string, unknown>>()
 const customerOf = (userId: string) => `cus_${userId}`
 
 /**
- * What a real checkout leaves behind: a completed payment of `cents`, on this customer,
- * made by createPaymentIntent for their order. Overrides describe everything else a
- * payment can be.
+ * What a real checkout leaves behind: a hold for `cents` on this customer's card, made by
+ * createPaymentIntent for their order and not yet captured. Overrides describe everything
+ * else a payment can be.
  */
 const payFor = async (
   userId: string,
@@ -88,9 +89,11 @@ const payFor = async (
   intents.set(paymentIntentId, {
     id: paymentIntentId,
     object: "payment_intent",
-    status: "succeeded",
+    status: "requires_capture",
+    capture_method: "manual",
     amount: cents,
-    amount_received: cents,
+    amount_capturable: cents,
+    amount_received: 0,
     currency: "nzd",
     customer: customerOf(userId),
     metadata: { purpose: "app_order", userId },
@@ -98,6 +101,16 @@ const payFor = async (
     ...overrides,
   })
 }
+
+/**
+ * A payment whose money has already been taken: the one way that happens now is a capture
+ * that succeeded before its order's commit failed.
+ */
+const taken = (cents: number) => ({
+  status: "succeeded",
+  amount_capturable: 0,
+  amount_received: cents,
+})
 
 describeIfDb("POST /api/auth/createOrder", () => {
   beforeEach(async () => {
@@ -114,6 +127,19 @@ describeIfDb("POST /api/auth/createOrder", () => {
       return intent
     })
     stripeApi.refunds.create.mockResolvedValue({ id: "re_test" })
+
+    // Capturing and releasing change the payment the way Stripe would, so a later read
+    // sees the new state.
+    stripeApi.paymentIntents.capture.mockImplementation(async (id: string) => {
+      const intent = intents.get(id)!
+      Object.assign(intent, taken(intent.amount_capturable as number))
+      return intent
+    })
+    stripeApi.paymentIntents.cancel.mockImplementation(async (id: string) => {
+      const intent = intents.get(id)!
+      Object.assign(intent, { status: "canceled", amount_capturable: 0 })
+      return intent
+    })
   })
 
   afterEach(() => {
@@ -144,6 +170,14 @@ describeIfDb("POST /api/auth/createOrder", () => {
 
     expect(await db.order.count()).toBe(1)
     expect(await db.cart.count({ where: { userId: user.id } })).toBe(0)
+
+    // The hold is taken once, and keyed so a retry cannot take it twice.
+    expect(stripeApi.paymentIntents.capture).toHaveBeenCalledTimes(1)
+    expect(stripeApi.paymentIntents.capture).toHaveBeenCalledWith(
+      "pi_basic",
+      {},
+      { idempotencyKey: "order-capture:pi_basic" },
+    )
   })
 
   it("never lets a client name its own price", async () => {
@@ -267,29 +301,32 @@ describeIfDb("POST /api/auth/createOrder", () => {
       await expectNoOrder(cart.id)
     })
 
-    it("refunds a payment that no longer covers the cart instead of making the order", async () => {
+    /**
+     * The card used to be charged before this endpoint ran, so a cart that changed during
+     * payment could only be answered with a refund — Stripe's fee lost, and days before
+     * the customer saw their money. A hold is simply let go.
+     */
+    it("lets the hold go, without refunding, when the cart changed during payment", async () => {
       const { user, cart } = await makeCustomerWithCart({
         itemPriceInCents: 1200,
         quantity: 2,
       })
-      // Paid for one, then a second added before the order was placed.
+      // Held for one, then a second added before the order was placed.
       await payFor(user.id, "pi_short", 1200)
 
       const res = await placeOrder(user.id, { paymentIntentId: "pi_short" })
 
       expect(res.status).toBe(409)
-      expect(res.body.refunded).toBe(true)
-      expect(res.body.message).toContain("$12.00")
-      expect(stripeApi.refunds.create).toHaveBeenCalledTimes(1)
-      expect(stripeApi.refunds.create).toHaveBeenCalledWith(
-        expect.objectContaining({ payment_intent: "pi_short" }),
-        { idempotencyKey: "order-refund:pi_short" },
-      )
-      expect(await db.order.count()).toBe(0)
-      expect(await db.cartItem.count({ where: { cartId: cart.id } })).toBe(1)
+      expect(res.body.released).toBe(true)
+      expect(stripeApi.paymentIntents.cancel).toHaveBeenCalledWith("pi_short", {
+        cancellation_reason: "abandoned",
+      })
+      expect(stripeApi.paymentIntents.capture).not.toHaveBeenCalled()
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+      await expectNoOrder(cart.id)
     })
 
-    it("refunds a payment taken in another currency", async () => {
+    it("lets the hold go when it was placed in another currency", async () => {
       const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
       // 1200 paise is about 25 cents.
       await payFor(user.id, "pi_rupees", 1200, { currency: "inr" })
@@ -297,30 +334,75 @@ describeIfDb("POST /api/auth/createOrder", () => {
       const res = await placeOrder(user.id, { paymentIntentId: "pi_rupees" })
 
       expect(res.status).toBe(409)
-      expect(res.body.refunded).toBe(true)
-      expect(stripeApi.refunds.create).toHaveBeenCalledTimes(1)
-      await expectNoOrder(cart.id)
-    })
-
-    /**
-     * A refund leaves a payment's status at "succeeded". Put the cart back the way it was
-     * and, without this, the refunded payment would buy the order after all.
-     */
-    it("will not spend a payment that has been refunded", async () => {
-      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
-      await payFor(user.id, "pi_refunded", 1200, {
-        latest_charge: { id: "ch_refunded", amount_refunded: 1200 },
-      })
-
-      const res = await placeOrder(user.id, { paymentIntentId: "pi_refunded" })
-
-      expect(res.status).toBe(409)
-      expect(res.body.refunded).toBe(true)
+      expect(res.body.released).toBe(true)
+      expect(stripeApi.paymentIntents.capture).not.toHaveBeenCalled()
       expect(stripeApi.refunds.create).not.toHaveBeenCalled()
       await expectNoOrder(cart.id)
     })
 
-    it("never refunds a payment that has already bought an order", async () => {
+    it("refuses a payment whose hold has already gone", async () => {
+      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+      await payFor(user.id, "pi_expired", 1200, {
+        status: "canceled",
+        amount_capturable: 0,
+      })
+
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_expired" })
+
+      expect(res.status).toBe(409)
+      expect(res.body.released).toBe(true)
+      expect(stripeApi.paymentIntents.capture).not.toHaveBeenCalled()
+      await expectNoOrder(cart.id)
+    })
+
+    /** The sweep, or the card network, can let a hold go while its order is on its way. */
+    it("rolls the order back when the hold is gone by the time it is captured", async () => {
+      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+      await payFor(user.id, "pi_vanished", 1200)
+      const actual = await vi.importActual<typeof import("stripe")>("stripe")
+      stripeApi.paymentIntents.capture.mockRejectedValueOnce(
+        new actual.Stripe.errors.StripeInvalidRequestError({
+          type: "invalid_request_error",
+          code: "payment_intent_unexpected_state",
+          message: "This PaymentIntent could not be captured because it has a status of canceled.",
+        }),
+      )
+
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_vanished" })
+
+      expect(res.status).toBe(409)
+      expect(res.body.released).toBe(true)
+      await expectNoOrder(cart.id)
+      expect(await db.loyaltyRecord.count()).toBe(0)
+    })
+
+    /**
+     * Capture is the last step before the order commits. A capture that fails leaves no
+     * order; one whose response was lost leaves the money taken, and the retry has to place
+     * the order without taking it again.
+     */
+    it("places the order on a retry after a capture whose response was lost", async () => {
+      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+      await payFor(user.id, "pi_lost", 1200)
+      stripeApi.paymentIntents.capture.mockImplementationOnce(async (id: string) => {
+        // Stripe took the money; the reply never arrived.
+        Object.assign(intents.get(id)!, taken(1200))
+        throw new Error("socket hang up")
+      })
+      vi.spyOn(console, "error").mockImplementation(() => {})
+
+      const first = await placeOrder(user.id, { paymentIntentId: "pi_lost" })
+      expect(first.status).toBe(500)
+      await expectNoOrder(cart.id)
+
+      const retry = await placeOrder(user.id, { paymentIntentId: "pi_lost" })
+
+      expect(retry.status).toBe(201)
+      expect(await db.order.count()).toBe(1)
+      expect(stripeApi.paymentIntents.capture).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not let go of a hold that already has an order", async () => {
       const { user, cart } = await makeCustomerWithCart({
         itemPriceInCents: 1200,
         quantity: 2,
@@ -337,16 +419,117 @@ describeIfDb("POST /api/auth/createOrder", () => {
           GST: 157,
           source: "APP",
           appUserId: other.id,
-          paymentIntentId: "pi_spent",
+          paymentIntentId: "pi_held_spent",
         },
       })
-      await payFor(user.id, "pi_spent", 1200)
+      await payFor(user.id, "pi_held_spent", 1200)
+      vi.spyOn(console, "error").mockImplementation(() => {})
 
-      const res = await placeOrder(user.id, { paymentIntentId: "pi_spent" })
+      const res = await placeOrder(user.id, { paymentIntentId: "pi_held_spent" })
 
       expect(res.status).toBe(409)
-      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+      expect(stripeApi.paymentIntents.cancel).not.toHaveBeenCalled()
       expect(await db.cartItem.count({ where: { cartId: cart.id } })).toBe(1)
+    })
+
+    /**
+     * Money already taken reaches here only through the capture-to-commit gap. A cart that
+     * changed before the retry can then only be answered with a refund.
+     */
+    describe("a payment already taken", () => {
+      it("is refunded when the cart no longer matches it", async () => {
+        const { user, cart } = await makeCustomerWithCart({
+          itemPriceInCents: 1200,
+          quantity: 2,
+        })
+        await payFor(user.id, "pi_short", 1200, taken(1200))
+
+        const res = await placeOrder(user.id, { paymentIntentId: "pi_short" })
+
+        expect(res.status).toBe(409)
+        expect(res.body.refunded).toBe(true)
+        expect(res.body.message).toContain("$12.00")
+        expect(stripeApi.refunds.create).toHaveBeenCalledTimes(1)
+        expect(stripeApi.refunds.create).toHaveBeenCalledWith(
+          { payment_intent: "pi_short", metadata: { userId: user.id } },
+          { idempotencyKey: "order-refund:pi_short" },
+        )
+        expect(await db.order.count()).toBe(0)
+        expect(await db.cartItem.count({ where: { cartId: cart.id } })).toBe(1)
+      })
+
+      /**
+       * A refund leaves a payment's status at "succeeded". Put the cart back the way it was
+       * and, without this, the refunded payment would buy the order after all.
+       */
+      it("is not spent once it has been refunded", async () => {
+        const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+        await payFor(user.id, "pi_refunded", 1200, {
+          ...taken(1200),
+          latest_charge: { id: "ch_refunded", amount_refunded: 1200 },
+        })
+
+        const res = await placeOrder(user.id, { paymentIntentId: "pi_refunded" })
+
+        expect(res.status).toBe(409)
+        expect(res.body.refunded).toBe(true)
+        expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+        await expectNoOrder(cart.id)
+      })
+
+      it("is never refunded once it has bought an order", async () => {
+        const { user, cart } = await makeCustomerWithCart({
+          itemPriceInCents: 1200,
+          quantity: 2,
+        })
+        const other = await makeUser()
+        await db.order.create({
+          data: {
+            tempOrderId: "6001",
+            priceInCents: 1200,
+            customerFirstName: "Ada",
+            customerLastName: "Lovelace",
+            customerEmail: "ada@example.test",
+            status: "PENDING",
+            GST: 157,
+            source: "APP",
+            appUserId: other.id,
+            paymentIntentId: "pi_spent",
+          },
+        })
+        await payFor(user.id, "pi_spent", 1200, taken(1200))
+
+        const res = await placeOrder(user.id, { paymentIntentId: "pi_spent" })
+
+        expect(res.status).toBe(409)
+        expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+        expect(await db.cartItem.count({ where: { cartId: cart.id } })).toBe(1)
+      })
+
+      it("is refused once the stranded-payment sweep has refunded it", async () => {
+        const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+        await payFor(user.id, "pi_stranded", 1200, taken(1200))
+        stripeApi.paymentIntents.search.mockImplementation(async ({ query }) => ({
+          data: String(query).includes("succeeded") ? [intents.get("pi_stranded")] : [],
+          has_more: false,
+          next_page: null,
+        }))
+        stripeApi.refunds.create.mockImplementation(async () => {
+          Object.assign(intents.get("pi_stranded")!, {
+            latest_charge: { id: "ch_stranded", amount_refunded: 1200 },
+          })
+          return { id: "re_stranded" }
+        })
+        vi.spyOn(console, "error").mockImplementation(() => {})
+
+        await sweepStrandedPayments()
+        const res = await placeOrder(user.id, { paymentIntentId: "pi_stranded" })
+
+        expect(stripeApi.refunds.create).toHaveBeenCalledTimes(1)
+        expect(res.status).toBe(409)
+        expect(res.body.refunded).toBe(true)
+        await expectNoOrder(cart.id)
+      })
     })
 
     /**
@@ -392,14 +575,35 @@ describeIfDb("POST /api/auth/createOrder", () => {
         await expectNoOrder(cart.id)
       })
 
-      // A verified payment is still never refused over the clock: the money has moved.
-      it("is still taken once its payment checks out", async () => {
-        const { user } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+      /**
+       * Accepting it was only ever because the money had already moved. On a hold it has
+       * not, so the store gets no order it cannot make and the customer is not charged.
+       */
+      it("is refused, and its hold let go, when the payment is only on hold", async () => {
+        const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
         await payFor(user.id, "pi_late", 1200)
-        const errors = vi.spyOn(console, "error").mockImplementation(() => {})
 
         const res = await placeOrder(user.id, {
           paymentIntentId: "pi_late",
+          body: { pickUpTime: passed() },
+        })
+
+        expect(res.status).toBe(400)
+        expect(res.body.released).toBe(true)
+        expect(res.body.message).toContain("You haven't been charged")
+        expect(stripeApi.paymentIntents.cancel).toHaveBeenCalledTimes(1)
+        expect(stripeApi.paymentIntents.capture).not.toHaveBeenCalled()
+        await expectNoOrder(cart.id)
+      })
+
+      // Money already taken still buys the order: refusing would strand it.
+      it("is still taken when the money has already been taken", async () => {
+        const { user } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+        await payFor(user.id, "pi_late_taken", 1200, taken(1200))
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await placeOrder(user.id, {
+          paymentIntentId: "pi_late_taken",
           body: { pickUpTime: passed() },
         })
 

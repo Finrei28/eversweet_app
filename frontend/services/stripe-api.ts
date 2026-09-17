@@ -115,8 +115,8 @@ export const createPaymentIntent = async (
   currency = "nzd",
   paymentMethodId?: string,
   // Sent so the server can refuse a slot outside trading hours before the card
-  // is charged. Order creation happens after the charge and takes a paid order
-  // whatever the clock says by then.
+  // is held. Order creation checks again, and lets the hold go if the store has
+  // closed in the meantime.
   pickUp?: {
     pickUpTime: Date
     eatIn: boolean
@@ -138,6 +138,11 @@ export const createPaymentIntent = async (
       pickUpTime: pickUp?.pickUpTime.toISOString(),
       eatIn: pickUp?.eatIn,
       confirmDuplicate: pickUp?.confirmDuplicate,
+      // This build expects its card to be held, not charged: the server takes the money
+      // only once createOrder has written the order, and lets the hold go if it can't. The
+      // server refuses card payments from builds that don't say so, because they read a
+      // hold as a failed payment.
+      authoriseOnly: true,
     },
     authMessage: UNAUTHENTICATED,
   })

@@ -72,6 +72,8 @@ describeIfDb("createPaymentIntent and offers that stopped running", () => {
         amount,
         currency: "nzd",
         pickUpTime: nextOpenPickUpTime().toISOString(),
+        // What the current app sends; a build without it is asked to update first.
+        authoriseOnly: true,
       })
 
   it.each([

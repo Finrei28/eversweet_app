@@ -323,29 +323,64 @@ line and the screen would just render blanks.
 
 **Order creation.** `POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
 keyed on the `Idempotency-Key` header and falling back to the payment intent for older
-builds. The card is charged *before* this endpoint is reached, so the controller's rule is
-that a **verified** paid order is never refused: a pick-up time that has become invalid is
-logged loudly and accepted, and a retry that lost a race returns the customer's own existing
-order rather than "cart is empty".
+builds. A retry that lost a race returns the customer's own existing order rather than
+"cart is empty".
 
-Verification is `lib/orderPayment.settleOrderPayment`, run first inside the order
-transaction. The payment intent must be the caller's Stripe customer's, carry the
-`purpose: "app_order"` metadata `createPaymentIntent` writes (membership invoices share the
-customer, so the customer check alone would let one pay for, or be refunded as, an order),
-be `succeeded`, not refunded (a refund leaves the status at `succeeded`), and equal the
-cart's `payableInCents` in NZD. A real payment that doesn't match is **refunded in full**
-and the order refused — never accepted at the amount paid. A Postgres advisory lock on the
-payment intent id is held from the Stripe read to the order's commit, so a concurrent
-attempt cannot both make the order and refund it. Hold-then-capture would avoid refunds
-altogether, but installed builds treat anything but `Succeeded` as a failed payment, so it
-needs an app release first.
+**Every card order is a hold, captured last.** `createPaymentIntent` creates the payment
+intent with `capture_method: "manual"`, so confirming in the app only authorises the card.
+- **The update gate:** the app must send `authoriseOnly: true`. A build that predates holds
+  reads one as a failed payment, so without the flag the endpoint answers **426**
+  `APP_UPDATE_REQUIRED` ("Please update the Eversweet app to pay by card") before touching
+  Stripe. The app has no over-the-air updates, so this gate is the only way to reach
+  installed builds. Points-only orders need no card and work on every build.
+- **Rollout order:** ship the app build before deploying a server change here. The app
+  accepts `Succeeded` as well as `RequiresCapture`, so it works against an older server.
 
-A refusal comes back as `409 { refunded: true }`, which the app turns into a "Payment
-refunded" alert (`PaymentRefundedError`, `services/api.ts`). `checkPaymentStatus` reports a
-refunded payment as `success: false, refunded: true`, so older builds say "Payment Failed"
-rather than "paid but no order". Payment intents created before `createPaymentIntent`
-started tagging them are refused and logged, so **deploy changes here while nobody is
-mid-checkout**.
+`lib/orderPayment.settleOrderPayment` runs first inside the order transaction, under a
+Postgres advisory lock on the payment intent id (`lockPayment`). The lock is held until
+commit, so settling, capturing, releasing and refunding one payment never interleave.
+Checks, in order:
+- **Ownership:** the intent must be the caller's Stripe customer's (else 404).
+- **Tag:** it must carry the `purpose: "app_order"` metadata. Membership invoices share the
+  customer, so the customer check alone would let one pay for, or be refunded as, an order.
+- **`requires_capture` (the normal case):**
+  - The hold must equal the cart's `payableInCents` in NZD.
+  - A mismatch or a pick-up time that has become invalid **releases the hold**
+    (`paymentIntents.cancel`): `400/409 { released: true }`, no order, nothing charged.
+  - Otherwise `createOrder` writes the order and captures with `captureOrderPayment` as the
+    **last step before commit**, keyed `order-capture:<id>`. A failed capture rolls the
+    order back; a hold already gone answers 409 `released`.
+- **`succeeded`** reaches here only through the capture-to-commit gap, since Stripe and
+  Postgres can't commit together.
+  - A retry with a matching cart is accepted with no second capture, even if the pick-up
+    time has since passed.
+  - A mismatch is **refunded in full** (`refundOrderPayment`, keyed `order-refund:<id>`),
+    never accepted at the amount paid.
+  - A refunded payment is refused: a refund leaves the status at `succeeded`, so check
+    `latest_charge.amount_refunded`.
+- **`canceled`:** 409 `released`.
+
+**The stranded-payment sweep** (`lib/strandedPayments`, every 5 minutes) mops up what
+`createOrder` never finished, using the same lock and keys. It looks at app payments older
+than 30 minutes:
+- It releases holds that have no order, and captures any hold that does (which should never
+  happen, so it logs loudly).
+- It refunds taken payments that have no order, looking back 48 hours.
+
+It uses Stripe search, which lags about a minute.
+
+**What the app does** (`app/checkout.tsx`):
+- `PaymentReleasedError` shows "You haven't been charged"; `PaymentRefundedError` shows
+  "Payment refunded".
+- `checkPaymentStatus` returns `authorised` (on hold) and `released` (let go) alongside
+  `success`, `refunded` and `pending`.
+- A payment that is authorised or succeeded but has no order offers "Place order", which
+  resends the same order (same payment intent, same idempotency key) from `pendingOrderRef`.
+- Recovery on returning to the foreground waits while a checkout is still running, for
+  example on return from 3D Secure.
+
+Payment intents created before `createPaymentIntent` started tagging them are refused and
+logged, so **deploy changes here while nobody is mid-checkout**.
 
 **Stripe.** One client, `lib/stripeClient` (with `idOf` for fields Stripe may send
 expanded); `lib/stripeErrors` has `orNullIfMissing`, which turns `resource_missing` into
@@ -358,7 +393,8 @@ null. Rules the endpoints follow:
 - `getOrCreateCustomerId` creates a customer only when the stored one is
   `resource_missing`. Any other Stripe error is rethrown: a blip used to replace the
   customer and orphan a member's cards and subscription.
-- `createPaymentIntent` always charges NZD, whatever `currency` says.
+- `createPaymentIntent` always holds in NZD, whatever `currency` says (see **Order
+  creation**).
 - `createMembership` always uses the plan's own price; a different `stripePriceId` gets 409.
 
 **Versions:** the SDK pins `2025-08-27.basil`. The webhook endpoint (and the account
@@ -418,6 +454,7 @@ Cron (`index.ts`) all runs in `Pacific/Auckland`:
 - kitchen sweep every 2 minutes;
 - restaurant status every minute;
 - admin socket re-check every minute;
+- stranded-payment sweep every 5 minutes;
 - `renewWeeklyOffers` on Monday at 00:00, the daily special, and `settleMonthlyWinners` at
   00:00 on the 1st.
 
