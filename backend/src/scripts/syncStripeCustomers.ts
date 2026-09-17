@@ -24,6 +24,9 @@ import { orNullIfMissing } from "../lib/stripeErrors"
  * `--apply` writes to the live Stripe account. Running it twice is harmless: a customer that
  * is already up to date is skipped.
  *
+ * A customer that fails is logged and the run carries on to the rest, but the script then
+ * exits non-zero, so a run with failures never looks complete. Re-running retries them.
+ *
  * Kept out of the build by tsconfig.build.json.
  */
 const apply = process.argv.includes("--apply")
@@ -91,6 +94,13 @@ async function main() {
     apply ? "Done." : "Dry run: nothing was written. Re-run with --apply to write.",
     { [apply ? "updated" : "wouldUpdate"]: updated, ...rest },
   )
+
+  // Each customer that failed was logged and the rest carried on, but the run as a whole is
+  // not complete: exit non-zero, so an unattended --apply is not mistaken for a clean one.
+  if (counts.failed > 0) {
+    console.error(`${counts.failed} customer(s) failed; re-run to retry them.`)
+    process.exitCode = 1
+  }
 }
 
 main()

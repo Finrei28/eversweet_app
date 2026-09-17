@@ -4,6 +4,7 @@ import request from "supertest"
 import { redisStub as redis } from "../test/redisStub"
 import app from "../app"
 import { db } from "../lib/db"
+import { customerDetailsOf } from "../lib/stripeCustomer"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeCustomerWithCart, makeUser } from "../test/factories"
 import {
@@ -36,13 +37,16 @@ const withStripeCustomer = async (userId: string, customerId = OWN_CUSTOMER) => 
   const user = await db.user.update({
     where: { id: userId },
     data: { stripeCustomerId: customerId },
-    select: { email: true, phone: true },
+    select: { email: true, firstName: true, lastName: true, phone: true },
   })
+  // The user's details as they stand, however the test set them up - so a test that gives a
+  // user another name does not find its customer "out of date" and trip a sync update.
+  const details = customerDetailsOf(user)
   stripeApi.customers.retrieve.mockResolvedValue({
     id: customerId,
-    email: user.email,
-    name: "Ada Lovelace",
-    phone: user.phone,
+    email: details.email,
+    name: details.name ?? null,
+    phone: details.phone ?? null,
   })
 }
 
@@ -671,6 +675,22 @@ describeIfDb("Stripe endpoints", () => {
 
     it("leaves a customer that is up to date alone", async () => {
       const user = await makeUser()
+      await withStripeCustomer(user.id)
+
+      const res = await listCards(user.id)
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.customers.update).not.toHaveBeenCalled()
+    })
+
+    // `withStripeCustomer` hard-coded the factory's name, so any test giving a user another
+    // one found its "up to date" customer stale and tripped a sync update it did not expect.
+    it("treats a customer set up for a renamed user as up to date", async () => {
+      const user = await makeUser()
+      await db.user.update({
+        where: { id: user.id },
+        data: { firstName: "Grace", lastName: "Hopper" },
+      })
       await withStripeCustomer(user.id)
 
       const res = await listCards(user.id)
