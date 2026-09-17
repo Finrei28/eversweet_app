@@ -388,6 +388,47 @@ describeIfDb("Stripe webhook", () => {
         ).toBe(2)
       })
 
+      /**
+       * Stripe redelivers an event whose delivery failed, and anyone can resend one from the
+       * Dashboard. The count used to run back from the invoice delivered, skipping anything
+       * newer, so August arriving again after September was recorded wrote two months over
+       * three and cut the member's discount a step until the next renewal.
+       */
+      it("does not lower the count when an older payment is delivered again", async () => {
+        stripeApi.invoices.list.mockResolvedValue(
+          invoicePage([
+            invoice("in_jul", raisedIn(6), "paid", "subscription_create"),
+            invoice("in_aug", raisedIn(7)),
+            invoice("in_sep", raisedIn(8)),
+          ]),
+        )
+
+        expect(
+          await countAfter(
+            paymentSucceeded("in_aug", "subscription_cycle", raisedIn(7)),
+          ),
+        ).toBe(3)
+      })
+
+      it.each([["draft"], ["open"]])(
+        "counts from the newest paid month past a renewal that is still %s",
+        async (status) => {
+          stripeApi.invoices.list.mockResolvedValue(
+            invoicePage([
+              invoice("in_jul", raisedIn(6), "paid", "subscription_create"),
+              invoice("in_aug", raisedIn(7)),
+              invoice("in_sep", raisedIn(8), status),
+            ]),
+          )
+
+          expect(
+            await countAfter(
+              paymentSucceeded("in_jul", "subscription_create", raisedIn(6)),
+            ),
+          ).toBe(2)
+        },
+      )
+
       it("counts the payment being delivered even while the list still shows it open", async () => {
         stripeApi.invoices.list.mockResolvedValue(
           invoicePage([
