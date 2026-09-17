@@ -1151,28 +1151,46 @@ const paysForAMonth = (invoice: Stripe.Invoice) =>
   MEMBERSHIP_MONTH_REASONS.has(invoice.billing_reason)
 
 /**
- * How many months of this subscription have been paid in a row, ending with the one just
+ * How many months of this subscription have been paid in a row, up to the newest month
  * paid. The member discount grows a step for each, and a month that was never paid starts
  * the customer again from the first step.
  *
- * Counting back from the payment and stopping at the first month left unpaid is what makes
- * it a run rather than a total. Stripe is set to cancel a subscription whose renewal fails
- * every retry, and a customer who comes back gets a new subscription counted from one — but
- * a month voided or written off by hand leaves the subscription running, and a plain count
- * of paid invoices stepped straight over it. A renewal declined and then paid on a retry
- * ends up paid, so it keeps the run: the customer paid for that month.
+ * Counting back and stopping at the first month left unpaid is what makes it a run rather
+ * than a total. Stripe is set to cancel a subscription whose renewal fails every retry, and
+ * a customer who comes back gets a new subscription counted from one — but a month voided or
+ * written off by hand leaves the subscription running, and a plain count of paid invoices
+ * stepped straight over it. A renewal declined and then paid on a retry ends up paid, so it
+ * keeps the run: the customer paid for that month.
  *
- * The invoice being processed counts as paid whatever the list says, since the list may not
- * have caught up with it, and anything newer — the next renewal's draft, if this delivery
- * is late — is not part of the run it ends.
+ * The count starts from the newest paid month whichever invoice was delivered, so every
+ * delivery of every payment arrives at the same number. It used to run back from the
+ * delivered invoice and skip anything newer, and Stripe redelivers events — so August
+ * arriving again after September had been recorded wrote two months over three and cut the
+ * member's discount until the next renewal. A newer renewal still being settled (the next
+ * one's draft, or one Stripe is retrying) is passed over rather than read as a missed month.
+ *
+ * The invoice being delivered counts as paid whatever the list says, since the list may not
+ * have caught up with it.
  */
 async function countConsecutivePaidMonths(
   subscriptionId: string,
   justPaid: Stripe.Invoice,
 ): Promise<number> {
-  // A proration or one-off invoice also arrives here; it ends no month of its own.
-  let months = paysForAMonth(justPaid) ? 1 : 0
+  let months = 0
+  let counting = false
+  // A proration or one-off invoice also arrives here; it is no month of its own to place.
+  let justPaidPlaced = !paysForAMonth(justPaid)
   let startingAfter: string | undefined
+
+  /** Takes the next monthly invoice, newest first. False once the run has ended. */
+  const take = (status: Stripe.Invoice.Status | null) => {
+    if (status === "paid") {
+      counting = true
+      months += 1
+      return true
+    }
+    return !counting && (status === "draft" || status === "open")
+  }
 
   for (;;) {
     const page = await stripe.invoices.list({
@@ -1183,16 +1201,30 @@ async function countConsecutivePaidMonths(
 
     for (const invoice of page.data) {
       if (!paysForAMonth(invoice)) continue
-      if (invoice.id === justPaid.id) continue
-      if (invoice.created > justPaid.created) continue
-      if (invoice.status !== "paid") return months
-      months += 1
+
+      if (invoice.id === justPaid.id) {
+        justPaidPlaced = true
+        take("paid")
+        continue
+      }
+
+      // Listed newest first: the delivered invoice belongs before the first one older than
+      // it, if the list has not caught up with it yet.
+      if (!justPaidPlaced && invoice.created < justPaid.created) {
+        justPaidPlaced = true
+        take("paid")
+      }
+
+      if (!take(invoice.status)) return months
     }
 
     const last = page.data[page.data.length - 1]
-    if (!page.has_more || !last?.id) return months
+    if (!page.has_more || !last?.id) break
     startingAfter = last.id
   }
+
+  if (!justPaidPlaced) take("paid")
+  return months
 }
 
 /**
