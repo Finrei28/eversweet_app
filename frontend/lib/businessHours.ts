@@ -61,36 +61,73 @@ export function isDayOff(date: Date, daysOff: DaysOff): boolean {
   return daysOff.has(getNZCalendarDay(date))
 }
 
-export function isOutsideBusinessHours(
+/**
+ * Why a time is outside the hours the shop takes orders for, matching the order server's
+ * reasons and the shared `pickUpTimeCases.json`.
+ */
+export type OrderingHoursProblem =
+  | "closed-day"
+  | "before-open"
+  | "after-last-pick-up"
+
+/** A day's opening and closing in minutes past Auckland midnight, or null when shut. */
+export function nzDayMinutes(
   date: Date,
   { storeHours, daysOff }: TradingCalendar,
-) {
-  if (!date) {
-    return true
-  }
-
+): { open: number; close: number } | null {
   // A day off closes the store whatever the weekly hours say for that weekday.
-  if (isDayOff(date, daysOff)) {
-    return true
-  }
+  if (isDayOff(date, daysOff)) return null
 
-  // Day name and time of day both have to come from the store's timezone.
-  // Reading them off the device clock disagreed with checkoutHelpers, which
-  // already resolved the day name in New Zealand.
+  // Day name and time of day both come from the store's timezone, never the device's.
   const hours = storeHours[getNZDayName(date)]
-  if (!hours) {
-    return true
-  }
+  if (!hours) return null
 
-  const [openStr, closeStr] = hours
-  const open = parseStoreTimeToMinutes(openStr)
-  const close = parseStoreTimeToMinutes(closeStr)
+  const open = parseStoreTimeToMinutes(hours[0])
+  const close = parseStoreTimeToMinutes(hours[1])
+  return open === null || close === null ? null : { open, close }
+}
 
-  if (open === null || close === null) {
-    return true
-  }
+/**
+ * What is wrong with `date` as an order time on the shop's hours, or null when nothing is.
+ * Bounded by the last order, not by closing: a pick-up is taken up to 10 minutes before
+ * close and eat-in up to 30, so a late customer still leaves the shop time to shut on
+ * time. Compared to the minute, as the order server does.
+ */
+export function orderingHoursProblem(
+  date: Date,
+  calendar: TradingCalendar,
+  lastOrderOffsetMinutes: number,
+): OrderingHoursProblem | null {
+  const day = nzDayMinutes(date, calendar)
+  if (!day) return "closed-day"
 
   const current = getNZMinutesOfDay(date)
+  if (current < day.open) return "before-open"
+  if (current > day.close - lastOrderOffsetMinutes) return "after-last-pick-up"
+  return null
+}
 
-  return current < open || current > close
+/**
+ * Whether an order cannot be placed for `date`. This checked against closing time rather
+ * than the last order, so checkout let 9:21-9:30 PM through on a 9:30 day and left the
+ * order server to refuse it after the customer had pressed pay.
+ */
+export function isOutsideOrderingHours(
+  date: Date | null,
+  calendar: TradingCalendar,
+  lastOrderOffsetMinutes: number,
+) {
+  return !date || orderingHoursProblem(date, calendar, lastOrderOffsetMinutes) !== null
+}
+
+/**
+ * Whether the doors are open at `now`, from opening up to closing. "Open Now" on the store
+ * screen: this runs to closing, not to the last order. Worked out on the device, where the
+ * order server's `isOpen` was fixed when the server started.
+ */
+export function isOpenNow(now: Date, calendar: TradingCalendar) {
+  const day = nzDayMinutes(now, calendar)
+  if (!day) return false
+  const current = getNZMinutesOfDay(now)
+  return current >= day.open && current < day.close
 }

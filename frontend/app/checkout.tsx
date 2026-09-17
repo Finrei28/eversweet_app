@@ -41,13 +41,19 @@ import {
   getEstimatedPickUpTime,
 } from "@/services/api"
 import DateTimePickerModal from "react-native-modal-datetime-picker"
-import { isDayOff, isOutsideBusinessHours } from "@/lib/businessHours"
+import {
+  isDayOff,
+  isOutsideOrderingHours,
+  orderingHoursProblem,
+} from "@/lib/businessHours"
 import { useLoyaltyStore } from "@/store/points"
 import {
+  describePickUpProblem,
   getLastOrderTime,
   getNextValidPickupTime,
   getOpenCloseTime,
   LAST_ORDER_OFFSET_MINUTES,
+  type PickUpTimeProblem,
 } from "@/lib/checkoutHelpers"
 import { useAuth } from "@/store/authProvider"
 import {
@@ -93,8 +99,15 @@ class CardNotConfirmedError extends Error {}
 function CheckoutContent() {
   const router = useRouter()
   const { confirmPayment, initPaymentSheet, presentPaymentSheet } = useStripe()
-  const { token, authLoading, dataLoading, usersMembership, tradingCalendar } =
-    useAuth()
+  const {
+    token,
+    authLoading,
+    dataLoading,
+    usersMembership,
+    tradingCalendar,
+    storeHoursStatus,
+    reloadTradingCalendar,
+  } = useAuth()
   const { data: restaurantStatus, isLoading: loadingRestaurantStatus } =
     useRestaurantStatusQuery()
   const [savedCards, setSavedCards] = useState<any[]>([])
@@ -584,7 +597,22 @@ function CheckoutContent() {
     }
   }
 
-  const alertTimeChange = (date: Date | null) => {
+  /**
+   * Tells the customer why a time cannot stand, and what it became. Every refusal used to
+   * read "Sorry, we are closed at that time" quoting opening to closing - including a
+   * time the kitchen only needed a few more minutes for, and a time after the last order
+   * but before closing, which the message itself said was open.
+   */
+  const alertTimeChange = (
+    date: Date | null,
+    problem: PickUpTimeProblem | null = null,
+    movedTo: Date | null = null,
+  ) => {
+    const movedNote = movedTo
+      ? ` We've changed it to ${formatDayMonthTime(movedTo)}.`
+      : ""
+    const orderKind = eatIn ? "eat-in order" : "pick up"
+
     if (date === null) {
       Alert.alert(
         "Invalid Time",
@@ -621,11 +649,30 @@ function CheckoutContent() {
       return
     }
 
+    if (problem === "before-open") {
+      Alert.alert(
+        "Sorry, we're not open yet at that time",
+        `We open at ${formatTime(openTime)} on a ${dayName}.${movedNote}`,
+      )
+      return
+    }
+
+    if (problem === "after-last-pick-up") {
+      Alert.alert(
+        `Sorry, that's after our last ${orderKind}`,
+        `Our last ${orderKind} on a ${dayName} is ${formatTime(
+          getLastOrderTime(closeTime, lastOrderOffsetMinutes),
+        )}, so we can close at ${formatTime(closeTime)}.${movedNote}`,
+      )
+      return
+    }
+
+    // Open, just sooner than the kitchen can have the order ready.
     Alert.alert(
-      "Sorry, we are closed at that time",
-      `Please choose a time during store hours. We are open ${formatTime(
-        openTime,
-      )} to ${formatTime(closeTime)} on a ${dayName}.`,
+      "That's a little too soon",
+      movedTo
+        ? `The earliest we can have your order ready is ${formatDayMonthTime(movedTo)}, so we've changed it to that.`
+        : "Please choose a later time.",
     )
   }
 
@@ -664,7 +711,13 @@ function CheckoutContent() {
     }
 
     if (validTime.getTime() !== picked.getTime()) {
-      alertTimeChange(picked)
+      // A time moved for no hours reason was moved because the kitchen cannot make it yet.
+      const problem =
+        describePickUpProblem(picked, tradingCalendar, {
+          earliestReadyTime: estimatedReadyTime,
+          lastOrderOffsetMinutes,
+        }) ?? "too-soon"
+      alertTimeChange(picked, problem, validTime)
       return { status: "moved", time: validTime }
     }
 
@@ -786,11 +839,23 @@ function CheckoutContent() {
     // gated on `pickupNow`, so for a hand-picked slot the answer was worked out
     // and then thrown away: a day off added while the screen was open, or a
     // slot that fell out of hours as the evening wore on, went through.
-    if (isOutsideBusinessHours(requestedPickUpTime, tradingCalendar)) {
-      Alert.alert(
-        pickupNow
-          ? "We're closed or are not open yet. Please pick a suitable pick up time."
-          : "We're closed at that time. Please pick a suitable pick up time.",
+    //
+    // Bounded by the last order, not by closing: this used to let 9:21-9:30 PM through
+    // on a 9:30 day, for the order server to refuse after the customer pressed pay.
+    if (
+      isOutsideOrderingHours(
+        requestedPickUpTime,
+        tradingCalendar,
+        lastOrderOffsetMinutes,
+      )
+    ) {
+      alertTimeChange(
+        requestedPickUpTime,
+        orderingHoursProblem(
+          requestedPickUpTime,
+          tradingCalendar,
+          lastOrderOffsetMinutes,
+        ),
       )
       return
     }
@@ -1098,7 +1163,10 @@ function CheckoutContent() {
     loadingCards ||
     cartOperations > 0 ||
     loading ||
-    loadingRestaurantStatus
+    loadingRestaurantStatus ||
+    // Until the real hours arrive every day reads as closed; offering nothing is better
+    // than flashing "we are currently closed" at a customer who can order.
+    storeHoursStatus === "loading"
   ) {
     return (
       <View className="flex-1 bg-background">
@@ -1118,6 +1186,28 @@ function CheckoutContent() {
   if (!token) {
     router.replace("/signin")
     return null
+  }
+
+  // The app used to fall back to a hard-coded copy of the hours here, and offer times
+  // from it that the server - reading the real ones - could refuse.
+  if (storeHoursStatus === "error") {
+    return (
+      <View className="flex-1 bg-background">
+        <CustomHeader />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text className="text-center text-gray-600">
+            We couldn&apos;t load our opening hours, so we can&apos;t offer a
+            pick up time just now.
+          </Text>
+          <TouchableOpacity
+            onPress={() => void reloadTradingCalendar()}
+            className="mt-6 bg-primary py-3 px-6 rounded-lg"
+          >
+            <Text className="text-white font-semibold">Try again</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    )
   }
 
   if (cartItems?.length === 0) {

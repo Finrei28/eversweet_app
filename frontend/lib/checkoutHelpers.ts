@@ -1,5 +1,10 @@
 import { getEstimatedPickUpTime } from "@/services/api"
-import { isDayOff, TradingCalendar } from "./businessHours"
+import {
+  isDayOff,
+  orderingHoursProblem,
+  type OrderingHoursProblem,
+  TradingCalendar,
+} from "./businessHours"
 import { addNZDays, getNZDayName, nzTimeOnSameDay } from "./nzTime"
 
 /**
@@ -78,6 +83,19 @@ export function getLastOrderTime(
   return new Date(closeTime.getTime() - lastOrderOffsetMinutes * 60 * 1000)
 }
 
+const MINUTE_MS = 60 * 1000
+
+/** Rounded up to the whole minute, as every implementation of the rule does. */
+export const ceilToMinute = (date: Date) =>
+  new Date(Math.ceil(date.getTime() / MINUTE_MS) * MINUTE_MS)
+
+/**
+ * The soonest valid time at or after `selected`: now for "as soon as possible", or the
+ * time a customer picked. The rule - shared with the website and the order server, and
+ * pinned by `pickUpTimeCases.json` - is the later of the kitchen's earliest (rounded up to
+ * the whole minute) and opening, if that is no later than the last order; otherwise the
+ * next trading day's opening time. Null when nothing opens in the next 60 days.
+ */
 export async function getNextValidPickupTime(
   selected: Date,
   totalItems: number,
@@ -87,9 +105,12 @@ export async function getNextValidPickupTime(
     lastOrderOffsetMinutes = LAST_ORDER_OFFSET_MINUTES.pickup,
   }: PickupTimeOptions = {},
 ) {
-  const minTime = earliestReadyTime ?? (await getEstimatedPickUpTime(totalItems))
+  const minTime = ceilToMinute(
+    earliestReadyTime ?? (await getEstimatedPickUpTime(totalItems)),
+  )
 
-  const date = new Date(selected)
+  // Compared to the minute, so any second of the last-order minute is still in time.
+  const date = new Date(Math.floor(selected.getTime() / MINUTE_MS) * MINUTE_MS)
 
   const nextOpeningFrom = (from: Date) => {
     const nextOpenDay = getNextOpenDay(from, calendar)
@@ -126,5 +147,35 @@ export async function getNextValidPickupTime(
     return nextOpeningFrom(addNZDays(date, 1))
   }
 
-  return earliest
+  // Keeps the seconds of a picked time: a time already on the minute is returned as is,
+  // so callers comparing it with what was picked see no change.
+  return earliest.getTime() === date.getTime() ? new Date(selected) : earliest
+}
+
+export type PickUpTimeProblem = OrderingHoursProblem | "too-soon"
+
+/**
+ * Why a picked time cannot stand, so the customer is told the actual reason: a time the
+ * kitchen cannot make yet is not "closed at that time", which is what every refusal used
+ * to say.
+ */
+export function describePickUpProblem(
+  picked: Date,
+  calendar: TradingCalendar,
+  {
+    earliestReadyTime,
+    lastOrderOffsetMinutes,
+  }: { earliestReadyTime: Date | null; lastOrderOffsetMinutes: number },
+): PickUpTimeProblem | null {
+  const hoursProblem = orderingHoursProblem(
+    picked,
+    calendar,
+    lastOrderOffsetMinutes,
+  )
+  if (hoursProblem) return hoursProblem
+
+  return earliestReadyTime &&
+    picked.getTime() < ceilToMinute(earliestReadyTime).getTime()
+    ? "too-soon"
+    : null
 }

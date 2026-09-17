@@ -494,6 +494,25 @@ model PrepTimeSetting {
   updatedAt    DateTime @updatedAt
 }
 
+/// The shop's weekly opening hours, one row per weekday. The website's checkout, the
+/// order server's pick-up time check and the customer app (through the order server)
+/// all read these, so they cannot drift apart the way the five hard-coded copies could.
+///
+/// Times are minutes past midnight on the Pacific/Auckland wall clock (NZST or NZDT,
+/// whichever is in force), so 750 is 12:30 PM. A day with both null is closed. The last
+/// pick-up is always 10 minutes before `closesAt`; one-off closures are `DaysOff`.
+///
+/// CHECK constraints the schema cannot express (see 20260918000000_trading_hours):
+/// weekday 0-6, open and close set together, within the day, and at least 10 minutes
+/// between opening and closing so a last pick-up exists.
+model TradingHours {
+  /// 0 = Sunday ... 6 = Saturday, as JavaScript's getDay() counts.
+  weekday   Int      @id
+  opensAt   Int?
+  closesAt  Int?
+  updatedAt DateTime @updatedAt
+}
+
 model RestaurantStatus {
   id                 String    @id @default(cuid())
   dineInAvailability Boolean

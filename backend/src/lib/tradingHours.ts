@@ -1,6 +1,5 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 import { db } from "./db"
-import { storeHours } from "./storeInfo"
 
 export const NZ_TIMEZONE = "Pacific/Auckland"
 
@@ -31,10 +30,6 @@ const PAST_GRACE_MINUTES = 20
 /** The New Zealand calendar day at `date`, as "yyyy-MM-dd". */
 export const nzCalendarDay = (date: Date) =>
   formatInTimeZone(date, NZ_TIMEZONE, "yyyy-MM-dd")
-
-/** The New Zealand weekday name at `date`, e.g. "Monday". */
-export const nzDayName = (date: Date) =>
-  formatInTimeZone(date, NZ_TIMEZONE, "EEEE")
 
 /**
  * The New Zealand calendar month containing `date` — as a half-open range of
@@ -85,29 +80,134 @@ const nzMonthStart = (year: number, month: number) => {
   )
 }
 
-/** Minutes past New Zealand midnight at `date`. */
-const nzMinutesOfDay = (date: Date) => {
+/**
+ * The shop's weekly hours, one entry per weekday (0 = Sunday), in minutes past Auckland
+ * midnight. A null day is closed.
+ *
+ * Read from the `TradingHours` table, which the website's repo owns. The hours were
+ * hard-coded here as "12:30 PM" strings, one of five copies - the website's checkout, its
+ * home page, the app's fallback and a commented holiday copy were the others - that had to
+ * be kept in step by hand.
+ */
+export type DayHours = { opensAt: number; closesAt: number }
+export type WeeklyHours = readonly (DayHours | null)[]
+export type TradingHoursRow = {
+  weekday: number
+  opensAt: number | null
+  closesAt: number | null
+}
+
+/** The table's rows as `WeeklyHours`. A weekday with no row reads as closed. */
+export const toWeeklyHours = (rows: readonly TradingHoursRow[]): WeeklyHours =>
+  Array.from({ length: 7 }, (_, weekday) => {
+    const row = rows.find((r) => r.weekday === weekday)
+    return row && row.opensAt !== null && row.closesAt !== null
+      ? { opensAt: row.opensAt, closesAt: row.closesAt }
+      : null
+  })
+
+/** A minute, as for the preparation times. */
+const HOURS_CACHE_TTL_MS = 60_000
+
+let cachedHours: WeeklyHours | null = null
+let cachedHoursAt = 0
+
+/**
+ * The weekly hours, cached for a minute. There is no fallback: hours that cannot be read
+ * leave nothing to check a time against, so the request fails rather than guessing - a
+ * guessed copy is how the five copies came to exist.
+ */
+export const getTradingHours = async (): Promise<WeeklyHours> => {
+  if (cachedHours && Date.now() - cachedHoursAt < HOURS_CACHE_TTL_MS) {
+    return cachedHours
+  }
+
+  const rows = await db.tradingHours.findMany({
+    select: { weekday: true, opensAt: true, closesAt: true },
+  })
+  if (rows.length !== 7) {
+    console.error(
+      `TradingHours holds ${rows.length} row(s), not 7: the missing weekdays read as closed.`,
+    )
+  }
+
+  cachedHours = toWeeklyHours(rows)
+  cachedHoursAt = Date.now()
+  return cachedHours
+}
+
+/** Clears the cache, so a change to the hours is seen at once. */
+export const invalidateTradingHours = () => {
+  cachedHours = null
+  cachedHoursAt = 0
+}
+
+/** Minutes past Auckland midnight at `date`, ignoring seconds. */
+export const nzMinutesOfDay = (date: Date) => {
   const [hours, minutes] = formatInTimeZone(date, NZ_TIMEZONE, "HH:mm")
     .split(":")
     .map(Number)
   return hours * 60 + minutes
 }
 
+/** The Auckland weekday at `date`, 0 = Sunday. ISO numbers Sunday 7. */
+export const nzWeekday = (date: Date) =>
+  Number(formatInTimeZone(date, NZ_TIMEZONE, "i")) % 7
+
+/** Minutes past midnight as the store-hours strings the app reads, e.g. 750 is "12:30 PM". */
+export const formatStoreTime = (minutes: number) => {
+  const hours24 = Math.floor(minutes / 60)
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+  const suffix = hours24 >= 12 && hours24 < 24 ? "PM" : "AM"
+  return `${hours12}:${String(minutes % 60).padStart(2, "0")} ${suffix}`
+}
+
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+]
+
 /**
- * Parses a store-hours string such as "12:30 PM" into minutes past midnight.
- * Returns null for anything unreadable, so a malformed entry reads as "closed"
- * rather than as midnight.
+ * The hours in the shape `/api/getStoreHours` has always served - day name to
+ * ["12:30 PM", "9:30 PM"], or null when closed - Monday first. App builds already
+ * installed read exactly this, and list the days in the order they arrive.
  */
-const parseStoreTimeToMinutes = (timeStr: string): number | null => {
-  const [time, modifier] = timeStr.trim().split(" ")
-  const [hours, minutes] = (time ?? "").split(":").map(Number)
+export const storeHoursByDayName = (
+  hours: WeeklyHours,
+): Record<string, [string, string] | null> =>
+  Object.fromEntries(
+    [1, 2, 3, 4, 5, 6, 0].map((weekday) => {
+      const day = hours[weekday]
+      return [
+        DAY_NAMES[weekday],
+        day ? [formatStoreTime(day.opensAt), formatStoreTime(day.closesAt)] : null,
+      ]
+    }),
+  )
 
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
-
-  let hrs = hours % 12
-  if (modifier?.toUpperCase() === "PM") hrs += 12
-
-  return hrs * 60 + minutes
+/**
+ * Whether the doors are open at `now`: from opening up to closing, on a day that is not a
+ * day off. This is "Open Now" on the store screen, so it runs to closing rather than to
+ * the last pick-up.
+ *
+ * It used to be worked out once, when the server started, and served unchanged until the
+ * next restart - and it never looked at days off.
+ */
+export const isOpenAt = (
+  now: Date,
+  hours: WeeklyHours,
+  daysOffKeys: ReadonlySet<string>,
+) => {
+  if (daysOffKeys.has(nzCalendarDay(now))) return false
+  const day = hours[nzWeekday(now)]
+  if (!day) return false
+  const minutes = nzMinutesOfDay(now)
+  return minutes >= day.opensAt && minutes < day.closesAt
 }
 
 /**
@@ -121,62 +221,94 @@ export const getDaysOffKeys = async (): Promise<Set<string>> => {
   return new Set(daysOff.map((day) => nzCalendarDay(day.date)))
 }
 
-export type PickUpTimeCheck = { ok: true } | { ok: false; message: string }
+/**
+ * Why a time was refused. The hours reasons - closed-day, before-open,
+ * after-last-pick-up - are the ones `pickUpTimeCases.json` holds every implementation to;
+ * the others are this endpoint's own limits.
+ */
+export type PickUpTimeProblem =
+  | "invalid-date"
+  | "past"
+  | "too-far-ahead"
+  | "closed-day"
+  | "before-open"
+  | "after-last-pick-up"
+
+export type PickUpTimeCheck =
+  | { ok: true }
+  | { ok: false; reason: PickUpTimeProblem; message: string }
 
 /**
  * Whether an order may be placed for `pickUpTime`. The app applies the same
  * rules before letting a customer reach checkout; this is the copy that decides,
  * since a stale build or a direct API call reaches the endpoint regardless.
+ *
+ * The last pick-up is 10 minutes before closing and the last eat-in order 30, compared to
+ * the minute on the Auckland clock: any second of 9:20 PM still makes a 9:30 close.
  */
 export const checkPickUpTime = (
   pickUpTime: Date,
   {
     eatIn,
     daysOffKeys,
+    hours,
     now = new Date(),
-  }: { eatIn: boolean; daysOffKeys: Set<string>; now?: Date },
+  }: {
+    eatIn: boolean
+    daysOffKeys: ReadonlySet<string>
+    hours: WeeklyHours
+    now?: Date
+  },
 ): PickUpTimeCheck => {
+  const refuse = (reason: PickUpTimeProblem, message: string) =>
+    ({ ok: false, reason, message }) as const
+
   if (!(pickUpTime instanceof Date) || Number.isNaN(pickUpTime.getTime())) {
-    return { ok: false, message: "That pick up time is not a valid date." }
+    return refuse("invalid-date", "That pick up time is not a valid date.")
   }
 
   const graceMs = PAST_GRACE_MINUTES * 60 * 1000
   if (pickUpTime.getTime() < now.getTime() - graceMs) {
-    return { ok: false, message: "That pick up time has already passed." }
+    return refuse("past", "That pick up time has already passed.")
   }
 
   const maxAhead = now.getTime() + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000
   if (pickUpTime.getTime() > maxAhead) {
-    return {
-      ok: false,
-      message: "Orders can only be placed up to a month in advance.",
-    }
+    return refuse(
+      "too-far-ahead",
+      "Orders can only be placed up to a month in advance.",
+    )
   }
 
   if (daysOffKeys.has(nzCalendarDay(pickUpTime))) {
-    return { ok: false, message: "We are closed on that date." }
+    return refuse("closed-day", "We are closed on that date.")
   }
 
-  const hours = storeHours[nzDayName(pickUpTime)]
-  if (!hours) {
-    return { ok: false, message: "We are not open on that day." }
+  const day = hours[nzWeekday(pickUpTime)]
+  if (!day) {
+    return refuse("closed-day", "We are not open on that day.")
   }
 
-  const open = parseStoreTimeToMinutes(hours[0])
-  const close = parseStoreTimeToMinutes(hours[1])
-  if (open === null || close === null) {
-    return { ok: false, message: "We are not open on that day." }
-  }
-
-  // The counter stops taking orders before the doors close, and eat-in needs
-  // longer because the customer still has to sit and eat.
-  const lastOrder =
-    close -
-    (eatIn ? LAST_ORDER_OFFSET_MINUTES.eatIn : LAST_ORDER_OFFSET_MINUTES.pickup)
   const minutes = nzMinutesOfDay(pickUpTime)
+  if (minutes < day.opensAt) {
+    return refuse(
+      "before-open",
+      `We open at ${formatStoreTime(day.opensAt)} that day.`,
+    )
+  }
 
-  if (minutes < open || minutes > lastOrder) {
-    return { ok: false, message: "We are closed at that time." }
+  // The counter stops taking orders before the doors close, so a late customer still
+  // leaves the shop time to close on time; eat-in needs longer, to sit and eat.
+  const lastOrder =
+    day.closesAt -
+    (eatIn ? LAST_ORDER_OFFSET_MINUTES.eatIn : LAST_ORDER_OFFSET_MINUTES.pickup)
+  if (minutes > lastOrder) {
+    return refuse(
+      "after-last-pick-up",
+      eatIn
+        ? `Our last eat-in order that day is ${formatStoreTime(lastOrder)}.`
+        : `Our last pick up that day is ${formatStoreTime(lastOrder)}.`,
+    )
   }
 
   return { ok: true }

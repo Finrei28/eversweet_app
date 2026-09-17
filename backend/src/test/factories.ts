@@ -1,5 +1,6 @@
 import { db } from "../lib/db"
 import { checkPickUpTime } from "../lib/tradingHours"
+import { SHOP_HOURS } from "./shopHours"
 
 let sequence = 0
 const unique = () => `${Date.now()}-${++sequence}`
@@ -108,7 +109,13 @@ export const nextOpenPickUpTime = (eatIn = false): Date => {
 
   // A week of quarter-hours is far more than enough to find an open slot.
   for (let step = 0; step < 4 * 24 * 7; step++) {
-    if (checkPickUpTime(candidate, { eatIn, daysOffKeys: new Set() }).ok) {
+    if (
+      checkPickUpTime(candidate, {
+        eatIn,
+        daysOffKeys: new Set(),
+        hours: SHOP_HOURS,
+      }).ok
+    ) {
       return candidate
     }
     candidate = new Date(candidate.getTime() + fifteenMinutes)

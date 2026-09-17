@@ -13,10 +13,23 @@ import CustomHeader from "@/_components/custom-header"
 import { useAuth } from "@/store/authProvider"
 import { useStoreInfoQuery } from "@/services/queries"
 import BouncingLoader from "@/_components/loader"
+import { useEffect, useState } from "react"
+import { isOpenNow } from "@/lib/businessHours"
+import { LAST_ORDER_OFFSET_MINUTES } from "@/lib/checkoutHelpers"
 
 export default function StoreInfo() {
   const { data: storeInfo, isLoading: loading } = useStoreInfoQuery()
-  const { storeHours } = useAuth()
+  const { storeHours, tradingCalendar, storeHoursStatus } = useAuth()
+
+  // "Open Now" is worked out here, from the hours and days off, and kept current while the
+  // screen is open. The server's `isOpen` was fixed when the server started, so it showed
+  // whatever the shop had been at the last deploy.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 30 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+  const openNow = storeHoursStatus === "ready" && isOpenNow(now, tradingCalendar)
 
   const openMaps = (address: string) => {
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
@@ -134,7 +147,7 @@ export default function StoreInfo() {
           <View className="p-4 border-b border-gray-200">
             <View className="flex-row justify-between items-center">
               <Text className="font-bold text-lg">{storeInfo?.name}</Text>
-              {storeInfo?.isOpen ? (
+              {storeHoursStatus !== "ready" ? null : openNow ? (
                 <View className="bg-green-100 px-2 py-1 rounded">
                   <Text className="text-green-800 text-xs font-medium">
                     Open Now
@@ -190,6 +203,14 @@ export default function StoreInfo() {
 
           <View className="p-4 border-t border-gray-200">
             <Text className="font-medium mb-2">Store Hours</Text>
+            {storeHoursStatus === "loading" && (
+              <Text className="text-gray-500">Loading our hours...</Text>
+            )}
+            {storeHoursStatus === "error" && (
+              <Text className="text-gray-500">
+                We couldn&apos;t load our hours just now.
+              </Text>
+            )}
             {Object.entries(storeHours).map(([day, hours], index) => (
               <View key={index} className="flex-row justify-between py-1">
                 <Text className="text-gray-700">{day}</Text>
@@ -198,6 +219,12 @@ export default function StoreInfo() {
                 </Text>
               </View>
             ))}
+            {storeHoursStatus === "ready" && (
+              <Text className="text-gray-500 text-sm mt-2">
+                Last pick up is {LAST_ORDER_OFFSET_MINUTES.pickup} minutes before
+                closing.
+              </Text>
+            )}
           </View>
         </View>
       </ScrollView>

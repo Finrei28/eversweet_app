@@ -16,6 +16,7 @@ import { getErrorMessage } from "../utils/getError"
 import {
   checkPickUpTime,
   getDaysOffKeys,
+  getTradingHours,
   nzMonthRange,
 } from "../lib/tradingHours"
 import { calculateCartPrice } from "../lib/cartPricing"
@@ -759,9 +760,14 @@ export const createOrder = async (req: Request, res: Response) => {
       }
     }
 
+    const [daysOffKeys, hours] = await Promise.all([
+      getDaysOffKeys(),
+      getTradingHours(),
+    ])
     const pickUpCheck = checkPickUpTime(parsedBody.pickUpTime, {
       eatIn: parsedBody.eatIn,
-      daysOffKeys: await getDaysOffKeys(),
+      daysOffKeys,
+      hours,
     })
 
     // `createPaymentIntent` stops a bad time before the card is touched, so
