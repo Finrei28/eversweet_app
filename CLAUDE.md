@@ -487,6 +487,14 @@ comparisons come from; never use the device clock or locale for trading hours.
 one-off days off in a single `TradingCalendar` value, because a day can be within the
 weekly hours and still be shut.
 
+**Hook dependencies.** `react-hooks/exhaustive-deps` is a warning, and CI fails only on
+errors. Before "fixing" one, check whether the value is stable:
+- **Stable, safe to list:** expo-router's `useRouter()` returns a module singleton, zustand
+  store actions never change, and AuthProvider's callbacks are memoised on the token.
+- **Not stable:** a plain function declared in the component body. The Menu and Rewards
+  tabs deliberately leave `scrollToCategory` out, with a disable comment saying why. Listing
+  it would re-run those effects on every render and keep snapping the category bar back.
+
 ### admin/ (staff app)
 
 Expo Router with the same `@/*` alias and NativeWind conventions. `AuthProvider` wraps

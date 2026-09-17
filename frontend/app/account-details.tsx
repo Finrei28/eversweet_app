@@ -80,7 +80,7 @@ export default function AccountDetails() {
     if (!token) {
       router.push("/signin")
     }
-  }, [token, authLoading])
+  }, [token, authLoading, router])
 
   useEffect(() => {
     if (userDetails) {

@@ -74,6 +74,10 @@ export default function Loyalty() {
       }
     }
     fetchData()
+    // Not scrollToCategory: it is a new function every render, and listing it would snap
+    // the tab back to the first category on every render. This runs when the menu arrives
+    // or actually changes (react-query keeps the same array while the data is unchanged).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categories])
 
   useEffect(() => {
@@ -86,6 +90,9 @@ export default function Loyalty() {
         flatListRef.current.scrollToOffset({ offset: 0, animated: true })
       }
     }
+    // Reacts to the customer picking a category; the menu is only read here. A changed
+    // menu is handled by the effect above, which reselects and so comes back through this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory])
 
   const scrollViewRef = useRef<ScrollView>(null)

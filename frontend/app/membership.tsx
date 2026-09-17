@@ -77,7 +77,8 @@ function MembershipContent() {
     }
 
     init()
-  }, [token, authLoading])
+    // refetchUsersMembership is memoised on the token alone, so listing it adds no runs.
+  }, [token, authLoading, router, refetchUsersMembership])
 
   const handlePaymentSheet = async () => {
     setLoadingPaymentSheet(true)
@@ -321,7 +322,6 @@ function MembershipContent() {
           </View>
         ) : (
           <View>
-            {" "}
             {/* Payment Method */}
             <View className="bg-white rounded-xl shadow-sm p-4">
               <View className="flex-row justify-between items-center mb-3">
