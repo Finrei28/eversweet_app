@@ -413,6 +413,14 @@ null. Rules the endpoints follow:
 - `getOrCreateCustomerId` creates a customer only when the stored one is
   `resource_missing`. Any other Stripe error is rethrown: a blip used to replace the
   customer and orphan a member's cards and subscription.
+- It also writes the user's name, email and phone onto the customer's **top-level** fields
+  whenever they differ (`lib/stripeCustomer`), because those are what the Stripe Dashboard
+  shows against a payment. Customers used to carry them only in metadata. The sync is
+  best-effort and never throws, and a new customer is created bare first, so a detail
+  Stripe refuses costs only the label, never the payment. `src/scripts/syncStripeCustomers.ts`
+  (dry run by default, `--apply` to write) backfills customers that are never used again.
+  The website creates Stripe customers of its own, marked `source: "website"` and not
+  tied to a user.
 - `createPaymentIntent` always holds in NZD, whatever `currency` says (see **Order
   creation**).
 - `createMembership` always uses the plan's own price; a different `stripePriceId` gets 409.

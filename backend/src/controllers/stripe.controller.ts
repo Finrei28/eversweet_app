@@ -18,6 +18,12 @@ import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 import { isOfferLive } from "../lib/offerAvailability"
 import { idOf, stripe } from "../lib/stripeClient"
 import {
+  type CustomerDetails,
+  customerDetailsOf,
+  describeStripeFailure,
+  staleCustomerDetails,
+} from "../lib/stripeCustomer"
+import {
   CHARGE_CURRENCY,
   ORDER_PAYMENT_PURPOSE,
   refundOf,
@@ -55,6 +61,10 @@ export function getInvoicePaymentIntent(
  * the stored id. One blip was enough to detach a member from the customer their cards and
  * subscription live on, after which every card and membership check here looked at an
  * empty customer.
+ *
+ * On the way it brings the customer's name, email and phone in line with the user row —
+ * see `lib/stripeCustomer` — which fills in customers created before they carried any, and
+ * follows a profile edit.
  */
 async function getOrCreateCustomerId(
   userId: string,
@@ -66,6 +76,7 @@ async function getOrCreateCustomerId(
       email: true,
       firstName: true,
       lastName: true,
+      phone: true,
     },
   })
 
@@ -73,30 +84,55 @@ async function getOrCreateCustomerId(
   // between: a failure to report, not a customer to create.
   if (!user) throw new Error(`User ${userId} not found`)
 
+  const details = customerDetailsOf(user)
+
   if (user.stripeCustomerId) {
     try {
       const customer = await stripe.customers.retrieve(user.stripeCustomerId)
-      if (!customer.deleted) return { customerId: customer.id }
+      if (!customer.deleted) {
+        await syncCustomerDetails(customer, details)
+        return { customerId: customer.id }
+      }
     } catch (error) {
       if (!isResourceMissing(error)) throw error
     }
   }
 
-  // Only reached with no customer on record, or one Stripe no longer has.
-  const customer = await stripe.customers.create({
-    metadata: {
-      userId,
-      email: user.email,
-      name: `${user.firstName} ${user.lastName}`,
-    },
-  })
+  // Only reached with no customer on record, or one Stripe no longer has. Created bare and
+  // then given its details, so an email or phone Stripe refuses costs the Dashboard label
+  // rather than the customer — and with it every payment.
+  const customer = await stripe.customers.create({ metadata: { userId } })
 
   await db.user.update({
     where: { id: userId },
     data: { stripeCustomerId: customer.id },
   })
 
+  await syncCustomerDetails(customer, details)
+
   return { customerId: customer.id }
+}
+
+/**
+ * Writes the user's details to their customer where they differ. Never throws: the details
+ * only label payments in the Stripe Dashboard, and a payment, card or membership must not
+ * fail over a label.
+ */
+async function syncCustomerDetails(
+  customer: Stripe.Customer,
+  details: CustomerDetails,
+) {
+  const stale = staleCustomerDetails(customer, details)
+  if (!stale) return
+
+  try {
+    await stripe.customers.update(customer.id, stale)
+  } catch (error) {
+    console.error(
+      `Could not update the details of Stripe customer ${customer.id}:`,
+      describeStripeFailure(error),
+    )
+  }
 }
 
 export const paymentMethods = async (req: Request, res: Response) => {
