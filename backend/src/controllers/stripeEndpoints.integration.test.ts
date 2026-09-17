@@ -28,13 +28,22 @@ const OWN_CUSTOMER = "cus_own"
 
 const as = (userId: string) => `Bearer ${tokenFor(userId)}`
 
-/** A customer whose Stripe customer already exists, so no test creates one by accident. */
+/**
+ * A customer whose Stripe customer already exists and already carries their details, so no
+ * test creates one, or writes to one, by accident.
+ */
 const withStripeCustomer = async (userId: string, customerId = OWN_CUSTOMER) => {
-  await db.user.update({
+  const user = await db.user.update({
     where: { id: userId },
     data: { stripeCustomerId: customerId },
+    select: { email: true, phone: true },
   })
-  stripeApi.customers.retrieve.mockResolvedValue({ id: customerId })
+  stripeApi.customers.retrieve.mockResolvedValue({
+    id: customerId,
+    email: user.email,
+    name: "Ada Lovelace",
+    phone: user.phone,
+  })
 }
 
 describeIfDb("Stripe endpoints", () => {
@@ -588,5 +597,108 @@ describeIfDb("Stripe endpoints", () => {
         orderId: order.id,
       })
     })
+  })
+
+  /**
+   * Customers were created with the name and email in metadata only, which the Stripe
+   * Dashboard does not show, so every app payment appeared there with no one against it.
+   */
+  describe("the Stripe customer's details", () => {
+    const listCards = (userId: string) =>
+      request(app).get("/api/stripe/paymentMethods").set("Authorization", as(userId))
+
+    beforeEach(() => {
+      stripeApi.paymentMethods.list.mockResolvedValue({ data: [] })
+    })
+
+    it("gives a new customer the user's name, email and phone", async () => {
+      const user = await makeUser()
+      stripeApi.customers.create.mockResolvedValue({
+        id: "cus_created",
+        email: null,
+        name: null,
+        phone: null,
+      })
+
+      const res = await listCards(user.id)
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.customers.create).toHaveBeenCalledWith({
+        metadata: { userId: user.id },
+      })
+      expect(stripeApi.customers.update).toHaveBeenCalledWith("cus_created", {
+        email: user.email,
+        name: "Ada Lovelace",
+        phone: "0211234567",
+      })
+      expect(
+        (await db.user.findUniqueOrThrow({ where: { id: user.id } })).stripeCustomerId,
+      ).toBe("cus_created")
+    })
+
+    it("fills in a customer created before it carried any details", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      stripeApi.customers.retrieve.mockResolvedValue({
+        id: OWN_CUSTOMER,
+        email: null,
+        name: null,
+        phone: null,
+        metadata: { userId: user.id, name: "Ada Lovelace" },
+      })
+
+      const res = await listCards(user.id)
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.customers.update).toHaveBeenCalledWith(OWN_CUSTOMER, {
+        email: user.email,
+        name: "Ada Lovelace",
+        phone: "0211234567",
+      })
+    })
+
+    it("follows a change of phone number", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      await db.user.update({ where: { id: user.id }, data: { phone: "0229876543" } })
+
+      await listCards(user.id)
+
+      expect(stripeApi.customers.update).toHaveBeenCalledWith(OWN_CUSTOMER, {
+        phone: "0229876543",
+      })
+    })
+
+    it("leaves a customer that is up to date alone", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+
+      const res = await listCards(user.id)
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.customers.update).not.toHaveBeenCalled()
+    })
+
+    // The details only label payments; a refusal must not cost the customer a payment.
+    it.each([["an existing customer"], ["a new customer"]])(
+      "carries on when Stripe refuses the details of %s",
+      async (which) => {
+        const user = await makeUser()
+        if (which === "an existing customer") {
+          await withStripeCustomer(user.id)
+          await db.user.update({ where: { id: user.id }, data: { phone: "0229876543" } })
+        } else {
+          stripeApi.customers.create.mockResolvedValue({ id: "cus_created" })
+        }
+        stripeApi.customers.update.mockRejectedValue(new Error("refused"))
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await listCards(user.id)
+
+        errorSpy.mockRestore()
+        expect(res.status).toBe(200)
+        expect(stripeApi.paymentMethods.list).toHaveBeenCalled()
+      },
+    )
   })
 })
