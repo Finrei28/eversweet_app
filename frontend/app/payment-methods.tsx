@@ -59,7 +59,7 @@ function PaymentMethodsContent() {
     }
 
     fetchSavedCards()
-  }, [token, authLoading])
+  }, [token, authLoading, router])
 
   const fetchSavedCards = async () => {
     try {

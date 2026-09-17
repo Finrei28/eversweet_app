@@ -1,10 +1,6 @@
 import { View, Text, FlatList, TouchableOpacity } from "react-native"
 import { useCartStore } from "@/store/cart"
-import {
-  useFocusEffect,
-  useNavigation,
-  useRoute,
-} from "@react-navigation/native"
+import { useFocusEffect, useNavigation } from "@react-navigation/native"
 import { useCallback, useEffect, useState } from "react"
 import { CartItem } from "@/utils/types"
 import CustomModal from "@/_components/modal"
@@ -17,7 +13,6 @@ import { SweetPointIcon } from "@/_components/sweetPointIcon"
 
 export default function CartPage() {
   const navigation = useNavigation()
-  const route = useRoute()
   const { usersMembership } = useAuth()
   const cartItems = useCartStore((state) => state.items)
   const clearCart = useCartStore((state) => state.clearCart)
@@ -40,7 +35,7 @@ export default function CartPage() {
       navigation.setOptions({
         headerBackTitle: title,
       })
-    }, [navigation, route.key]),
+    }, [navigation]),
   )
   const totalCost = getTotalCost()
   useEffect(() => {
@@ -59,7 +54,8 @@ export default function CartPage() {
     return () => {
       cancelled = true
     }
-  }, [usersMembership, totalCost])
+    // getEarnablePoints is a zustand store action, the same function for the store's life.
+  }, [usersMembership, totalCost, getEarnablePoints])
 
   // if (cartOperations === 1) {
   //   return (

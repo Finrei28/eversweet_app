@@ -71,6 +71,12 @@ export default function Menu() {
       }
 
       fetchData()
+      // Not scrollToCategory: it is a new function every render, and listing it would
+      // re-run this on every render while the tab is focused — re-selecting and re-scrolling
+      // the category bar over whatever the customer does. This is meant to run on focus and
+      // when the category or the menu changes, and the offset it works out on a later focus
+      // matches the one it scrolled to when that category was picked.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [categoryParam, menu]),
   )
 

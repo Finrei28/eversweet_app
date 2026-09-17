@@ -211,7 +211,7 @@ export default function RootLayout() {
         notificationResponseListener.current?.remove()
       }
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, router])
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
