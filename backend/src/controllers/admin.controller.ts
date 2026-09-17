@@ -109,10 +109,8 @@ export const getPendingOrders = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching pending orders",
-      error: getErrorMessage(error),
-    })
+    console.error("Error fetching pending orders:", error)
+    res.status(500).json({ message: "Error fetching pending orders" })
     return
   }
 }
@@ -185,10 +183,8 @@ export const getCurrentOrders = async (req: Request, res: Response) => {
     res.status(200).json({ orders })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching current orders",
-      error: getErrorMessage(error),
-    })
+    console.error("Error fetching current orders:", error)
+    res.status(500).json({ message: "Error fetching current orders" })
     return
   }
 }
@@ -280,10 +276,8 @@ export const getPastOrders = async (req: Request, res: Response) => {
     res.status(200).json({ orders })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching past orders",
-      error: getErrorMessage(error),
-    })
+    console.error("Error fetching past orders:", error)
+    res.status(500).json({ message: "Error fetching past orders" })
     return
   }
 }
@@ -396,10 +390,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error sending order status notification:", error)
-    res.status(500).json({
-      message: "Error sending order status notification",
-      error: getErrorMessage(error),
-    })
+    res.status(500).json({ message: "Error sending order status notification" })
     return
   }
 }
@@ -485,10 +476,8 @@ export const getOverview = async (req: Request, res: Response) => {
     res.status(200).json({ overview, today, week, month, todaySales })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching overview",
-      error: getErrorMessage(error),
-    })
+    console.error("Error fetching overview:", error)
+    res.status(500).json({ message: "Error fetching overview" })
     return
   }
 }
@@ -522,10 +511,8 @@ export const updateRestaurantStatus = async (req: Request, res: Response) => {
     res.status(200).json({ message: "Restaurant status updated successfully" })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Error changing restaurant status",
-      error: getErrorMessage(error),
-    })
+    console.error("Error changing restaurant status:", error)
+    res.status(500).json({ message: "Error changing restaurant status" })
     return
   }
 }
@@ -655,10 +642,8 @@ export const getPrepTimeSettings = async (_req: Request, res: Response) => {
     res.status(200).json({ prepTimes: await getPrepTimes() })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Failed to load preparation times",
-      error: getErrorMessage(error),
-    })
+    console.error("Failed to load preparation times:", error)
+    res.status(500).json({ message: "Failed to load preparation times" })
     return
   }
 }
@@ -718,10 +703,8 @@ export const updatePrepTimeSettings = async (req: Request, res: Response) => {
     res.status(200).json({ prepTimes: await getPrepTimes() })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Failed to update preparation times",
-      error: getErrorMessage(error),
-    })
+    console.error("Failed to update preparation times:", error)
+    res.status(500).json({ message: "Failed to update preparation times" })
     return
   }
 }

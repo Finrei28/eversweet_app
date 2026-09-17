@@ -714,6 +714,13 @@ export const addItemToCart = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * Thrown inside one of getCartItems' clean-up transactions to roll it back,
+ * when the rows it came to sweep turn out to have been swept by someone else.
+ * Caught there and never surfaced: the cart is already in the state asked for.
+ */
+class AlreadySwept extends Error {}
+
 export const getCartItems = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
@@ -764,13 +771,30 @@ export const getCartItems = async (req: Request, res: Response) => {
       // is the `break`, which abandoned the refund for every later item once
       // one lookup came up empty.
       //
-      // The refund and the releases touch different tables and none depends on
-      // another's result, so they are issued together. Awaited one at a time
-      // this was a round trip per offer item before the cart could be deleted.
-      await Promise.all([
-        ...(totalPointsToRefund > 0
-          ? [
-              db.loyalty.update({
+      // One transaction, in the lock order at the top of this file. These were
+      // loose writes issued together with Promise.all and the cart deleted
+      // after them, so nothing tied one to another: a write that failed partway
+      // answered 500 with the rest committed and the cart still standing, and
+      // the next launch refunded the points and released the offers again. Two
+      // loads racing past the expiry check did the same without any failure.
+      // The delete is the claim now — the request that finds the cart already
+      // gone rolls its refund and releases back with it.
+      //
+      // Serial round trips where the Promise.all was one wave, but this runs
+      // once in a cart's life, and what it moves is points and offer uses.
+      try {
+        await retryOnCartConflict(() =>
+          db.$transaction(async (tx) => {
+            for (const item of cart.cartItems) {
+              if (!item.offerId) continue
+              await tx.offerRedemption.updateMany({
+                where: { offerId: item.offerId, userId, used: { gt: 0 } },
+                data: RELEASE_REDEMPTION,
+              })
+            }
+
+            if (totalPointsToRefund > 0) {
+              await tx.loyalty.update({
                 where: { userId },
                 data: {
                   points: { increment: totalPointsToRefund },
@@ -778,20 +802,19 @@ export const getCartItems = async (req: Request, res: Response) => {
                     create: { change: totalPointsToRefund, reason: "REFUND" },
                   },
                 },
-              }),
-            ]
-          : []),
-        ...cart.cartItems
-          .filter((item) => item.offerId)
-          .map((item) =>
-            db.offerRedemption.updateMany({
-              where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-              data: RELEASE_REDEMPTION,
-            }),
-          ),
-      ])
+              })
+            }
 
-      await db.cart.delete({ where: { id: cart.id } })
+            const { count } = await tx.cart.deleteMany({
+              where: { id: cart.id },
+            })
+            if (count === 0) throw new AlreadySwept()
+          }, TRANSACTION_OPTIONS),
+        )
+      } catch (error) {
+        if (!(error instanceof AlreadySwept)) throw error
+      }
+
       res.status(200).json({ success: true, message: "Cart expired" })
       return
     }
@@ -827,22 +850,36 @@ export const getCartItems = async (req: Request, res: Response) => {
       const doomed = [...new Set([...memberOnlyItems, ...retiredOfferItems])]
 
       if (doomed.length > 0) {
-        // Releases and the delete hit different tables, so they go together.
-        const [, deletedItems] = await Promise.all([
-          Promise.all(
-            doomed.map((item) =>
-              db.offerRedemption.updateMany({
-                where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-                data: RELEASE_REDEMPTION,
-              }),
-            ),
-          ),
-          db.cartItem.deleteMany({
-            where: { id: { in: doomed.map((item) => item.id) } },
-          }),
-        ])
+        // Releases then the delete, in one transaction, for the reasons given
+        // on the expiry branch above. The count is the claim: fewer rows deleted
+        // than items doomed means another request — a second load, or the
+        // customer removing one of them — has dealt with some already and
+        // handed their redemptions back. Releasing from this request's stale
+        // list would hand those back twice, so it rolls back instead and leaves
+        // whatever is left to the next load.
+        let swept = 0
+        try {
+          swept = await retryOnCartConflict(() =>
+            db.$transaction(async (tx) => {
+              for (const item of doomed) {
+                await tx.offerRedemption.updateMany({
+                  where: { offerId: item.offerId!, userId, used: { gt: 0 } },
+                  data: RELEASE_REDEMPTION,
+                })
+              }
 
-        if (deletedItems.count > 0) {
+              const { count } = await tx.cartItem.deleteMany({
+                where: { id: { in: doomed.map((item) => item.id) } },
+              })
+              if (count !== doomed.length) throw new AlreadySwept()
+              return count
+            }, TRANSACTION_OPTIONS),
+          )
+        } catch (error) {
+          if (!(error instanceof AlreadySwept)) throw error
+        }
+
+        if (swept > 0) {
           warning =
             memberOnlyItems.length > 0 && retiredOfferItems.length > 0
               ? "Some items in your cart are no longer available. They have been removed from your cart."
@@ -1114,6 +1151,9 @@ export const updateCartItem = async (req: Request, res: Response) => {
         db.cartItem.findUnique({
           where: { id: cartItem.id },
           select: {
+            // Both checked against the request below, before anything is priced.
+            dessertId: true,
+            cart: { select: { userId: true } },
             itemPriceInCents: true,
             loyaltyPointsUsed: true,
             quantity: true,
@@ -1137,13 +1177,27 @@ export const updateCartItem = async (req: Request, res: Response) => {
         loadCustomisations(cartItem.customisations),
       ])
 
-    if (!dessert) {
-      res.status(404).json({ message: "Dessert not found" })
+    // Someone else's line answers exactly as a missing one does. The write below is scoped
+    // to this user's cart, so it never could change another customer's item — but it
+    // reached that write and failed there as a 500, after pricing a stranger's line.
+    if (!existingCartItem || existingCartItem.cart.userId !== userId) {
+      res.status(404).json({ message: "Cart item not found" })
       return
     }
 
-    if (!existingCartItem) {
-      res.status(404).json({ message: "Cart item not found" })
+    // The line is priced from the dessert the request names, and nothing checked that it
+    // was the dessert the line holds. `dessertId` is never written back to the row, so
+    // editing a $20 dessert's line with a $3 dessert's id stored the $3 price against the
+    // $20 dessert — and `calculateCartPrice` charges what is stored, while the kitchen
+    // makes what the row says. The app always sends the line's own dessert, so only a
+    // tampered request is refused here.
+    if (cartItem.dessertId !== existingCartItem.dessertId) {
+      res.status(400).json({ message: "That item does not match your cart" })
+      return
+    }
+
+    if (!dessert) {
+      res.status(404).json({ message: "Dessert not found" })
       return
     }
 
@@ -1389,6 +1443,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       select: {
         id: true,
         cartId: true,
+        cart: { select: { userId: true } },
         itemPriceInCents: true,
         loyaltyPointsUsed: true,
         quantity: true,
@@ -1411,7 +1466,10 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       },
     })
 
-    if (!cartItem) {
+    // Someone else's line answers as a missing one, as in updateCartItem: the scoped
+    // write below could never change it, but it failed there as a 500 carrying the
+    // serialised Prisma error.
+    if (!cartItem || cartItem.cart.userId !== userId) {
       res.status(404).json({ message: "Cart item not found" })
       return
     }
@@ -1524,7 +1582,7 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error(error)
-    res.status(500).json({ success: false, message: error })
+    res.status(500).json({ success: false, message: "Internal server error" })
     return
   }
 }

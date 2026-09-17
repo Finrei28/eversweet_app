@@ -1,7 +1,6 @@
 import { Request, Response } from "express"
 import { Prisma } from "@prisma/client"
 import { db } from "../lib/db"
-import { getErrorMessage } from "../utils/getError"
 import { nzMonthRange } from "../lib/tradingHours"
 import {
   formatPrizeCode,
@@ -282,7 +281,7 @@ export const assignWinnerReward = async (req: Request, res: Response) => {
     console.error("Failed to assign a reward:", error)
     res
       .status(500)
-      .json({ message: "Failed to assign the reward: " + getErrorMessage(error) })
+      .json({ message: "Failed to assign the reward" })
   }
 }
 

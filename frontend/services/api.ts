@@ -249,6 +249,19 @@ export async function getUserOrdersPage(
   return { orders: data.orders, nextCursor: data.nextCursor ?? null }
 }
 
+/**
+ * The server refused the order and refunded the payment, because the cart no longer
+ * matched what was paid — it changed while the card was being charged. Its own type so
+ * checkout can say the money is on its way back, rather than "your payment may have been
+ * processed" and an offer to check a status that will only ever say it failed.
+ */
+export class PaymentRefundedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PaymentRefundedError"
+  }
+}
+
 export async function createOrder(
   paymentMethodId: string | null,
   pickupNow: boolean,
@@ -281,6 +294,15 @@ export async function createOrder(
   if (res.status === 409 && data?.inProgress) {
     throw new Error(
       "Your order is already being placed. Check your orders in a moment.",
+    )
+  }
+
+  if (res.status === 409 && data?.refunded) {
+    throw new PaymentRefundedError(
+      getErrorMessage(
+        data,
+        "Your payment has been refunded. Please check your cart and try again.",
+      ),
     )
   }
 

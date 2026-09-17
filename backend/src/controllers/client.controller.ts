@@ -15,9 +15,10 @@ import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
 import { isOfferLive } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
-import { getErrorMessage } from "../utils/getError"
+import { generateOtp } from "../lib/otp"
 import { cached, CACHE_KEYS, invalidate } from "../lib/cache"
 import { forgetSession } from "../lib/sessionCache"
+import { disconnectUserSockets } from "../lib/socketAuth"
 import { nzMonthRange } from "../lib/tradingHours"
 import { Prisma } from "@prisma/client"
 
@@ -126,7 +127,9 @@ export const getAvailableCustomisations = async (
     res.set("Cache-Control", "public, max-age=60")
     res.status(200).json({ customisations })
   } catch (error) {
-    res.status(500).json({ message: error })
+    // Logged, never sent: a serialised Prisma error carries its model, fields and query.
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
   }
 }
 
@@ -158,7 +161,7 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
     return
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const otp = generateOtp()
   const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
   try {
     await db.user.update({
@@ -176,7 +179,8 @@ export const getResetPasswordCode = async (req: Request, res: Response) => {
     res.status(200).json({ success: true })
     return
   } catch (error) {
-    res.status(500).json({ message: getErrorMessage(error) })
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -246,7 +250,8 @@ export const verifyResetPasswordCode = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    res.status(500).json({ message: getErrorMessage(error) })
+    console.error(`${req.method} ${req.originalUrl} failed:`, error)
+    res.status(500).json({ message: "Internal server error" })
     return
   }
 }
@@ -306,7 +311,12 @@ export const resetPassword = async (req: Request, res: Response) => {
       select: { id: true },
     })
 
-    if (resetUser) await forgetSession(resetUser.id)
+    if (resetUser) {
+      await forgetSession(resetUser.id)
+      // Clearing the cache retires the old tokens for new requests and new sockets; an open
+      // socket has already been let in, and would keep receiving until it reconnected.
+      await disconnectUserSockets(resetUser.id)
+    }
     res
       .status(200)
       .json({ success: true, message: "Password reset successfully" })
@@ -540,10 +550,7 @@ export async function getEstimatedPickUpTime(req: Request, res: Response) {
       .json({ estimatedTime: new Date(Date.now() + minutes * 60 * 1000) })
     return
   } catch (error) {
-    res.status(500).json({
-      message: "Failed to estimate a pick up time",
-      error: getErrorMessage(error),
-    })
+    res.status(500).json({ message: "Failed to estimate a pick up time" })
     return
   }
 }

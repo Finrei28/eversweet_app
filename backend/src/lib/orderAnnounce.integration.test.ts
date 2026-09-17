@@ -6,9 +6,28 @@ import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 import jwt from "jsonwebtoken"
 import request from "supertest"
 
-const { findUnique } = vi.hoisted(() => ({ findUnique: vi.fn() }))
+const { findUnique, findUser } = vi.hoisted(() => ({
+  findUnique: vi.fn(),
+  // The socket handshake reads the user row for the role and the password check, rather
+  // than trusting the token. Each token below names its role in its user id ("ADMIN-1"),
+  // so the row on record agrees with it.
+  findUser: vi.fn(async ({ where }: { where: { id: string } }) => ({
+    role: where.id.split("-")[0],
+    passwordChangedAt: null as Date | null,
+  })),
+}))
 
-vi.mock("../lib/db", () => ({ db: { order: { findUnique } } }))
+vi.mock("../lib/db", () => ({
+  db: { order: { findUnique }, user: { findUnique: findUser } },
+}))
+
+// Always a miss. This file does not stub Redis, and the session cache would otherwise
+// reach for whatever REDIS_URL backend/.env names.
+vi.mock("./sessionCache", () => ({
+  cachedSession: vi.fn(async () => undefined),
+  rememberSession: vi.fn(),
+  forgetSession: vi.fn(async () => {}),
+}))
 
 // The stub database has no settings table; pin the defaults rather than let
 // the relay fall back through an error path on every call.
@@ -48,7 +67,11 @@ vi.mock("../email/orderConfirmation", () => ({ default: () => null }))
 
 import app from "../app"
 import { setIo } from "./socket"
-import { registerSocketHandlers } from "./socketAuth"
+import {
+  disconnectUserSockets,
+  recheckAdminSockets,
+  registerSocketHandlers,
+} from "./socketAuth"
 import { clearScheduledOrders } from "./orderRelay"
 import { SERVICE_SECRET_HEADER } from "../middleware/serviceAuth"
 
@@ -98,6 +121,17 @@ const nextReceipt = (socket: ClientSocket, ms = 500) =>
   nextEvent(socket, "order-received", ms)
 
 const settle = (ms = 200) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Resolves true once the server has sent this socket away, or false if it has not in time. */
+const disconnectedWithin = (socket: ClientSocket, ms = 500) =>
+  new Promise<boolean>((resolve) => {
+    if (socket.disconnected) return resolve(true)
+    const timer = setTimeout(() => resolve(false), ms)
+    socket.once("disconnect", () => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
 
 const dueOrder = (over: Record<string, unknown> = {}) => ({
   id: "order-1",
@@ -291,5 +325,67 @@ describe("website order announcement, end to end", () => {
     // have not yet accepted is how the sweep nags them. The app is what keeps
     // it to one alert.
     expect(delivered).toBe(3)
+  })
+})
+
+/**
+ * A socket is checked once, at its handshake, and a kitchen tablet stays connected for
+ * days. A demoted admin, a thief whose stolen password had been reset, or a token that had
+ * run out kept receiving every order until the socket happened to reconnect.
+ */
+describe("sockets already in the kitchen room", () => {
+  it("sends away an admin who is no longer an admin", async () => {
+    const admin = await connectAs("ADMIN")
+    findUser.mockResolvedValueOnce({ role: "USER", passwordChangedAt: null })
+
+    await recheckAdminSockets(io)
+
+    expect(await disconnectedWithin(admin)).toBe(true)
+  })
+
+  it("sends away a socket whose password has been reset since it connected", async () => {
+    const admin = await connectAs("ADMIN")
+    findUser.mockResolvedValueOnce({
+      role: "ADMIN",
+      passwordChangedAt: new Date(Date.now() + 60_000),
+    })
+
+    await recheckAdminSockets(io)
+
+    expect(await disconnectedWithin(admin)).toBe(true)
+  })
+
+  it("keeps an admin whose session still holds, and keeps sending them orders", async () => {
+    findUnique.mockResolvedValue(dueOrder())
+    const admin = await connectAs("ADMIN")
+
+    await recheckAdminSockets(io)
+
+    expect(await disconnectedWithin(admin, 200)).toBe(false)
+    const received = nextOrder(admin)
+    await announce()
+    expect(await received).toMatchObject({ id: "order-1" })
+  })
+
+  // Dropping every tablet in the shop over a database blip would silence the alarms.
+  it("keeps the socket when the check cannot be made", async () => {
+    const admin = await connectAs("ADMIN")
+    findUser.mockRejectedValueOnce(new Error("Can't reach database server"))
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await recheckAdminSockets(io)
+
+    expect(await disconnectedWithin(admin, 200)).toBe(false)
+    errors.mockRestore()
+  })
+
+  it("disconnects only the user whose password was reset", async () => {
+    const admin = await connectAs("ADMIN")
+    const customer = await connectAs("USER")
+
+    await disconnectUserSockets("USER-1")
+
+    expect(await disconnectedWithin(customer)).toBe(true)
+    expect(await disconnectedWithin(admin, 200)).toBe(false)
   })
 })

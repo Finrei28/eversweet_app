@@ -6,7 +6,7 @@ import { Server } from "socket.io"
 import cron from "node-cron"
 import app from "./app"
 import { setIo, emitNewOrder } from "./lib/socket"
-import { registerSocketHandlers } from "./lib/socketAuth"
+import { recheckAdminSockets, registerSocketHandlers } from "./lib/socketAuth"
 import { clearScheduledOrders } from "./lib/orderRelay"
 import {
   checkRestaurantStatus,
@@ -20,13 +20,24 @@ import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
 
-// Initialize Socket.IO with CORS configuration
+/**
+ * Any origin, deliberately — this is not the open door the old "restrict this in
+ * production" comment made it sound like.
+ *
+ * CORS protects credentials a browser attaches on its own: cookies. Nothing here uses
+ * them. A socket authenticates with a bearer token passed in the handshake (see
+ * lib/socketAuth), which a page on another origin has no way to read or borrow, so
+ * limiting origins would stop no attack. What it could stop is the kitchen: React Native
+ * sockets can send an Origin header, and a whitelist that missed it would silence the
+ * order alarms. `credentials` is off because no cookie is ever involved — it was on,
+ * which advertised a capability this server has no use for.
+ */
 export const io = new Server(server, {
   cors: {
-    origin: "*", // In production, restrict this to your app's domain
+    origin: "*",
     methods: ["GET", "POST"],
     allowedHeaders: ["Authorization"],
-    credentials: true,
+    credentials: false,
   },
 })
 
@@ -50,6 +61,11 @@ try {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("* * * * *", checkRestaurantStatus, {
+    timezone: "Pacific/Auckland",
+  })
+  // A socket is checked once, at its handshake; this is what stops one staying in the
+  // kitchen room after a demotion, a password reset or its token running out.
+  cron.schedule("* * * * *", () => recheckAdminSockets(io), {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * 1", renewWeeklyOffers, {

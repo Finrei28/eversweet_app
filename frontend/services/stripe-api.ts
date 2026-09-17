@@ -115,7 +115,8 @@ export const createPaymentIntent = async (
   currency = "nzd",
   paymentMethodId?: string,
   // Sent so the server can refuse a slot outside trading hours before the card
-  // is charged. Order creation happens after the charge and cannot refund.
+  // is charged. Order creation happens after the charge and takes a paid order
+  // whatever the clock says by then.
   pickUp?: {
     pickUpTime: Date
     eatIn: boolean
@@ -231,9 +232,14 @@ export const pollMembershipStatus = async (): Promise<MembershipStatus> =>
     statusMessages: { 401: UNAUTHENTICATED, 404: NO_MEMBERSHIP },
   })
 
+/**
+ * Null when there is no active subscription, or it has no default card — the
+ * server answers both with a 200 and no id rather than a 404. A rejection is
+ * therefore always a real failure, and means "unknown", not "none".
+ */
 export const getCurrentSubscriptionPaymentMethodId =
-  async (): Promise<string> => {
-    const data = await apiRequest<{ paymentMethodId: string }>(
+  async (): Promise<string | null> => {
+    const data = await apiRequest<{ paymentMethodId?: string }>(
       "/api/stripe/getCurrentSubscriptionPaymentMethodId",
       {
         authMessage: UNAUTHENTICATED,
@@ -244,5 +250,5 @@ export const getCurrentSubscriptionPaymentMethodId =
       },
     )
 
-    return data.paymentMethodId
+    return data.paymentMethodId ?? null
   }

@@ -1,15 +1,23 @@
 import { db } from "../lib/db"
+import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
 import { membershipBenefits } from "../lib/membership"
-import { getErrorMessage } from "../utils/getError"
+import {
+  isResourceMissing,
+  orNullIfMissing,
+  stripeErrorMessage,
+} from "../lib/stripeErrors"
 import { checkPickUpTime, getDaysOffKeys } from "../lib/tradingHours"
 import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 import { isOfferLive } from "../lib/offerAvailability"
-
-// Initialize Stripe with your secret key
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
+import { idOf, stripe } from "../lib/stripeClient"
+import {
+  CHARGE_CURRENCY,
+  ORDER_PAYMENT_PURPOSE,
+  refundOf,
+} from "../lib/orderPayment"
 
 export function getInvoicePaymentIntent(
   invoice: Stripe.Invoice,
@@ -28,95 +36,63 @@ export function getInvoicePaymentIntent(
   return null
 }
 
-async function getUserFromDatabase(userId: string) {
-  // Implement your database lookup
-  try {
-    const user = await db.user.findUnique({
-      where: { id: userId },
-    })
-    if (!user) {
-      return { id: null, stripeCustomerId: null }
-    }
-    if (user.stripeCustomerId) {
-      return {
-        id: userId,
-        stripeCustomerId: user.stripeCustomerId,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      }
-    }
-    return {
-      id: userId,
-      stripeCustomerId: null,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    }
-  } catch (error) {}
-}
+/**
+ * The user's Stripe customer, created on first use. Always a real id, or a throw.
+ *
+ * Two ways this used to go wrong, both quietly:
+ *
+ * It handed back `{ customerId: undefined }` when the user row could not be read — the
+ * lookup swallowed every database error into that. Stripe's list endpoints read a missing
+ * `customer` as no filter at all, so a caller that did not check went on to list across
+ * every customer on the account.
+ *
+ * And any failure retrieving the stored customer other than "no such customer" — a
+ * timeout, a Stripe outage — fell through to creating a brand new customer and overwriting
+ * the stored id. One blip was enough to detach a member from the customer their cards and
+ * subscription live on, after which every card and membership check here looked at an
+ * empty customer.
+ */
+async function getOrCreateCustomerId(
+  userId: string,
+): Promise<{ customerId: string }> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      stripeCustomerId: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+    },
+  })
 
-async function updateUserWithCustomerId(userId: string, customerId: string) {
-  // Implement your database update
+  // authenticateToken found this user moments ago, so a miss is an account deleted in
+  // between: a failure to report, not a customer to create.
+  if (!user) throw new Error(`User ${userId} not found`)
+
+  if (user.stripeCustomerId) {
+    try {
+      const customer = await stripe.customers.retrieve(user.stripeCustomerId)
+      if (!customer.deleted) return { customerId: customer.id }
+    } catch (error) {
+      if (!isResourceMissing(error)) throw error
+    }
+  }
+
+  // Only reached with no customer on record, or one Stripe no longer has.
+  const customer = await stripe.customers.create({
+    metadata: {
+      userId,
+      email: user.email,
+      name: `${user.firstName} ${user.lastName}`,
+    },
+  })
 
   await db.user.update({
     where: { id: userId },
-    data: {
-      stripeCustomerId: customerId,
-    },
+    data: { stripeCustomerId: customer.id },
   })
-}
 
-async function getOrCreateCustomerId(userId: string) {
-  try {
-    // In a real app, you would look up the user in your database
-    // to see if they already have a Stripe customer ID
-    const user = await getUserFromDatabase(userId)
-
-    if (!user || !user.id) {
-      return { customerId: undefined }
-    }
-
-    if (user.stripeCustomerId) {
-      try {
-        const customer = await stripe.customers.retrieve(user.stripeCustomerId)
-        return { customerId: customer.id }
-      } catch (error) {
-        if (
-          error instanceof Stripe.errors.StripeInvalidRequestError &&
-          error.message.includes("No such customer")
-        ) {
-          const customer = await stripe.customers.create({
-            metadata: {
-              userId: userId,
-              email: user.email,
-              name: `${user.firstName} ${user.lastName}`,
-            },
-          })
-          await updateUserWithCustomerId(userId, customer.id)
-          return { customerId: customer.id }
-        }
-      }
-    }
-
-    // If no customer ID exists, create a new customer in Stripe
-    const customer = await stripe.customers.create({
-      metadata: {
-        userId: userId,
-        email: user.email,
-        name: `${user.firstName} ${user.lastName}`,
-      },
-      // You can also add email, name, etc. if available
-    })
-
-    // Save the customer ID to your database
-    await updateUserWithCustomerId(userId, customer.id)
-
-    return { customerId: customer.id }
-  } catch (error) {
-    console.error("Error in getOrCreateCustomerId:", error)
-    throw error
-  }
+  return { customerId: customer.id }
 }
 
 export const paymentMethods = async (req: Request, res: Response) => {
@@ -139,10 +115,7 @@ export const paymentMethods = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error fetching payment methods:", error)
-    res.status(500).json({
-      message: "Error fetching payment methods",
-      error: getErrorMessage(error),
-    })
+    res.status(500).json({ message: "Error fetching payment methods" })
     return
   }
 }
@@ -175,11 +148,8 @@ export const createSetupIntent = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
-    console.error("Error saving card:", error)
-    res.status(500).json({
-      message: "Error saving card",
-      error: getErrorMessage(error),
-    })
+    console.error("Error creating setup intent:", error)
+    res.status(500).json({ message: "Error saving card" })
   }
   return
 }
@@ -196,29 +166,36 @@ export const setCardForMembershipPayments = async (
   try {
     const { setupIntentId } = req.body ?? {}
 
-    if (!setupIntentId) {
+    if (typeof setupIntentId !== "string" || !setupIntentId) {
       res.status(400).json({ message: "Set up intent is required" })
       return
     }
 
-    const { customerId } = await getOrCreateCustomerId(userId)
-    if (!customerId) {
-      res.status(400).json({ message: "Could not find your details" })
+    const [{ customerId }, setupIntent] = await Promise.all([
+      getOrCreateCustomerId(userId),
+      orNullIfMissing(stripe.setupIntents.retrieve(setupIntentId)),
+    ])
+
+    // The setup intent has to be one this customer finished. It used to be taken on
+    // trust — whatever card it named became the default for whoever asked — so the only
+    // thing between one customer and another's setup intent was Stripe declining to set
+    // a card the customer did not own. The card is checked too: it may have been removed
+    // since the sheet closed, which Stripe would otherwise report as a 500.
+    const paymentMethodId = idOf(setupIntent?.payment_method)
+    const paymentMethod =
+      setupIntent &&
+      idOf(setupIntent.customer) === customerId &&
+      setupIntent.status === "succeeded" &&
+      paymentMethodId
+        ? await orNullIfMissing(stripe.paymentMethods.retrieve(paymentMethodId))
+        : null
+
+    // The retrieve above used to feed a console.log of the whole payment method —
+    // cardholder name, billing address, last four — into the server logs on every call.
+    if (!paymentMethodId || idOf(paymentMethod?.customer) !== customerId) {
+      res.status(404).json({ message: "Card not found" })
       return
     }
-
-    const si = await stripe.setupIntents.retrieve(setupIntentId)
-
-    const paymentMethodId = si.payment_method as string
-
-    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId)
-
-    console.log({
-      paymentMethodCustomer: paymentMethod.customer,
-      customerId,
-      paymentMethod,
-      paymentMethodId,
-    })
 
     await stripe.customers.update(customerId, {
       invoice_settings: {
@@ -230,7 +207,10 @@ export const setCardForMembershipPayments = async (
   } catch (error) {
     console.error("Error making card as default:", error)
     res.status(500).json({
-      message: getErrorMessage(error),
+      message: stripeErrorMessage(
+        error,
+        "Could not set that card for membership payments",
+      ),
     })
     return
   }
@@ -246,22 +226,23 @@ export const saveCard = async (req: Request, res: Response) => {
   try {
     const { paymentMethodId } = req.body ?? {}
 
-    if (!paymentMethodId) {
+    if (typeof paymentMethodId !== "string" || !paymentMethodId) {
       res.status(400).json({ message: "Payment method ID is required" })
       return
     }
 
-    // Get or create a Stripe customer for this user
-    const { customerId } = await getOrCreateCustomerId(userId)
-    if (!customerId) {
-      res.status(400).json({ message: "Could not find your details" })
-      return
-    }
-    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId)
-    if (paymentMethod.customer && paymentMethod.customer !== customerId) {
-      res.status(400).json({
-        message: "This payment method is already attached to another customer",
-      })
+    const [{ customerId }, paymentMethod] = await Promise.all([
+      getOrCreateCustomerId(userId),
+      orNullIfMissing(stripe.paymentMethods.retrieve(paymentMethodId)),
+    ])
+
+    // One answer for a card that does not exist and a card that is someone else's, the
+    // same one removeCard gives. This used to say "already attached to another customer",
+    // which confirmed to anyone holding a card id that it was real and in use — and an id
+    // Stripe had never issued came back as a 500.
+    const owner = idOf(paymentMethod?.customer)
+    if (!paymentMethod || (owner && owner !== customerId)) {
+      res.status(404).json({ message: "Card not found" })
       return
     }
 
@@ -287,12 +268,55 @@ export const saveCard = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error saving card:", error)
-    res.status(500).json({
-      message: "Error saving card",
-      error: getErrorMessage(error),
-    })
+    // Attaching can decline a card, and that reason is worth passing on.
+    res
+      .status(500)
+      .json({ message: stripeErrorMessage(error, "Error saving card") })
     return
   }
+}
+
+/**
+ * Subscription states in which Stripe will still try to charge a card. A card behind any
+ * of these is paying for a membership, whatever the membership row says.
+ */
+const BILLING_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "incomplete",
+])
+
+/**
+ * The card a customer's membership renews on, or null when nothing is billing them.
+ *
+ * The subscription's own default wins when it has one, but `createMembership` never sets
+ * it — it sets the customer's invoice default instead — and Stripe falls back to that. So
+ * reading the subscription alone, as `getCurrentSubscriptionPaymentMethodId` used to,
+ * found no card for any membership this app created.
+ */
+async function membershipPaymentMethodId(
+  customerId: string,
+): Promise<string | null> {
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 10,
+  })
+
+  const billing = subscriptions.data.find((subscription) =>
+    BILLING_SUBSCRIPTION_STATUSES.has(subscription.status),
+  )
+  if (!billing) return null
+
+  const own = idOf(billing.default_payment_method)
+  if (own) return own
+
+  const customer = await stripe.customers.retrieve(customerId)
+  return customer.deleted
+    ? null
+    : idOf(customer.invoice_settings.default_payment_method)
 }
 
 export const removeCard = async (req: Request, res: Response) => {
@@ -304,22 +328,57 @@ export const removeCard = async (req: Request, res: Response) => {
   try {
     const { paymentMethodId } = req.body ?? {}
 
-    if (!paymentMethodId) {
+    if (typeof paymentMethodId !== "string" || !paymentMethodId) {
       res.status(400).json({ message: "Payment method ID is required" })
       return
     }
 
-    // Detach the payment method
+    // This used to detach whatever id it was sent. A secret-key call can detach any
+    // payment method on the account, so any signed-in customer holding someone else's
+    // card id could take that card off them. The card now has to belong to the Stripe
+    // customer on this user's record — read from the row, not getOrCreateCustomerId,
+    // because removing a card is no reason to create a Stripe customer.
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { stripeCustomerId: true },
+    })
+    const customerId = user?.stripeCustomerId
+
+    if (!customerId) {
+      res.status(404).json({ message: "Card not found" })
+      return
+    }
+
+    const [paymentMethod, renewsOn] = await Promise.all([
+      orNullIfMissing(stripe.paymentMethods.retrieve(paymentMethodId)),
+      membershipPaymentMethodId(customerId),
+    ])
+
+    // The same answer for a card that does not exist and a card that is someone else's,
+    // so this cannot be used to learn whether an id is real.
+    if (idOf(paymentMethod?.customer) !== customerId) {
+      res.status(404).json({ message: "Card not found" })
+      return
+    }
+
+    // Detaching the card a membership renews on leaves the next renewal nothing to
+    // charge, and the membership lapses. The app greys this card's delete button, but
+    // only the server can actually refuse.
+    if (renewsOn === paymentMethodId) {
+      res.status(409).json({
+        message:
+          "This card pays for your membership. Set another card for membership payments before removing it.",
+      })
+      return
+    }
+
     await stripe.paymentMethods.detach(paymentMethodId)
 
     res.status(200).json({ success: true })
     return
   } catch (error) {
     console.error("Error removing card:", error)
-    res.status(500).json({
-      message: "Error removing card",
-      error: getErrorMessage(error),
-    })
+    res.status(500).json({ message: "Error removing card" })
     return
   }
 }
@@ -347,16 +406,29 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       confirmDuplicate,
     } = req.body ?? {}
 
-    if (!amount || !currency) {
-      res.status(400).json({ message: "Amount and currency are required" })
+    if (!amount) {
+      res.status(400).json({ message: "Amount is required" })
+      return
+    }
+
+    // The charge is in New Zealand dollars, always. `currency` used to go to Stripe
+    // exactly as sent, while the amount check below compares bare cents — so a request
+    // naming rupees passed that check and was charged 5000 paise, about NZ$1, for a
+    // NZ$50 cart. Still accepted from builds that send it, but only ever as NZD.
+    if (
+      currency !== undefined &&
+      (typeof currency !== "string" ||
+        currency.toLowerCase() !== CHARGE_CURRENCY)
+    ) {
+      res.status(400).json({ message: "Payments are taken in NZD" })
       return
     }
 
     // Checked here rather than only at order creation because this runs before
-    // the card is charged. `createOrder` runs after, and there is no refund
-    // path, so refusing there would take the customer's money and give them no
-    // order. Optional for now so a build that predates this still checks out;
-    // make it required once those are gone.
+    // the card is charged. `createOrder` runs after and accepts a verified
+    // payment whatever the clock says, because refusing there would take the
+    // customer's money and give them no order. Optional for now so a build that
+    // predates this still checks out; make it required once those are gone.
     if (pickUpTime !== undefined) {
       const check = checkPickUpTime(new Date(pickUpTime), {
         eatIn: Boolean(eatIn),
@@ -411,7 +483,9 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     // Refused rather than silently repriced, for the same reason as the amount
     // mismatch below: the total on their screen must be the total they are charged.
     const now = new Date()
-    if (cart.cartItems.some((item) => item.offer && !isOfferLive(item.offer, now))) {
+    if (
+      cart.cartItems.some((item) => item.offer && !isOfferLive(item.offer, now))
+    ) {
       res.status(409).json({
         message:
           "An offer in your cart is no longer available. Please review your cart and try again.",
@@ -473,11 +547,14 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     // Create a payment intent
     const paymentIntent = await stripe.paymentIntents.create({
       amount: payableInCents,
-      currency,
+      currency: CHARGE_CURRENCY,
       customer: customerId,
       payment_method: paymentMethodId,
       confirm: false, // We'll confirm on the client side
       setup_future_usage: "off_session", // This allows the card to be used for future payments
+      // What createOrder requires before it will place, or refund, an order against this
+      // payment. See ORDER_PAYMENT_PURPOSE.
+      metadata: { purpose: ORDER_PAYMENT_PURPOSE, userId },
     })
 
     res.status(200).json({
@@ -488,8 +565,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error creating payment intent:", error)
     res.status(500).json({
-      message: "Error creating payment intent",
-      error: getErrorMessage(error),
+      message: stripeErrorMessage(error, "Error creating payment intent"),
     })
     return
   }
@@ -503,46 +579,54 @@ export const checkPaymentStatus = async (req: Request, res: Response) => {
   }
   try {
     const paymentIntentId = req.params.id
-    // Retrieve the payment intent from Stripe
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId)
 
-    // Check if this payment intent belongs to this user
-    // In a real app, you would check this in your database
-    // For this example, we'll assume it's valid
+    const [user, order, paymentIntent] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: { stripeCustomerId: true },
+      }),
+      db.order.findUnique({
+        where: { paymentIntentId },
+        select: { id: true, appUserId: true },
+      }),
+      orNullIfMissing(
+        stripe.paymentIntents.retrieve(paymentIntentId, {
+          expand: ["latest_charge"],
+        }),
+      ),
+    ])
 
-    // Check if there's an order associated with this payment intent
-    // In a real app, you would query your database
-    // For this example, we'll simulate it
-    let orderId = null
-    try {
-      // Query your database for an order with this payment intent ID
-      const order = await db.order.findFirst({
-        where: { paymentIntentId: paymentIntentId },
-      })
-      if (order?.appUserId !== userId) {
-        res
-          .status(403)
-          .json({ message: "You don't have permission to view this order" })
-        return
-      }
-      if (!order) {
-        res.status(404).json({
-          message: "no orders found associated with this payment intent",
-        })
-        return
-      }
-      orderId = order.id
-    } catch (dbError) {
-      console.error("Error checking for order:", dbError)
+    // Whose payment this is. An order for it settles the question; with no order yet,
+    // the payment's own customer does, since createPaymentIntent always sets one.
+    //
+    // Two things were wrong before. A database error in the order lookup was caught and
+    // logged, and the status of any payment intent went back to whoever asked. And the
+    // ownership check was on the order alone, so a payment with no order was always a
+    // 403 — which meant the app's "paid, but no order was created" recovery in checkout
+    // could never run for the one customer it exists for.
+    const owned = order
+      ? order.appUserId === userId
+      : !!user?.stripeCustomerId &&
+        idOf(paymentIntent?.customer) === user.stripeCustomerId
+
+    // One answer for missing and for someone else's.
+    if (!paymentIntent || !owned) {
+      res.status(404).json({ message: "Payment not found" })
+      return
     }
 
-    // Return the payment intent status
+    // createOrder refunds a payment that no longer matches the cart, and a refunded
+    // payment still reads "succeeded". Reported as such, the app would tell a customer
+    // whose money is on its way back that they had paid and their order was lost.
+    const refunded = refundOf(paymentIntent) > 0
+
     res.status(200).json({
-      success: paymentIntent.status === "succeeded",
+      success: paymentIntent.status === "succeeded" && !refunded,
+      refunded,
       pending:
         paymentIntent.status === "processing" ||
         paymentIntent.status === "requires_capture",
-      orderId: orderId, // Include the order ID if found
+      orderId: order?.id ?? null,
     })
     return
   } catch (error) {
@@ -550,7 +634,6 @@ export const checkPaymentStatus = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error checking payment status",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -571,10 +654,13 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       res.status(404).json({ message: "Membership plan not found" })
       return
     }
-    if (!membershipPlan.stripePriceId!) {
+    if (!membershipPlan.stripePriceId) {
       res
         .status(404)
         .json({ message: "Membership plan does not have a stripe price id" })
+      // Missing until now, so this carried on to ask Stripe for an empty price and
+      // tried to answer a second time.
+      return
     }
     const price = await stripe.prices.retrieve(membershipPlan.stripePriceId)
     const membershipDetails = {
@@ -590,7 +676,6 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error getting membership details",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -629,7 +714,6 @@ export const getUsersMembership = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error getting users membership",
-      error: getErrorMessage(error),
     })
     return
   }
@@ -709,11 +793,25 @@ export const retryPayment = async (req: Request, res: Response) => {
     res.status(200).json({ success: true })
   } catch (error) {
     console.error("Error retrying payment:", error)
+    // A decline is the likeliest failure here, and its reason is for the customer.
     res.status(500).json({
-      message: getErrorMessage(error),
+      message: stripeErrorMessage(
+        error,
+        "Your payment retry could not be completed",
+      ),
     })
   }
 }
+
+/**
+ * How long a join that is still waiting on Stripe keeps a second one out. Long enough to
+ * cover the subscription being created and its first payment coming back, short enough
+ * that a join that crashed partway does not lock the customer out for good.
+ */
+const JOIN_IN_PROGRESS_MS = 2 * 60 * 1000
+
+const JOIN_IN_PROGRESS_MESSAGE =
+  "Your membership is already being set up. Please wait a moment and check again."
 
 export const createMembership = async (req: Request, res: Response) => {
   const userId = (req as any).userId
@@ -721,69 +819,106 @@ export const createMembership = async (req: Request, res: Response) => {
     res.status(401).json({ message: "Please sign in to join our membership." })
     return
   }
+  // Undoes this request's claim on the membership if Stripe refuses before a subscription
+  // exists, so the customer can try again at once rather than being told a join is under way.
+  let releaseClaim: (() => Promise<unknown>) | null = null
   try {
     const { paymentMethodId, stripePriceId } = req.body ?? {}
 
-    if (!paymentMethodId || !stripePriceId) {
-      res
-        .status(400)
-        .json({ message: "Payment method and price id are required" })
+    if (typeof paymentMethodId !== "string" || !paymentMethodId) {
+      res.status(400).json({ message: "Payment method is required" })
+      return
+    }
+
+    const [plan, existingMembership] = await Promise.all([
+      db.membershipPlan.findFirstOrThrow({
+        where: { name: "Monthly_Membership" },
+      }),
+      db.membership.findUnique({ where: { userId } }),
+    ])
+    let membership = existingMembership
+
+    // The price is the plan's. It used to be whatever the request named, handed to Stripe
+    // as sent — so any other recurring price on the account, however cheap, bought a full
+    // membership the moment its first invoice cleared. Builds send the id
+    // getMembershipDetails gave them, and one that disagrees is refused rather than
+    // charged a price the customer was not shown: the rule createPaymentIntent applies to
+    // a cart total. Omitting it is fine.
+    if (stripePriceId !== undefined && stripePriceId !== plan.stripePriceId) {
+      res.status(409).json({
+        message: "Membership pricing has changed. Please reload and try again.",
+      })
+      return
+    }
+
+    if (membership && membership.isActive) {
+      res.status(400).json({ message: "Your membership is still active" })
       return
     }
 
     // Get or create a Stripe customer for this user
     const { customerId } = await getOrCreateCustomerId(userId)
 
-    if (!customerId) {
-      res.status(400).json({ message: "Could not find your details" })
-      return
-    }
-
-    await stripe.customers.update(customerId, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    })
-
-    const plan = await db.membershipPlan.findFirstOrThrow({
-      where: { name: "Monthly_Membership" },
-    })
-
-    let membership = await db.membership.findUnique({ where: { userId } })
-    if (membership && membership.isActive) {
-      res.status(400).json({ message: "Your membership is still active" })
-      return
-    }
     const existingSubs = await stripe.subscriptions.list({
       customer: customerId,
-      status: "active", // or "active" if you only care about active ones
+      status: "active",
       expand: ["data.items.data.price"],
     })
 
     const hasSameSub = existingSubs.data.some((sub) =>
-      sub.items.data.some((item) => item.price.id === stripePriceId),
+      sub.items.data.some((item) => item.price.id === plan.stripePriceId),
     )
 
     if (hasSameSub) {
       res.status(400).json({ message: "Your membership is still active" })
       return
     }
+
+    // The attempt is claimed before anything changes at Stripe. Nothing did before: two
+    // requests for a returning member — a double tap that lands before the button disables,
+    // or a resend — both read an inactive membership, both passed every check above, and
+    // both created a subscription. The customer was billed twice, every month. Now the
+    // second finds the claim and is turned away.
     if (!membership) {
-      // Create a membership in PENDING state
-      membership = await db.membership.create({
-        data: {
-          user: { connect: { id: userId } },
-          plan: { connect: { id: plan.id } },
-          paymentStatus: "PENDING",
-          isActive: false,
-          stripePaymentMethodId: paymentMethodId,
-          startDate: new Date(),
-          endDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-        },
-      })
+      try {
+        membership = await db.membership.create({
+          data: {
+            user: { connect: { id: userId } },
+            plan: { connect: { id: plan.id } },
+            paymentStatus: "PENDING",
+            isActive: false,
+            stripePaymentMethodId: paymentMethodId,
+            startDate: new Date(),
+            endDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
+          },
+        })
+      } catch (error) {
+        // One membership per user: the other request created it first.
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          res.status(409).json({ message: JOIN_IN_PROGRESS_MESSAGE })
+          return
+        }
+        throw error
+      }
+
+      const created = membership
+      releaseClaim = () =>
+        db.membership.deleteMany({
+          where: { id: created.id, stripeSubscriptionId: null },
+        })
     } else {
-      await db.membership.update({
-        where: { id: membership.id },
+      const claimed = await db.membership.updateMany({
+        where: {
+          id: membership.id,
+          isActive: false,
+          OR: [
+            { paymentStatus: { not: "PENDING" } },
+            { updatedAt: { lt: new Date(Date.now() - JOIN_IN_PROGRESS_MS) } },
+          ],
+        },
         data: {
           paymentStatus: "PENDING",
           isActive: false,
@@ -791,20 +926,38 @@ export const createMembership = async (req: Request, res: Response) => {
           totalMonths: 0,
         },
       })
+
+      if (claimed.count === 0) {
+        res.status(409).json({ message: JOIN_IN_PROGRESS_MESSAGE })
+        return
+      }
+
+      const { id, paymentStatus } = membership
+      releaseClaim = () =>
+        db.membership.updateMany({
+          where: { id, paymentStatus: "PENDING" },
+          data: { paymentStatus },
+        })
     }
 
-    // Create a payment intent
+    // After every refusal rather than first, where it was: a request turned away above
+    // still used to replace the customer's default card on its way out.
+    await stripe.customers.update(customerId, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
+      },
+    })
+
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
-      items: [{ price: stripePriceId }],
+      items: [{ price: plan.stripePriceId }],
       metadata: { userId },
       collection_method: "charge_automatically",
     })
+    // From here the subscription exists and the webhook decides the membership's state.
+    releaseClaim = null
 
-    // first create the membership to store the subscriptionid before setting member active. Only set active when webhook confirms payment is successful
-
-    // check if user has a membership record already else create one
-
+    // The membership only becomes active once the webhook confirms the first payment.
     await db.membership.update({
       where: { id: membership.id },
       data: { stripeSubscriptionId: subscription.id },
@@ -814,8 +967,16 @@ export const createMembership = async (req: Request, res: Response) => {
     return
   } catch (error) {
     console.error("Error creating membership:", error)
+    if (releaseClaim) {
+      await releaseClaim().catch((releaseError) =>
+        console.error("Could not release a failed membership join:", releaseError),
+      )
+    }
     res.status(500).json({
-      message: "Failed to create membership: " + getErrorMessage(error),
+      message: stripeErrorMessage(
+        error,
+        "Failed to create membership. Please try again.",
+      ),
     })
     return
   }
@@ -855,9 +1016,9 @@ export const cancelMembership = async (req: Request, res: Response) => {
       .status(201)
       .json({ success: true, endDate: new Date(subscription.cancel_at * 1000) })
   } catch (error) {
-    console.error("Error cancelling membershp:", error)
+    console.error("Error cancelling membership:", error)
     res.status(500).json({
-      message: "Failed to cancel membership: " + getErrorMessage(error),
+      message: "Failed to cancel membership. Please try again.",
     })
     return
   }
@@ -892,8 +1053,9 @@ export const resumeMembership = async (req: Request, res: Response) => {
     })
     return
   } catch (error) {
+    console.error("Error resuming membership:", error)
     res.status(500).json({
-      message: getErrorMessage(error),
+      message: "Failed to resume membership. Please try again.",
     })
     return
   }
@@ -938,19 +1100,9 @@ export const getCurrentSubscriptionPaymentMethodId = async (
   try {
     const { customerId } = await getOrCreateCustomerId(userId)
 
-    const subscriptions = await stripe.subscriptions.list({
-      customer: customerId,
-      limit: 1,
-      status: "active",
-    })
-
-    const subscription = subscriptions.data[0]
-    if (!subscription) {
-      res.status(200).json({ message: "No active subscription found" })
-      return
-    }
-
-    const paymentMethodId = subscription.default_payment_method
+    // The same lookup removeCard refuses on, so the card the app greys out is exactly the
+    // card the server will not detach.
+    const paymentMethodId = await membershipPaymentMethodId(customerId)
 
     if (!paymentMethodId) {
       res.status(200).json({ message: "No payment method found" })
@@ -960,12 +1112,326 @@ export const getCurrentSubscriptionPaymentMethodId = async (
     res.status(200).json({ paymentMethodId })
     return
   } catch (error) {
+    console.error("Error fetching the membership card:", error)
     res.status(500).json({
-      message:
-        "Failed to fetch current subscription payment method ID: " +
-        getErrorMessage(error),
+      message: "Failed to fetch current subscription payment method ID",
     })
     return
+  }
+}
+
+/** The invoices that pay for a month of membership, as opposed to prorations or one-offs. */
+const MEMBERSHIP_MONTH_REASONS = new Set<Stripe.Invoice.BillingReason>([
+  "subscription_create",
+  "subscription_cycle",
+])
+
+const paysForAMonth = (invoice: Stripe.Invoice) =>
+  !!invoice.billing_reason &&
+  MEMBERSHIP_MONTH_REASONS.has(invoice.billing_reason)
+
+/**
+ * How many months of this subscription have been paid in a row, ending with the one just
+ * paid. The member discount grows a step for each, and a month that was never paid starts
+ * the customer again from the first step.
+ *
+ * Counting back from the payment and stopping at the first month left unpaid is what makes
+ * it a run rather than a total. Stripe is set to cancel a subscription whose renewal fails
+ * every retry, and a customer who comes back gets a new subscription counted from one — but
+ * a month voided or written off by hand leaves the subscription running, and a plain count
+ * of paid invoices stepped straight over it. A renewal declined and then paid on a retry
+ * ends up paid, so it keeps the run: the customer paid for that month.
+ *
+ * The invoice being processed counts as paid whatever the list says, since the list may not
+ * have caught up with it, and anything newer — the next renewal's draft, if this delivery
+ * is late — is not part of the run it ends.
+ */
+async function countConsecutivePaidMonths(
+  subscriptionId: string,
+  justPaid: Stripe.Invoice,
+): Promise<number> {
+  // A proration or one-off invoice also arrives here; it ends no month of its own.
+  let months = paysForAMonth(justPaid) ? 1 : 0
+  let startingAfter: string | undefined
+
+  for (;;) {
+    const page = await stripe.invoices.list({
+      subscription: subscriptionId,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    })
+
+    for (const invoice of page.data) {
+      if (!paysForAMonth(invoice)) continue
+      if (invoice.id === justPaid.id) continue
+      if (invoice.created > justPaid.created) continue
+      if (invoice.status !== "paid") return months
+      months += 1
+    }
+
+    const last = page.data[page.data.length - 1]
+    if (!page.has_more || !last?.id) return months
+    startingAfter = last.id
+  }
+}
+
+/**
+ * Brings a membership in line with its subscription after a successful payment.
+ *
+ * Every figure is read from Stripe and written as it stands, never adjusted from what the
+ * row held, so a delivery Stripe repeats — which it does whenever a response is slow or
+ * lost — changes nothing the second time. This used to add one to `totalMonths` per
+ * delivery, and each repeat raised the member's discount a step towards its cap.
+ *
+ * It also used to store `invoice.period_end` as the renewal date. For a subscription
+ * invoice that field looks back one period, so "Renews on" showed the day the member had
+ * just paid rather than the day they would next be charged. The subscription item's
+ * `current_period_end` is the real one.
+ */
+async function recordMembershipPayment(
+  subscriptionId: string,
+  invoice: Stripe.Invoice,
+) {
+  const [subscription, totalMonths] = await Promise.all([
+    orNullIfMissing(stripe.subscriptions.retrieve(subscriptionId)),
+    countConsecutivePaidMonths(subscriptionId, invoice),
+  ])
+
+  // A delivery that arrives after the subscription ended — a retry of one that failed
+  // earlier — must not switch a cancelled membership back on.
+  if (
+    !subscription ||
+    (subscription.status !== "active" && subscription.status !== "trialing")
+  ) {
+    console.warn(
+      `Membership payment for subscription ${subscriptionId} ignored: the subscription is ${
+        subscription?.status ?? "missing"
+      }.`,
+    )
+    return
+  }
+
+  const periodEnd = subscription.items.data[0]?.current_period_end
+
+  await updateSubscriptionMembership(subscription, "payment", {
+    ...(periodEnd ? { endDate: new Date(periodEnd * 1000) } : {}),
+    paymentStatus: "SUCCESS",
+    isActive: true,
+    totalMonths,
+    cancel: subscription.cancel_at_period_end,
+  })
+}
+
+/**
+ * Writes to the membership a subscription belongs to. Never throws for a subscription that
+ * matches no membership — it logs and returns — because a webhook that throws is redelivered
+ * by Stripe for days, and a subscription with no membership never gains one by being retried.
+ */
+async function updateSubscriptionMembership(
+  subscription: Stripe.Subscription,
+  event: string,
+  data: Prisma.MembershipUpdateManyMutationInput,
+) {
+  const updated = await db.membership.updateMany({
+    where: { stripeSubscriptionId: subscription.id },
+    data,
+  })
+  if (updated.count > 0) return
+
+  // createMembership stores the subscription id only once Stripe has created the
+  // subscription, and Stripe attempts the first invoice while doing so — so its outcome, paid
+  // or declined, can arrive before the id does. The row is found by its owner instead, and
+  // only while it is still waiting on a first payment. A payment used to throw here, so only
+  // Stripe's later retry ever switched such a membership on; a decline matched nothing and
+  // was lost, leaving the app polling until it timed out.
+  const userId = subscription.metadata?.userId
+  if (userId) {
+    const claimed = await db.membership.updateMany({
+      where: { userId, isActive: false, paymentStatus: "PENDING" },
+      data: { ...data, stripeSubscriptionId: subscription.id },
+    })
+    if (claimed.count > 0) return
+  }
+
+  console.error(
+    `Membership ${event} for subscription ${subscription.id} matched no membership.`,
+  )
+}
+
+/** The subscription an invoice was raised for, in either shape Stripe sends. */
+const subscriptionIdOf = (invoice: Stripe.Invoice) =>
+  idOf(invoice.lines?.data[0]?.subscription) ??
+  idOf(invoice.parent?.subscription_details?.subscription)
+
+/** Subscription states in which a declined renewal is still being retried. */
+const RETRYING_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
+  "active",
+  "past_due",
+  "unpaid",
+])
+
+/** Why the last attempt at an invoice was declined, as Stripe reports it to the customer. */
+async function declineOf(
+  current: Stripe.Invoice,
+  delivered: Stripe.Invoice,
+): Promise<{ code: string | null; message: string | null }> {
+  // The live invoice is read with its payments expanded, which is where this API version
+  // keeps the payment intent. The event's own copy is in whatever version the webhook
+  // endpoint is set to, so the older places are still tried.
+  const legacy = delivered as Stripe.Invoice & {
+    payment_intent?: string | null
+  }
+  const confirmation = delivered.confirmation_secret
+  const paymentIntentId =
+    getInvoicePaymentIntent(current) ??
+    legacy.payment_intent ??
+    (confirmation?.type === "payment_intent"
+      ? confirmation.client_secret.split("_secret_")[0]
+      : null)
+
+  if (!paymentIntentId) return { code: null, message: null }
+
+  const intent = await orNullIfMissing(
+    stripe.paymentIntents.retrieve(paymentIntentId),
+  )
+  return {
+    code: intent?.last_payment_error?.code ?? null,
+    message: intent?.last_payment_error?.message ?? null,
+  }
+}
+
+/**
+ * Records a declined membership payment: a failed first payment ends the attempt to join,
+ * a failed renewal puts the membership on hold while Stripe retries.
+ *
+ * Both the subscription and the invoice are read back from Stripe rather than taken from
+ * the event (webhook), for two reasons. The handler used to call Stripe with whatever the event named
+ * and throw on anything unexpected — an invoice with no subscription, a subscription Stripe
+ * no longer had — so Stripe redelivered those for days.
+ *
+ * And a decline can be delivered after the payment has gone through: Stripe retries a
+ * renewal on its own, and redelivers any event whose first delivery failed. Applied then,
+ * the stale decline put a paid member back on hold, and since perks need a SUCCESS payment
+ * status, switched their discount off until the next renewal. Only an invoice that is still
+ * unpaid now is recorded as declined.
+ */
+async function recordMembershipPaymentFailure(
+  subscriptionId: string,
+  delivered: Stripe.Invoice,
+) {
+  if (!delivered.id) return
+
+  const [subscription, current] = await Promise.all([
+    orNullIfMissing(stripe.subscriptions.retrieve(subscriptionId)),
+    orNullIfMissing(
+      stripe.invoices.retrieve(delivered.id, { expand: ["payments"] }),
+    ),
+  ])
+
+  if (!subscription || !current || current.status !== "open") {
+    console.warn(
+      `Membership payment failure for subscription ${subscriptionId} ignored: the invoice is ${
+        current?.status ?? "missing"
+      } and the subscription is ${subscription?.status ?? "missing"}.`,
+    )
+    return
+  }
+
+  if (subscription.status === "incomplete") {
+    const decline = await declineOf(current, delivered)
+    await updateSubscriptionMembership(subscription, "payment failure", {
+      paymentStatus: "FAILED",
+      isActive: false,
+      paymentFailureCode: decline.code,
+      paymentFailureMessage: decline.message,
+    })
+    return
+  }
+
+  // A renewal. Once the subscription has ended, customer.subscription.deleted has the last
+  // word; putting an ended membership on hold would offer its owner a retry that charges
+  // them for a membership that no longer exists.
+  if (!RETRYING_SUBSCRIPTION_STATUSES.has(subscription.status)) {
+    console.warn(
+      `Membership renewal failure for subscription ${subscriptionId} ignored: the subscription is ${subscription.status}.`,
+    )
+    return
+  }
+
+  await updateSubscriptionMembership(subscription, "renewal failure", {
+    paymentStatus: "PENDING",
+  })
+}
+
+/**
+ * Records that a membership has ended.
+ *
+ * This used to mark every ended membership as a failed payment, so a member who cancelled
+ * and simply reached the end of what they had paid for was told "Payment Failed" in red on
+ * the membership screen. Stripe records why the subscription ended; only a payment that
+ * failed or was disputed is a failure. Otherwise the status says nothing is owed — never
+ * "pending", which would show the membership as on hold and offer to retry a payment for a
+ * subscription that no longer exists.
+ *
+ * The end date is when the subscription actually ended, not when this event was processed,
+ * which for a redelivered event can be days later.
+ */
+async function recordMembershipEnded(delivered: Stripe.Subscription) {
+  // Stripe added the reason in 2023. An event rendered in an older version lacks it, so it
+  // is read back through the SDK, which is pinned to a version that has it.
+  const details =
+    delivered.cancellation_details !== undefined
+      ? delivered.cancellation_details
+      : (await orNullIfMissing(stripe.subscriptions.retrieve(delivered.id)))
+          ?.cancellation_details
+  const reason = details?.reason
+  const unpaid = reason === "payment_failed" || reason === "payment_disputed"
+
+  await db.membership.updateMany({
+    where: { stripeSubscriptionId: delivered.id },
+    data: {
+      paymentStatus: unpaid ? "FAILED" : "SUCCESS",
+      isActive: false,
+      endDate: delivered.ended_at
+        ? new Date(delivered.ended_at * 1000)
+        : new Date(),
+      cancel: true,
+    },
+  })
+}
+
+/**
+ * Records whether a membership is set to end at the close of its period, and when.
+ *
+ * Read from the subscription as it stands, not from the event. This took the event's
+ * `cancel_at_period_end` as the truth, and Stripe redelivers events: a "cancelling" update
+ * that arrived again after the member had tapped Re-subscribe marked them as leaving, and the
+ * app showed "Expires on" to someone still being billed until their next renewal set it right.
+ */
+async function recordMembershipSchedule(delivered: Stripe.Subscription) {
+  const subscription = await orNullIfMissing(
+    stripe.subscriptions.retrieve(delivered.id),
+  )
+
+  // An ended subscription is customer.subscription.deleted's to record.
+  if (
+    !subscription ||
+    subscription.status === "canceled" ||
+    subscription.status === "incomplete_expired"
+  ) {
+    return
+  }
+
+  if (subscription.cancel_at_period_end && subscription.cancel_at) {
+    await db.membership.updateMany({
+      where: { stripeSubscriptionId: subscription.id },
+      data: { endDate: new Date(subscription.cancel_at * 1000), cancel: true },
+    })
+  } else if (!subscription.cancel_at_period_end) {
+    await db.membership.updateMany({
+      where: { stripeSubscriptionId: subscription.id },
+      data: { cancel: false },
+    })
   }
 }
 
@@ -994,108 +1460,30 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     }
     case "invoice.payment_succeeded": {
       const invoice = event.data.object as Stripe.Invoice
-      const newEndDate = invoice.period_end
-      const subscriptionId = invoice.lines.data[0].subscription
+      const subscriptionId = subscriptionIdOf(invoice)
       if (subscriptionId) {
-        await db.membership.update({
-          where: { stripeSubscriptionId: subscriptionId as string },
-          data: {
-            endDate: new Date(newEndDate * 1000),
-            paymentStatus: "SUCCESS",
-            isActive: true,
-            totalMonths: { increment: 1 },
-            cancel: false,
-          },
-        })
+        await recordMembershipPayment(subscriptionId, invoice)
       }
       break
     }
 
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice
-
-      const subscriptionId = invoice.lines.data[0].subscription as string
-
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-
-      let paymentIntentId: string | null = null
-
-      if ((invoice as any).payment_intent) {
-        paymentIntentId = (invoice as any).payment_intent
-      } else if (
-        invoice.confirmation_secret &&
-        invoice.confirmation_secret.type === "payment_intent"
-      ) {
-        const clientSecret = invoice.confirmation_secret.client_secret
-        paymentIntentId = clientSecret.split("_secret_")[0]
-      }
-
-      let failureCode: string | null = null
-      let failureMessage: string | null = null
-
-      if (paymentIntentId) {
-        const paymentIntent =
-          await stripe.paymentIntents.retrieve(paymentIntentId)
-
-        failureCode = paymentIntent.last_payment_error?.code ?? null
-        failureMessage = paymentIntent.last_payment_error?.message ?? null
-      }
-
-      if (subscription.status === "incomplete") {
-        // First payment failed
-        await db.membership.updateMany({
-          where: { stripeSubscriptionId: subscriptionId },
-          data: {
-            paymentStatus: "FAILED",
-            isActive: false,
-            paymentFailureCode: failureCode,
-            paymentFailureMessage: failureMessage,
-          },
-        })
-      } else {
-        // Renewal payment failed -> still in retry window
-        await db.membership.updateMany({
-          where: { stripeSubscriptionId: subscriptionId },
-          data: {
-            paymentStatus: "PENDING", // attempt to charge the customer again before cancelling their membership
-          },
-        })
+      // A one-off invoice has no subscription and nothing to do with a membership.
+      const subscriptionId = subscriptionIdOf(invoice)
+      if (subscriptionId) {
+        await recordMembershipPaymentFailure(subscriptionId, invoice)
       }
       break
     }
 
     case "customer.subscription.updated": {
-      const sub = event.data.object as Stripe.Subscription
-
-      // Check if subscription is set to cancel at period end
-      if (sub.cancel_at_period_end && sub.cancel_at) {
-        // Update your DB with the endDate from Stripe
-        await db.membership.updateMany({
-          where: { stripeSubscriptionId: sub.id },
-          data: { endDate: new Date(sub.cancel_at * 1000), cancel: true }, // timestamp to JS Date
-        })
-      } else if (!sub.cancel_at_period_end) {
-        await db.membership.updateMany({
-          where: { stripeSubscriptionId: sub.id },
-          data: { cancel: false }, // timestamp to JS Date
-        })
-      }
+      await recordMembershipSchedule(event.data.object as Stripe.Subscription)
       break
     }
 
     case "customer.subscription.deleted": {
-      const sub = event.data.object as Stripe.Subscription
-
-      // Only mark inactive if subscription ended immediately
-      await db.membership.updateMany({
-        where: { stripeSubscriptionId: sub.id },
-        data: {
-          paymentStatus: "FAILED",
-          isActive: false,
-          endDate: new Date(),
-          cancel: true,
-        },
-      })
+      await recordMembershipEnded(event.data.object as Stripe.Subscription)
       break
     }
   }

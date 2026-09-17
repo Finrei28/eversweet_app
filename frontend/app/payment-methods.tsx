@@ -23,6 +23,7 @@ import BouncingLoader from "@/_components/loader"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { getNZYearMonth } from "@/lib/nzTime"
 import Toast from "react-native-toast-message"
+import { getErrorMessage } from "@/utils/getError"
 
 export default function PaymentMethodsStripe() {
   return (
@@ -63,11 +64,18 @@ function PaymentMethodsContent() {
   const fetchSavedCards = async () => {
     try {
       setLoadingCards(true)
-      // Users without a subscription have no subscription payment method, and
-      // that lookup 404s for them — it must not take the card list down with it.
+      // A failed membership-card lookup no longer takes the card list down with
+      // it. The screen only uses the answer to grey out the card a membership
+      // renews on, and removeCard refuses that card itself (409, its message is
+      // shown) — so not knowing costs a greyed-out button, not a lapsed
+      // membership. Failing the whole screen closed over it left a customer
+      // unable to see or add a card whenever Stripe was slow.
       const [cards, id] = await Promise.all([
         getSavedCards(),
-        getCurrentSubscriptionPaymentMethodId().catch(() => null),
+        getCurrentSubscriptionPaymentMethodId().catch((error) => {
+          console.warn("Could not tell which card pays for the membership:", error)
+          return null
+        }),
       ])
       setPaymentMethodId(id)
       setSavedCards(cards)
@@ -108,7 +116,12 @@ function PaymentMethodsContent() {
               fetchSavedCards()
             } catch (error) {
               console.error("Failed to delete payment method:", error)
-              Alert.alert("Error", "Failed to delete payment method.")
+              // The server's reason, when it gave one: it refuses the card a
+              // membership renews on, and "Failed" alone reads as a fault.
+              Alert.alert(
+                "Error",
+                getErrorMessage(error, "Failed to delete payment method."),
+              )
             }
           },
         },

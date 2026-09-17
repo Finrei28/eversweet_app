@@ -6,6 +6,7 @@ import app from "../app"
 import { db } from "../lib/db"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeDessert, makeUser } from "../test/factories"
+import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 
 // Reached through a getter because vi.mock is hoisted above the imports.
 vi.mock("../lib/redis", () => ({
@@ -425,6 +426,149 @@ describeIfDb("cart write paths", () => {
     expect(res.body.cartItems[0].dessert.id).toBe(plain.id)
   })
 
+  /**
+   * The load that finds an expired or doomed cart used to issue its refund, its releases
+   * and its delete as loose writes via Promise.all. Nothing tied them together: a write
+   * that failed partway left the others committed and the cart still standing, and the
+   * next load refunded and released again. Two loads racing past the same check did the
+   * same thing without needing a failure at all.
+   *
+   * The race tests have the same honesty problem as the add/remove race at the bottom of
+   * this file — locally the window is milliseconds, so the old code only failed them some
+   * of the time. The fixed code passes them every time, because the loser rolls back.
+   */
+  describe("sweeping a cart on load", () => {
+    const expiredCartFor = (
+      userId: string,
+      items: Array<{
+        dessertId: string
+        offerId?: string
+        loyaltyPointsUsed?: number
+      }>,
+    ) =>
+      db.cart.create({
+        data: {
+          userId,
+          expiresAt: new Date(Date.now() - 60_000),
+          cartItems: {
+            create: items.map((item) => ({
+              itemPriceInCents: 1200,
+              quantity: 1,
+              ...item,
+            })),
+          },
+        },
+      })
+
+    it("hands nothing back from an expired cart when its clean-up fails partway", async () => {
+      const user = await makeUser()
+      const offerDessert = await makeDessert(1200)
+      const rewardDessert = await makeDessert(1200)
+      const offer = await db.offer.create({
+        data: {
+          name: "Held when the cart expired",
+          audience: "EVERYONE",
+          dessertId: offerDessert.id,
+          itemPriceInCents: 500,
+        },
+      })
+      await db.offerRedemption.create({
+        data: { offerId: offer.id, userId: user.id, status: "REDEEMED", used: 1 },
+      })
+
+      // Points on a line and no Loyalty row to refund them to. That is only here to make
+      // the refund throw once the release has been issued - a stand-in for any write in
+      // the clean-up failing partway.
+      await expiredCartFor(user.id, [
+        { dessertId: offerDessert.id, offerId: offer.id },
+        { dessertId: rewardDessert.id, loyaltyPointsUsed: 500 },
+      ])
+
+      const res = await loadCart(user.id)
+      expect(res.status).toBe(500)
+
+      // The cart is still there holding the offer item, so the use must still be held.
+      expect(await db.cart.findUnique({ where: { userId: user.id } })).not.toBeNull()
+      const redemption = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(redemption?.used).toBe(1)
+    })
+
+    it("refunds an expired cart's points once when two loads race", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      await db.loyalty.create({ data: { userId: user.id, points: 0 } })
+      await expiredCartFor(user.id, [
+        { dessertId: dessert.id, loyaltyPointsUsed: 500 },
+      ])
+
+      const [a, b] = await Promise.all([loadCart(user.id), loadCart(user.id)])
+
+      // The loser is not an error: the cart it came to clear is cleared.
+      expect([a.status, b.status]).toEqual([200, 200])
+
+      const loyalty = await db.loyalty.findUnique({ where: { userId: user.id } })
+      const records = await db.loyaltyRecord.count({
+        where: { loyalty: { userId: user.id } },
+      })
+      expect(loyalty?.points).toBe(500)
+      expect(records).toBe(1)
+      expect(await db.cart.findUnique({ where: { userId: user.id } })).toBeNull()
+    })
+
+    it("hands a retired offer's use back once when two loads race", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      const offer = await db.offer.create({
+        data: {
+          name: "Three a customer",
+          audience: "EVERYONE",
+          dessertId: dessert.id,
+          itemPriceInCents: 500,
+          limit: 3,
+        },
+      })
+      // Two uses spent on past orders and the third held by the line in the cart. With
+      // `used` at 1 the `used > 0` guard would hide a second release, so this starts high
+      // enough for one to show.
+      await db.offerRedemption.create({
+        data: { offerId: offer.id, userId: user.id, status: "REDEEMED", used: 3 },
+      })
+      await db.cart.create({
+        data: {
+          userId: user.id,
+          expiresAt: new Date(Date.now() + 3_600_000),
+          cartItems: {
+            create: [
+              {
+                dessertId: dessert.id,
+                offerId: offer.id,
+                itemPriceInCents: 1200,
+                quantity: 1,
+              },
+            ],
+          },
+        },
+      })
+      await db.offer.update({
+        where: { id: offer.id },
+        data: { endsAt: new Date(Date.now() - 60_000) },
+      })
+
+      const [a, b] = await Promise.all([loadCart(user.id), loadCart(user.id)])
+
+      expect([a.status, b.status]).toEqual([200, 200])
+      expect(a.body.cartItems).toHaveLength(0)
+      expect(b.body.cartItems).toHaveLength(0)
+
+      const redemption = await db.offerRedemption.findUnique({
+        where: { offerId_userId: { offerId: offer.id, userId: user.id } },
+      })
+      expect(redemption?.used).toBe(2)
+    })
+  })
+
   it("says nothing when every offer in the cart is still running", async () => {
     const user = await makeUser()
     const dessert = await makeDessert(1200)
@@ -645,6 +789,130 @@ describeIfDb("cart write paths", () => {
 
     // A third is refused rather than given away.
     expect((await addItem(user.id, body)).status).toBe(400)
+  })
+
+  /**
+   * updateCartItem priced the line from the dessert the request named and never checked
+   * it was the dessert the line holds. `dessertId` is not written back, so editing a
+   * $20 dessert's line with a cheap dessert's id stored the cheap price against the $20
+   * dessert — and checkout charges what is stored.
+   */
+  describe("editing a line", () => {
+    const EDIT = "/api/cart/updateCartItem"
+
+    const editItem = (userId: string, body: Record<string, unknown>) =>
+      request(app)
+        .patch(EDIT)
+        .set("Authorization", `Bearer ${tokenFor(userId)}`)
+        .send({ quantity: 1, customisations: [], ...body })
+
+    /** What checkout would charge for this customer's cart right now. */
+    const payable = async (userId: string) => {
+      const items = await db.cartItem.findMany({
+        where: { cart: { userId } },
+        include: cartPricingInclude,
+      })
+      return calculateCartPrice(items).payableInCents
+    }
+
+    it("refuses an edit that names a cheaper dessert than the line holds", async () => {
+      const user = await makeUser()
+      const expensive = await makeDessert(2000)
+      const cheap = await makeDessert(300)
+
+      const added = await addItem(user.id, {
+        dessertId: expensive.id,
+        itemPriceInCents: 2000,
+      })
+      expect(added.status).toBe(201)
+
+      const res = await editItem(user.id, {
+        id: added.body.cartItem.id,
+        dessertId: cheap.id,
+        itemPriceInCents: 300,
+      })
+
+      expect(res.status).toBe(400)
+
+      const line = await db.cartItem.findUnique({
+        where: { id: added.body.cartItem.id },
+      })
+      expect(line?.dessertId).toBe(expensive.id)
+      expect(line?.itemPriceInCents).toBe(2000)
+      expect(await payable(user.id)).toBe(2000)
+    })
+
+    it("will not edit another customer's line", async () => {
+      const owner = await makeUser()
+      const stranger = await makeUser()
+      const dessert = await makeDessert(1200)
+      const topping = await db.ingredient.create({
+        data: { name: "Pearls", chineseName: "珍珠", priceInCents: 100 },
+      })
+
+      const added = await addItem(owner.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+      })
+
+      const res = await editItem(stranger.id, {
+        id: added.body.cartItem.id,
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+        customisations: [
+          {
+            id: topping.id,
+            name: "Pearls",
+            chineseName: "珍珠",
+            quantity: 3,
+            priceInCents: 100,
+            discountedAmountInCents: 0,
+          },
+        ],
+      })
+
+      // Not a 500 from the scoped write failing: the line is simply not theirs.
+      expect(res.status).toBe(404)
+      expect(
+        await db.customisationInCartItem.count({
+          where: { cartItemId: added.body.cartItem.id },
+        }),
+      ).toBe(0)
+      expect(await payable(owner.id)).toBe(1200)
+    })
+
+    it("still reprices a genuine edit from the database", async () => {
+      const user = await makeUser()
+      const dessert = await makeDessert(1200)
+      const topping = await db.ingredient.create({
+        data: { name: "Pearls", chineseName: "珍珠", priceInCents: 150 },
+      })
+
+      const added = await addItem(user.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+      })
+
+      const res = await editItem(user.id, {
+        id: added.body.cartItem.id,
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+        customisations: [
+          {
+            id: topping.id,
+            name: "Pearls",
+            chineseName: "珍珠",
+            quantity: 2,
+            // Claimed free; the database says 150c each.
+            priceInCents: 0,
+            discountedAmountInCents: 0,
+          },
+        ],
+      })
+
+      expect(res.status).toBe(200)
+      expect(await payable(user.id)).toBe(1200 + 2 * 150)
+    })
   })
 
   it("discounts a customisation on its real price, not the claimed one", async () => {

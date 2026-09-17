@@ -34,6 +34,7 @@ import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker"
 import {
+  PaymentRefundedError,
   createOrder,
   checkOrderStatus,
   getEstimatedPickUpTime,
@@ -391,7 +392,13 @@ function CheckoutContent() {
     try {
       const status = await checkPaymentStatus(intentId)
 
-      if (status.success) {
+      if (status.refunded) {
+        Alert.alert(
+          "Payment refunded",
+          "Your cart changed while you were paying, so this payment was refunded. Please check your cart and try again.",
+        )
+        setPaymentIntentId(null)
+      } else if (status.success) {
         // Payment was successful, check if order was created
         if (status.orderId) {
           setOrderInProgress(status.orderId)
@@ -876,7 +883,13 @@ function CheckoutContent() {
     } catch (error) {
       setPaymentSuccess(false)
       setCreatingOrderLoading(false)
-      if (paymentIntentId) {
+      if (error instanceof PaymentRefundedError) {
+        // Settled, not in doubt: no order, and the money is on its way back. The cart is
+        // what changed, so it is re-read to show what would be charged now.
+        setPaymentIntentId(null)
+        Alert.alert("Payment refunded", error.message)
+        void useCartStore.getState().fetchCart()
+      } else if (paymentIntentId) {
         Alert.alert(
           "Connection Issue",
           "Your payment may have been processed, but we couldn't confirm your order. Would you like to check the status?",
