@@ -71,6 +71,11 @@ export default function Loyalty() {
 
         setSelectedCategory(categories[0] || null)
         scrollToCategory(categories[0]?.id || "")
+        // Here rather than left to the activeCategory effect below: a refreshed menu whose
+        // first category keeps its id sets activeCategory to the value it already holds,
+        // React skips that update, and the effect never runs — the refreshed list would
+        // stay wherever the customer had scrolled it.
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true })
       }
     }
     fetchData()
@@ -90,8 +95,10 @@ export default function Loyalty() {
         flatListRef.current.scrollToOffset({ offset: 0, animated: true })
       }
     }
-    // Reacts to the customer picking a category; the menu is only read here. A changed
-    // menu is handled by the effect above, which reselects and so comes back through this.
+    // Reacts to the customer picking a category; the menu is only read here. A changed menu
+    // is the effect above's: it reselects and resets the list itself. Listing categories here
+    // too would run this in the same pass with the previous activeCategory — on first load
+    // that selects nothing over the first category, and the tab renders empty for a frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory])
 
