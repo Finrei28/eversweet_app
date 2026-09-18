@@ -149,10 +149,20 @@ describe("appVersionGate", () => {
     expect(res.headers["vary"]).toMatch(/x-app-build/i)
   })
 
+  it("tells caches it depends on the platform too, since the thresholds differ", async () => {
+    // The same build number passes on one platform and is refused on the other.
+    // On the build alone, a cache could answer an Android request from an iOS
+    // response and wave a retired build through.
+    const res = await asApp("/api/getMenu", "10")
+
+    expect(res.headers["vary"]).toMatch(/x-app-platform/i)
+  })
+
   it("tells caches so even for a request it never judged", async () => {
     const res = await asApp("/api/getMenu", null, null)
 
     expect(res.headers["vary"]).toMatch(/x-app-build/i)
+    expect(res.headers["vary"]).toMatch(/x-app-platform/i)
   })
 
   it("never refuses a staff app request, whatever build it claims", async () => {

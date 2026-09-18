@@ -46,9 +46,19 @@ export const appVersionGate = (
   // endpoints answer with `Cache-Control: public`, and a response that carries
   // the update-recommended header must not be handed by a cache to an app that
   // is already up to date — nor a response without it to one that is not.
+  //
+  // Both headers, because the thresholds are per platform: with an iOS minimum
+  // of 10 and an Android one of 50, build 20 passes on one and is refused on
+  // the other. Varying on the build alone would let a cache answer an Android
+  // request from an iOS response with the same number, and wave a retired build
+  // straight through.
+  //
   // Set here rather than from a `res.on("finish")` hook like requestTiming's:
   // that fires after the headers are flushed, where this would throw.
+  // Two calls rather than one array: `vary` accepts an array at runtime, but
+  // Express declares res.vary(field: string), and it appends either way.
   res.vary(APP_BUILD_HEADER)
+  res.vary(APP_PLATFORM_HEADER)
 
   if (UNGATED_PREFIXES.some((prefix) => req.path.startsWith(prefix))) {
     next()
