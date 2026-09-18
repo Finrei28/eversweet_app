@@ -30,6 +30,14 @@ export const REFUND_WINDOW_MS = 48 * 60 * 60 * 1000
 
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
 
+/**
+ * How long Stripe lets an uncaptured hold stand before it expires it, and so the furthest a
+ * capture can ever trail its authorisation. The refund search below looks back this much
+ * further than its own window, since a charge is listed by when the card was authorised but
+ * judged by when the money moved.
+ */
+const MAX_HOLD_MS = 7 * 24 * 60 * 60 * 1000
+
 const unixSeconds = (ms: number) => Math.floor(ms / 1000)
 
 /**
@@ -97,7 +105,23 @@ async function searchAll(query: string): Promise<Stripe.PaymentIntent[]> {
   }
 }
 
-/** Every charge taken in a window, across pages. */
+/**
+ * When a charge's money actually moved.
+ *
+ * `charge.created` is when the card was **authorised**, which for these payments is not when
+ * they were taken: every one is `capture_method: "manual"`, so the money moves later, when
+ * `createOrder` captures the hold. The balance transaction is what Stripe creates at that
+ * point, so its `created` is the capture. An uncaptured charge has none, and a charge whose
+ * transaction was not expanded reads as its authorisation rather than throwing.
+ */
+const capturedAt = (charge: Stripe.Charge): number => {
+  const transaction = charge.balance_transaction
+  return transaction && typeof transaction !== "string"
+    ? transaction.created
+    : charge.created
+}
+
+/** Every charge authorised in a window, with the transaction that says when it was taken. */
 async function chargesTakenBetween(
   from: number,
   to: number,
@@ -108,6 +132,7 @@ async function chargesTakenBetween(
   for (;;) {
     const page = await stripe.charges.list({
       created: { gte: unixSeconds(from), lte: unixSeconds(to) },
+      expand: ["data.balance_transaction"],
       limit: 100,
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
@@ -190,27 +215,40 @@ async function releaseAbandonedHolds(tag: OrderPaymentTag, now: number) {
  * the app, or changes their cart first, would otherwise wait for staff to notice. The same
  * holds for the website's checkout.
  *
- * **Candidates come from the charges taken in the window, not from a search for payments
- * created in it.** A search can only ask when the payment *intent* was created, and the
- * website creates its intent when the checkout's details are filled in - a page left open
- * longer than the window pays against an intent already outside it, and that payment would
- * be skipped by this run and by every run after it. A charge's time is when the money moved,
- * which is what the window is meant to mean. It also keeps the window's other job: money
- * taken before it is out of reach, so a first run cannot reach back into payments the shop
- * settled by hand.
+ * **Candidates come from charges, not from a search for payments.** A search can only ask
+ * when the payment *intent* was created, and the website creates its intent when the
+ * checkout's details are filled in - a page left open longer than the window pays against an
+ * intent already outside it, and that payment would be skipped by this run and by every run
+ * after it. Listing has a second benefit: the list API is immediately consistent, while
+ * search lags about a minute.
  *
- * Listing rather than searching has a second benefit - the list API is immediately
- * consistent, while search lags about a minute.
+ * **The window itself is on the capture** (`capturedAt`), because that is when the money
+ * moved and what both of its bounds are about: a payment is given half an hour to become an
+ * order before it is handed back, and money taken before the window is out of reach, so a
+ * run cannot reach into payments the shop settled by hand. Charges can only be *listed* by
+ * when the card was authorised, which for a manual capture comes first - so the search looks
+ * back a hold's whole life further than the window, and the capture time decides. Judging by
+ * the authorisation would refund a hold captured half an hour after it was made the moment it
+ * was taken, with none of that grace, and would lose a capture whose authorisation had aged
+ * past the window from every run after it.
  */
 async function refundOrderlessPayments(now: number) {
+  const takenBefore = unixSeconds(now - STRANDED_AFTER_MS)
+  const takenAfter = unixSeconds(now - REFUND_WINDOW_MS)
+
   const taken = (
-    await chargesTakenBetween(now - REFUND_WINDOW_MS, now - STRANDED_AFTER_MS)
+    await chargesTakenBetween(
+      now - REFUND_WINDOW_MS - MAX_HOLD_MS,
+      now - STRANDED_AFTER_MS,
+    )
   ).filter(
     (charge) =>
       charge.paid &&
       charge.captured &&
       charge.amount_refunded === 0 &&
-      typeof charge.payment_intent === "string",
+      typeof charge.payment_intent === "string" &&
+      capturedAt(charge) <= takenBefore &&
+      capturedAt(charge) >= takenAfter,
   )
   if (taken.length === 0) return
 

@@ -403,12 +403,19 @@ follow:
   - *Holds:* search can only filter on the payment's `created`, which narrows the list; the
     decision is then `latest_charge.created` (`heldLongEnoughAgo`). Going by `created` alone
     would release a hold seconds old, before its order is written.
-  - *Refunds:* there is no search for them at all. `chargesTakenBetween` lists the charges
-    created in the window, and their payments are what the sweep settles. Searching by the
-    payment's `created` put a payment made against an older intent outside the window on
-    every run, for good - nobody would ever refund that customer. The window's other job
-    still holds: money taken before it is out of reach, so a run cannot reach back into
-    payments the shop settled by hand.
+  - *Refunds:* there is no search for them at all. `chargesTakenBetween` lists charges, and
+    their payments are what the sweep settles. Searching by the payment's `created` put a
+    payment made against an older intent outside the window on every run, for good - nobody
+    would ever refund that customer.
+  - *And the refund window is on the **capture**,* not on the charge's own `created`. These
+    are manual captures: a charge is created when the card is authorised and the money moves
+    later, when `createOrder` captures the hold. `capturedAt` reads the balance transaction,
+    which Stripe creates at that moment. Both bounds are about the money: half an hour to
+    become an order before it is handed back, and anything taken before the window out of
+    reach, so a run cannot reach back into payments the shop settled by hand. Charges can
+    only be *listed* by the authorisation, so the search looks back `MAX_HOLD_MS` (Stripe's
+    seven-day hold life, the furthest a capture can trail its authorisation) further than
+    the window, and the capture time decides.
   - Because those charges are **every** charge on the account, the payment is checked for its
     tag (`isOrderPayment`) before anything is refunded. Without that the sweep would refund
     membership invoices, which have no order either.

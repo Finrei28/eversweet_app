@@ -135,8 +135,9 @@ describeIfDb("sweepStrandedPayments", () => {
         next_page: null,
       }),
     )
-    // The charges the refund pass lists: one for every payment whose money has been taken,
-    // filtered by when the charge itself was created.
+    // The charges the refund pass lists: one for every payment whose money has been taken.
+    // Stripe lists them by when the card was authorised (`created`) and carries the balance
+    // transaction that says when the money actually moved.
     stripeApi.charges.list.mockImplementation(
       async ({ created }: { created?: { gte?: number; lte?: number } }) => ({
         data: [...intents.values()]
@@ -146,11 +147,17 @@ describeIfDb("sweepStrandedPayments", () => {
               id: string
               amount_refunded: number
               created?: number
+              capturedAt?: number
             }
+            const authorisedAt = charge.created ?? (intent.created as number)
             return {
               id: charge.id,
               object: "charge",
-              created: charge.created ?? (intent.created as number),
+              created: authorisedAt,
+              balance_transaction: {
+                id: `txn_${charge.id}`,
+                created: charge.capturedAt ?? authorisedAt,
+              },
               paid: true,
               captured: true,
               amount_refunded: charge.amount_refunded,
@@ -373,13 +380,21 @@ describeIfDb("sweepStrandedPayments", () => {
       expect(stripeApi.refunds.create).not.toHaveBeenCalled()
     })
 
-    it("asks for the charges taken between half an hour and two days ago", async () => {
+    it("asks for the charges authorised far enough back to cover a late capture", async () => {
       await sweepStrandedPayments(NOW)
 
       const cutoff = Math.floor((NOW - STRANDED_AFTER_MS) / 1000)
-      const window = Math.floor((NOW - REFUND_WINDOW_MS) / 1000)
+      // A hold can be captured up to seven days after it was authorised, and charges can
+      // only be listed by the authorisation - so the search reaches back that much further
+      // than the window it judges by.
+      const window = Math.floor(
+        (NOW - REFUND_WINDOW_MS - 7 * 24 * 60 * 60 * 1000) / 1000,
+      )
       expect(stripeApi.charges.list).toHaveBeenCalledWith(
-        expect.objectContaining({ created: { gte: window, lte: cutoff } }),
+        expect.objectContaining({
+          created: { gte: window, lte: cutoff },
+          expand: ["data.balance_transaction"],
+        }),
       )
       // One pass over the charges covers both services, so no search asks for taken payments.
       for (const [{ query }] of stripeApi.paymentIntents.search.mock.calls) {
@@ -424,12 +439,81 @@ describeIfDb("sweepStrandedPayments", () => {
           id: "ch_settled_by_hand",
           amount_refunded: 0,
           created: Math.floor((NOW - 3 * 24 * 60 * 60 * 1000) / 1000),
+          capturedAt: Math.floor((NOW - 3 * 24 * 60 * 60 * 1000) / 1000),
         },
       })
 
       await sweepStrandedPayments(NOW)
 
       expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+    })
+
+    /**
+     * These are manual captures: the charge is created when the card is authorised, and the
+     * money moves later, when createOrder captures the hold. The half hour a payment is given
+     * to become an order runs from the capture - going by the authorisation would hand back a
+     * hold captured a moment ago simply because the card was authorised earlier.
+     */
+    it("gives a payment captured a moment ago its full half hour, however old the hold", async () => {
+      const user = await makeUser()
+      taken("pi_just_captured", user.id, {
+        latest_charge: {
+          id: "ch_just_captured",
+          amount_refunded: 0,
+          created: Math.floor((NOW - 3 * 60 * 60 * 1000) / 1000),
+          capturedAt: Math.floor((NOW - 10 * 60 * 1000) / 1000),
+        },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+    })
+
+    it("refunds that payment once the half hour has passed since the capture", async () => {
+      const user = await makeUser()
+      taken("pi_captured_late", user.id, {
+        latest_charge: {
+          id: "ch_captured_late",
+          amount_refunded: 0,
+          created: Math.floor((NOW - 3 * 60 * 60 * 1000) / 1000),
+          capturedAt: Math.floor((NOW - 45 * 60 * 1000) / 1000),
+        },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).toHaveBeenCalledWith(
+        { payment_intent: "pi_captured_late", metadata: { userId: user.id } },
+        { idempotencyKey: "order-refund:pi_captured_late" },
+      )
+    })
+
+    /**
+     * And the far end: a hold authorised days ago but captured this morning is money taken
+     * today. Listing by the authorisation alone would have dropped it out of every run.
+     */
+    it("refunds a capture whose authorisation has aged past the window", async () => {
+      const user = await makeUser()
+      taken("pi_late_capture_old_hold", user.id, {
+        created: Math.floor((NOW - 4 * 24 * 60 * 60 * 1000) / 1000),
+        latest_charge: {
+          id: "ch_late_capture_old_hold",
+          amount_refunded: 0,
+          created: Math.floor((NOW - 4 * 24 * 60 * 60 * 1000) / 1000),
+          capturedAt: Math.floor((NOW - 2 * 60 * 60 * 1000) / 1000),
+        },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).toHaveBeenCalledWith(
+        {
+          payment_intent: "pi_late_capture_old_hold",
+          metadata: { userId: user.id },
+        },
+        { idempotencyKey: "order-refund:pi_late_capture_old_hold" },
+      )
     })
 
     /**
