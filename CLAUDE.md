@@ -381,13 +381,47 @@ Checks, in order:
 - **`canceled`:** 409 `released`.
 
 **The stranded-payment sweep** (`lib/strandedPayments`, every 5 minutes) mops up what
-`createOrder` never finished, using the same lock and keys. It looks at app payments older
-than 30 minutes:
+`createOrder` never finished, using the same lock and keys. It looks at payments older than
+30 minutes:
 - It releases holds that have no order, and captures any hold that does (which should never
-  happen, so it logs loudly).
-- It refunds taken payments that have no order, looking back 48 hours.
+  happen, so it logs loudly). Holds are found by Stripe search, which lags about a minute.
+- It refunds taken payments that have no order, looking back 48 hours. Those are found by
+  **listing charges** in that window rather than searching for payments created in it - see
+  below - so that half is immediately consistent.
 
-It uses Stripe search, which lags about a minute.
+**It settles the website's payments too** (`metadata.source = "website"`, alongside
+`purpose = "app_order"`; `ORDER_PAYMENT_TAGS`). Since 2026-09-18 the website holds the card
+when its customer pays. Its own `createNewOrder` (`src/server/websiteOrder.ts` in that repo)
+captures as the last step before the order commits, under this advisory lock, with the same
+`order-capture:<id>` and `order-refund:<id>` keys and parameters. Nothing on Vercel runs on a
+timer, so this sweep is what lets go of an abandoned website checkout's hold. Two things
+follow:
+
+- **Both halves measure from when the money moved, not from when the payment was created.**
+  The website creates its payment when the checkout details are filled in, possibly long
+  before Pay, so the payment's own `created` says nothing about when the card was used.
+  - *Holds:* search can only filter on the payment's `created`, which narrows the list; the
+    decision is then `latest_charge.created` (`heldLongEnoughAgo`). Going by `created` alone
+    would release a hold seconds old, before its order is written.
+  - *Refunds:* there is no search for them at all. `chargesTakenBetween` lists charges, and
+    their payments are what the sweep settles. Searching by the payment's `created` put a
+    payment made against an older intent outside the window on every run, for good - nobody
+    would ever refund that customer.
+  - *And the refund window is on the **capture**,* not on the charge's own `created`. These
+    are manual captures: a charge is created when the card is authorised and the money moves
+    later, when `createOrder` captures the hold. `capturedAt` reads the balance transaction,
+    which Stripe creates at that moment. Both bounds are about the money: half an hour to
+    become an order before it is handed back, and anything taken before the window out of
+    reach, so a run cannot reach back into payments the shop settled by hand. Charges can
+    only be *listed* by the authorisation, so the search looks back `MAX_HOLD_MS` (Stripe's
+    seven-day hold life, the furthest a capture can trail its authorisation) further than
+    the window, and the capture time decides.
+  - Because those charges are **every** charge on the account, the payment is checked for its
+    tag (`isOrderPayment`) before anything is refunded. Without that the sweep would refund
+    membership invoices, which have no order either.
+- **Refunds of website payments carry no metadata** (there is no `userId`). The website sends
+  exactly those parameters under the same key, and Stripe refuses a reused key with different
+  ones. Change the keys or parameters in both repos or neither.
 
 **What the app does** (`app/checkout.tsx`):
 - `PaymentReleasedError` shows "You haven't been charged"; `PaymentRefundedError` shows
