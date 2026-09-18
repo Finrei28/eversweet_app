@@ -309,13 +309,18 @@ after `requestTiming`) retires customer app builds. The app sends `X-App-Build` 
 - **The gate is only as prompt as the first request.** `app/_layout.tsx`'s launch
   `getAnnouncements()` is what trips it before the splash hides; if that call ever goes, a
   blocked build looks normal until the customer touches something.
+- **Take the number from the store, not from EAS.** `eas build:version:get` answers "what
+  will the next build be" — EAS increments its counter when a build *runs*, not when one is
+  submitted, so a build made and never shipped leaves it ahead of anything a customer has.
+  Setting `MIN_*` from it blocks everybody, newest release included. The live number is the
+  one App Store Connect shows against the released version and the one in the Play Console's
+  release.
 - **Raising `MIN_*`:** only to a build already live in that store, never above one still in
   staged rollout on Android, and outside Auckland trading hours — a block landing mid-checkout
   unmounts `checkout.tsx` and leaves an authorised hold the stranded-payment sweep releases
-  within 30 minutes. Never above the newest build, or you block everybody, TestFlight
-  included: those are production builds and spend the same counter. Let `RECOMMENDED_*` lead
-  by a week or two. Rollback is one env change and a restart, which is the whole argument for
-  env over a table.
+  within 30 minutes. Remember TestFlight builds are production builds and spend the same
+  counter, so a minimum can lock testers out too. Let `RECOMMENDED_*` lead by a week or two.
+  Rollback is one env change and a restart, which is the whole argument for env over a table.
 - The in-band `authoriseOnly` 426 in `createPaymentIntent` stays. This gate is configuration
   and can be switched off by an unset variable or a header stripped in front of the server;
   that one is proved by the request itself and cannot. Both share the code, and the app blocks
