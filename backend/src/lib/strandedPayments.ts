@@ -8,6 +8,7 @@ import {
   refundOf,
   refundOrderPayment,
   releaseHold,
+  WEBSITE_PAYMENT_SOURCE,
 } from "./orderPayment"
 import { stripe } from "./stripeClient"
 import { orNullIfMissing } from "./stripeErrors"
@@ -30,6 +31,42 @@ export const REFUND_WINDOW_MS = 48 * 60 * 60 * 1000
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
 
 const unixSeconds = (ms: number) => Math.floor(ms / 1000)
+
+/**
+ * The payments this sweep settles, by the metadata the code that creates them tags them with:
+ * the app's (`createPaymentIntent`), and the website's (its `/api/checkout_sessions`). The
+ * website holds a card and captures it in its `createNewOrder` the same way `createOrder`
+ * does - under the same lock, with the same capture and refund keys - so both are settled
+ * alike. Stripe search cannot mix AND with OR, so each is searched on its own.
+ */
+export const ORDER_PAYMENT_TAGS = [
+  `metadata['purpose']:'${ORDER_PAYMENT_PURPOSE}'`,
+  `metadata['source']:'${WEBSITE_PAYMENT_SOURCE}'`,
+] as const
+
+type OrderPaymentTag = (typeof ORDER_PAYMENT_TAGS)[number]
+
+/** Who a payment was for, for the log: an app user, or a website checkout, which has none. */
+const payer = (intent: Stripe.PaymentIntent) =>
+  intent.metadata?.userId ? `user ${intent.metadata.userId}` : "a website checkout"
+
+/**
+ * Whether the card was held more than `STRANDED_AFTER_MS` ago, by the charge's own time.
+ *
+ * Search can only ask when the payment intent was created. The app creates its payment right
+ * before the card is confirmed, so the two are seconds apart - but the website creates its
+ * payment as soon as the checkout's details are filled in, which can be long before Pay. By
+ * the payment's age alone, a website hold made a moment ago could be released, or its money
+ * refunded, in the seconds before its order is written. Needs the charge expanded; a charge
+ * whose time cannot be read leaves it to the search's own filter.
+ */
+const heldLongEnoughAgo = (intent: Stripe.PaymentIntent, now: number) => {
+  const charge = intent.latest_charge
+  if (!charge || typeof charge === "string" || typeof charge.created !== "number") {
+    return true
+  }
+  return charge.created < unixSeconds(now - STRANDED_AFTER_MS)
+}
 
 /** Every payment intent a search matches, across pages. */
 async function searchAll(query: string): Promise<Stripe.PaymentIntent[]> {
@@ -56,9 +93,9 @@ async function searchAll(query: string): Promise<Stripe.PaymentIntent[]> {
  * would ever let the hold go, and the amount would sit on the customer's card as pending
  * until the card network gave up on it days later.
  */
-async function releaseAbandonedHolds(now: number) {
+async function releaseAbandonedHolds(tag: OrderPaymentTag, now: number) {
   const held = await searchAll(
-    `status:'requires_capture' AND metadata['purpose']:'${ORDER_PAYMENT_PURPOSE}' ` +
+    `status:'requires_capture' AND ${tag} ` +
       `AND created<${unixSeconds(now - STRANDED_AFTER_MS)}`,
   )
 
@@ -70,7 +107,9 @@ async function releaseAbandonedHolds(now: number) {
         await lockPayment(tx, found.id)
 
         const intent = await orNullIfMissing(
-          stripe.paymentIntents.retrieve(found.id),
+          stripe.paymentIntents.retrieve(found.id, {
+            expand: ["latest_charge"],
+          }),
         )
         if (intent?.status !== "requires_capture") return
 
@@ -90,9 +129,12 @@ async function releaseAbandonedHolds(now: number) {
           return
         }
 
+        // Held too recently to call abandoned, however old the payment itself is.
+        if (!heldLongEnoughAgo(intent, now)) return
+
         await releaseHold(intent.id)
         console.warn(
-          `Released an abandoned hold: payment ${intent.id}, user ${intent.metadata?.userId}, ` +
+          `Released an abandoned hold: payment ${intent.id}, ${payer(intent)}, ` +
             `${intent.amount_capturable} ${intent.currency}.`,
         )
       }, TRANSACTION_OPTIONS)
@@ -112,11 +154,12 @@ async function releaseAbandonedHolds(now: number) {
  * Postgres cannot commit together: a commit that fails straight after a successful capture
  * leaves the money taken and no order. The app's retry usually repairs that — the payment
  * is found taken and the order placed without capturing again — but a customer who closes
- * the app, or changes their cart first, would otherwise wait for staff to notice.
+ * the app, or changes their cart first, would otherwise wait for staff to notice. The same
+ * holds for the website's checkout.
  */
-async function refundOrderlessPayments(now: number) {
+async function refundOrderlessPayments(tag: OrderPaymentTag, now: number) {
   const taken = await searchAll(
-    `status:'succeeded' AND metadata['purpose']:'${ORDER_PAYMENT_PURPOSE}' ` +
+    `status:'succeeded' AND ${tag} ` +
       `AND created<${unixSeconds(now - STRANDED_AFTER_MS)} ` +
       `AND created>${unixSeconds(now - REFUND_WINDOW_MS)}`,
   )
@@ -151,14 +194,18 @@ async function refundOrderlessPayments(now: number) {
             expand: ["latest_charge"],
           }),
         )
-        if (!intent || intent.status !== "succeeded" || refundOf(intent) > 0) {
+        if (
+          !intent ||
+          intent.status !== "succeeded" ||
+          refundOf(intent) > 0 ||
+          !heldLongEnoughAgo(intent, now)
+        ) {
           return
         }
 
-        const userId = intent.metadata?.userId ?? ""
-        await refundOrderPayment(intent, userId)
+        await refundOrderPayment(intent, intent.metadata?.userId)
         console.error(
-          `Refunded payment ${intent.id} for user ${userId}: ${intent.amount_received} ${intent.currency} ` +
+          `Refunded payment ${intent.id} for ${payer(intent)}: ${intent.amount_received} ${intent.currency} ` +
             `was taken but no order was placed within 30 minutes.`,
         )
       }, TRANSACTION_OPTIONS)
@@ -172,24 +219,29 @@ async function refundOrderlessPayments(now: number) {
 }
 
 /**
- * Settles every app payment that has waited too long for its order. Run on a timer.
- * Never throws: a failure is logged, and whatever it left is picked up by the next run.
+ * Settles every app and website payment that has waited too long for its order. Run on a
+ * timer. Never throws: a failure is logged, and whatever it left is picked up by the next run.
  * Safe on more than one instance at once — every step is under the payment's lock, and
  * captures and refunds are idempotent on the payment.
  */
 export async function sweepStrandedPayments(now = Date.now()) {
-  try {
-    await releaseAbandonedHolds(now)
-  } catch (error) {
-    console.error("Could not look for abandoned holds:", getErrorMessage(error))
-  }
+  for (const tag of ORDER_PAYMENT_TAGS) {
+    try {
+      await releaseAbandonedHolds(tag, now)
+    } catch (error) {
+      console.error(
+        `Could not look for abandoned holds (${tag}):`,
+        getErrorMessage(error),
+      )
+    }
 
-  try {
-    await refundOrderlessPayments(now)
-  } catch (error) {
-    console.error(
-      "Could not look for payments taken without an order:",
-      getErrorMessage(error),
-    )
+    try {
+      await refundOrderlessPayments(tag, now)
+    } catch (error) {
+      console.error(
+        `Could not look for payments taken without an order (${tag}):`,
+        getErrorMessage(error),
+      )
+    }
   }
 }

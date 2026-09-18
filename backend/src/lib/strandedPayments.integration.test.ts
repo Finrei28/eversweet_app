@@ -33,7 +33,7 @@ const held = (id: string, userId: string, extra: Record<string, unknown> = {}) =
     currency: "nzd",
     created: longAgo,
     metadata: { purpose: "app_order", userId },
-    latest_charge: { id: `ch_${id}`, amount_refunded: 0 },
+    latest_charge: { id: `ch_${id}`, amount_refunded: 0, created: longAgo },
     ...extra,
   }
   intents.set(id, intent)
@@ -47,6 +47,32 @@ const taken = (id: string, userId: string, extra: Record<string, unknown> = {}) 
     amount_received: 1200,
     ...extra,
   })
+
+/**
+ * A website checkout's payment, as the website's `/api/checkout_sessions` creates it: tagged
+ * `source: "website"`, with no user. `heldAt` is when the card was held, which for a website
+ * payment can be long after the payment was created.
+ */
+const websiteHeld = (
+  id: string,
+  { heldAt = longAgo, ...extra }: Record<string, unknown> & { heldAt?: number } = {},
+) =>
+  held(id, "", {
+    metadata: { source: "website", itemCount: "2" },
+    latest_charge: { id: `ch_${id}`, amount_refunded: 0, created: heldAt },
+    ...extra,
+  })
+
+const websiteTaken = (id: string, extra: Record<string, unknown> & { heldAt?: number } = {}) =>
+  websiteHeld(id, {
+    status: "succeeded",
+    amount_capturable: 0,
+    amount_received: 1200,
+    ...extra,
+  })
+
+/** A moment ago: well inside the half hour a payment is given to become an order. */
+const justNow = Math.floor((NOW - 60_000) / 1000)
 
 const orderFor = (paymentIntentId: string, appUserId: string) =>
   db.order.create({
@@ -64,8 +90,30 @@ const orderFor = (paymentIntentId: string, appUserId: string) =>
     },
   })
 
+const websiteOrderFor = (paymentIntentId: string) =>
+  db.order.create({
+    data: {
+      tempOrderId: "6003",
+      priceInCents: 1200,
+      customerFirstName: "Grace",
+      customerLastName: "Hopper",
+      customerEmail: "grace@example.test",
+      status: "PENDING",
+      GST: 157,
+      source: "WEBSITE",
+      paymentIntentId,
+    },
+  })
+
 /** The statuses a search query asks for. */
 const statusIn = (query: string) => /status:'([a-z_]+)'/.exec(query)?.[1]
+
+/** Whether a payment carries the metadata tag a search query asks for, as Stripe matches it. */
+const taggedFor = (query: string, intent: Record<string, unknown>) => {
+  const [, key, value] = /metadata\['(\w+)'\]:'([^']*)'/.exec(query) ?? []
+  const metadata = intent.metadata as Record<string, string> | undefined
+  return key !== undefined && metadata?.[key] === value
+}
 
 describeIfDb("sweepStrandedPayments", () => {
   beforeEach(async () => {
@@ -79,7 +127,9 @@ describeIfDb("sweepStrandedPayments", () => {
     stripeApi.paymentIntents.search.mockImplementation(
       async ({ query }: { query: string }) => ({
         data: [...intents.values()]
-          .filter((intent) => intent.status === statusIn(query))
+          .filter(
+            (intent) => intent.status === statusIn(query) && taggedFor(query, intent),
+          )
           .map((intent) => ({ ...intent })),
         has_more: false,
         next_page: null,
@@ -303,6 +353,117 @@ describeIfDb("sweepStrandedPayments", () => {
           query: `status:'succeeded' AND metadata['purpose']:'app_order' AND created<${cutoff} AND created>${window}`,
         }),
       )
+    })
+  })
+
+  /**
+   * The website holds a card when its customer pays and captures it when its createNewOrder
+   * writes the order, under this same lock and with the same keys - so an abandoned website
+   * checkout leaves exactly what an abandoned app checkout does.
+   */
+  describe("website payments", () => {
+    it("asks for website holds and taken payments as well as the app's", async () => {
+      await sweepStrandedPayments(NOW)
+
+      const cutoff = Math.floor((NOW - STRANDED_AFTER_MS) / 1000)
+      const window = Math.floor((NOW - REFUND_WINDOW_MS) / 1000)
+      expect(stripeApi.paymentIntents.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: `status:'requires_capture' AND metadata['source']:'website' AND created<${cutoff}`,
+        }),
+      )
+      expect(stripeApi.paymentIntents.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: `status:'succeeded' AND metadata['source']:'website' AND created<${cutoff} AND created>${window}`,
+        }),
+      )
+    })
+
+    it("lets go of a website hold nobody placed an order for", async () => {
+      websiteHeld("pi_web_abandoned")
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.paymentIntents.retrieve).toHaveBeenCalledWith("pi_web_abandoned", {
+        expand: ["latest_charge"],
+      })
+      expect(stripeApi.paymentIntents.cancel).toHaveBeenCalledWith("pi_web_abandoned", {
+        cancellation_reason: "abandoned",
+      })
+      expect(stripeApi.paymentIntents.cancel).toHaveBeenCalledTimes(1)
+    })
+
+    /**
+     * The website creates its payment when the checkout's details are filled in, not when
+     * Pay is pressed. A payment made long ago whose card was held a minute ago is a customer
+     * whose order is about to be written, not an abandoned one.
+     */
+    it("leaves a website hold made a moment ago, however old its payment", async () => {
+      websiteHeld("pi_web_paying", { heldAt: justNow })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.paymentIntents.cancel).not.toHaveBeenCalled()
+      expect(intents.get("pi_web_paying")?.status).toBe("requires_capture")
+    })
+
+    it("takes the money for a website hold whose order exists", async () => {
+      websiteHeld("pi_web_ordered")
+      await websiteOrderFor("pi_web_ordered")
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.paymentIntents.capture).toHaveBeenCalledWith(
+        "pi_web_ordered",
+        {},
+        { idempotencyKey: "order-capture:pi_web_ordered" },
+      )
+      expect(stripeApi.paymentIntents.cancel).not.toHaveBeenCalled()
+    })
+
+    /**
+     * No metadata: the website refunds its own mismatched payments with exactly these
+     * parameters under this key, and Stripe refuses a reused key with different ones.
+     */
+    it("refunds a website payment taken without an order, with the website's own parameters", async () => {
+      websiteTaken("pi_web_orphan")
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).toHaveBeenCalledTimes(1)
+      expect(stripeApi.refunds.create).toHaveBeenCalledWith(
+        { payment_intent: "pi_web_orphan" },
+        { idempotencyKey: "order-refund:pi_web_orphan" },
+      )
+    })
+
+    it("does not refund a website payment whose card was held a moment ago", async () => {
+      websiteTaken("pi_web_retrying", { heldAt: justNow })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+    })
+
+    it("leaves a website payment that has its order", async () => {
+      websiteTaken("pi_web_paid_for")
+      await websiteOrderFor("pi_web_paid_for")
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+    })
+
+    it("settles each payment once, not once per search", async () => {
+      const user = await makeUser()
+      held("pi_app_abandoned", user.id)
+      websiteHeld("pi_web_abandoned")
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.paymentIntents.cancel).toHaveBeenCalledTimes(2)
+      expect(intents.get("pi_app_abandoned")?.status).toBe("canceled")
+      expect(intents.get("pi_web_abandoned")?.status).toBe("canceled")
     })
   })
 

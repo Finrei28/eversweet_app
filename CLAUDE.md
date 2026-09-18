@@ -381,13 +381,30 @@ Checks, in order:
 - **`canceled`:** 409 `released`.
 
 **The stranded-payment sweep** (`lib/strandedPayments`, every 5 minutes) mops up what
-`createOrder` never finished, using the same lock and keys. It looks at app payments older
-than 30 minutes:
+`createOrder` never finished, using the same lock and keys. It looks at payments older than
+30 minutes:
 - It releases holds that have no order, and captures any hold that does (which should never
   happen, so it logs loudly).
 - It refunds taken payments that have no order, looking back 48 hours.
 
 It uses Stripe search, which lags about a minute.
+
+**It settles the website's payments too** (`metadata.source = "website"`, alongside
+`purpose = "app_order"`; `ORDER_PAYMENT_TAGS`). Since 2026-09-18 the website holds the card
+when its customer pays. Its own `createNewOrder` (`src/server/websiteOrder.ts` in that repo)
+captures as the last step before the order commits, under this advisory lock, with the same
+`order-capture:<id>` and `order-refund:<id>` keys and parameters. Nothing on Vercel runs on a
+timer, so this sweep is what lets go of an abandoned website checkout's hold. Two things
+follow:
+
+- **Age is measured from when the card was held** (`latest_charge.created`), not from when
+  the payment was created. Search can only filter on the payment's `created`, which the sweep
+  still uses to narrow the list. The website creates its payment when the checkout details
+  are filled in, possibly long before Pay. Going by `created` alone would release a hold
+  seconds old, before its order is written.
+- **Refunds of website payments carry no metadata** (there is no `userId`). The website sends
+  exactly those parameters under the same key, and Stripe refuses a reused key with different
+  ones. Change the keys or parameters in both repos or neither.
 
 **What the app does** (`app/checkout.tsx`):
 - `PaymentReleasedError` shows "You haven't been charged"; `PaymentRefundedError` shows

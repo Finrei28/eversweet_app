@@ -17,6 +17,13 @@ export const CHARGE_CURRENCY = "nzd"
  */
 export const ORDER_PAYMENT_PURPOSE = "app_order"
 
+/**
+ * Written into the metadata of every payment the website's checkout creates. The website
+ * places and captures its own orders, but the stranded-payment sweep settles its payments
+ * too - see `ORDER_PAYMENT_TAGS` in `lib/strandedPayments`.
+ */
+export const WEBSITE_PAYMENT_SOURCE = "website"
+
 /** A refusal to hand straight back to the client. */
 export type PaymentRefusal = {
   status: number
@@ -79,10 +86,13 @@ export const lockPayment = (tx: DbTransactionClient, paymentIntentId: string) =>
  * every caller — `settleOrderPayment` and the stranded-payment sweep — so however the two
  * interleave, a payment is refunded once; Stripe refuses a reused key with different
  * parameters, which is why the reason goes to the log rather than into the request.
+ *
+ * A website payment has no user, and is refunded with no metadata at all: exactly what the
+ * website's own `createNewOrder` sends under this key, so its refund and the sweep's are one.
  */
-export const refundOrderPayment = (intent: Stripe.PaymentIntent, userId: string) =>
+export const refundOrderPayment = (intent: Stripe.PaymentIntent, userId?: string) =>
   stripe.refunds.create(
-    { payment_intent: intent.id, metadata: { userId } },
+    { payment_intent: intent.id, ...(userId ? { metadata: { userId } } : {}) },
     { idempotencyKey: `order-refund:${intent.id}` },
   )
 
