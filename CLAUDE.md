@@ -384,10 +384,10 @@ Checks, in order:
 `createOrder` never finished, using the same lock and keys. It looks at payments older than
 30 minutes:
 - It releases holds that have no order, and captures any hold that does (which should never
-  happen, so it logs loudly).
-- It refunds taken payments that have no order, looking back 48 hours.
-
-It uses Stripe search, which lags about a minute.
+  happen, so it logs loudly). Holds are found by Stripe search, which lags about a minute.
+- It refunds taken payments that have no order, looking back 48 hours. Those are found by
+  **listing charges** in that window rather than searching for payments created in it - see
+  below - so that half is immediately consistent.
 
 **It settles the website's payments too** (`metadata.source = "website"`, alongside
 `purpose = "app_order"`; `ORDER_PAYMENT_TAGS`). Since 2026-09-18 the website holds the card
@@ -397,11 +397,21 @@ captures as the last step before the order commits, under this advisory lock, wi
 timer, so this sweep is what lets go of an abandoned website checkout's hold. Two things
 follow:
 
-- **Age is measured from when the card was held** (`latest_charge.created`), not from when
-  the payment was created. Search can only filter on the payment's `created`, which the sweep
-  still uses to narrow the list. The website creates its payment when the checkout details
-  are filled in, possibly long before Pay. Going by `created` alone would release a hold
-  seconds old, before its order is written.
+- **Both halves measure from when the money moved, not from when the payment was created.**
+  The website creates its payment when the checkout details are filled in, possibly long
+  before Pay, so the payment's own `created` says nothing about when the card was used.
+  - *Holds:* search can only filter on the payment's `created`, which narrows the list; the
+    decision is then `latest_charge.created` (`heldLongEnoughAgo`). Going by `created` alone
+    would release a hold seconds old, before its order is written.
+  - *Refunds:* there is no search for them at all. `chargesTakenBetween` lists the charges
+    created in the window, and their payments are what the sweep settles. Searching by the
+    payment's `created` put a payment made against an older intent outside the window on
+    every run, for good - nobody would ever refund that customer. The window's other job
+    still holds: money taken before it is out of reach, so a run cannot reach back into
+    payments the shop settled by hand.
+  - Because those charges are **every** charge on the account, the payment is checked for its
+    tag (`isOrderPayment`) before anything is refunded. Without that the sweep would refund
+    membership invoices, which have no order either.
 - **Refunds of website payments carry no metadata** (there is no `userId`). The website sends
   exactly those parameters under the same key, and Stripe refuses a reused key with different
   ones. Change the keys or parameters in both repos or neither.

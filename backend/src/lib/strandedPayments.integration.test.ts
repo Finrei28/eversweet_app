@@ -135,6 +135,36 @@ describeIfDb("sweepStrandedPayments", () => {
         next_page: null,
       }),
     )
+    // The charges the refund pass lists: one for every payment whose money has been taken,
+    // filtered by when the charge itself was created.
+    stripeApi.charges.list.mockImplementation(
+      async ({ created }: { created?: { gte?: number; lte?: number } }) => ({
+        data: [...intents.values()]
+          .filter((intent) => intent.status === "succeeded")
+          .map((intent) => {
+            const charge = intent.latest_charge as {
+              id: string
+              amount_refunded: number
+              created?: number
+            }
+            return {
+              id: charge.id,
+              object: "charge",
+              created: charge.created ?? (intent.created as number),
+              paid: true,
+              captured: true,
+              amount_refunded: charge.amount_refunded,
+              payment_intent: intent.id,
+            }
+          })
+          .filter(
+            (charge) =>
+              (created?.gte === undefined || charge.created >= created.gte) &&
+              (created?.lte === undefined || charge.created <= created.lte),
+          ),
+        has_more: false,
+      }),
+    )
     stripeApi.paymentIntents.retrieve.mockImplementation(async (id: string) => {
       const intent = intents.get(id)
       if (!intent) throw resourceMissing(actual)
@@ -343,16 +373,78 @@ describeIfDb("sweepStrandedPayments", () => {
       expect(stripeApi.refunds.create).not.toHaveBeenCalled()
     })
 
-    it("only asks for app payments between half an hour and two days old", async () => {
+    it("asks for the charges taken between half an hour and two days ago", async () => {
       await sweepStrandedPayments(NOW)
 
       const cutoff = Math.floor((NOW - STRANDED_AFTER_MS) / 1000)
       const window = Math.floor((NOW - REFUND_WINDOW_MS) / 1000)
-      expect(stripeApi.paymentIntents.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: `status:'succeeded' AND metadata['purpose']:'app_order' AND created<${cutoff} AND created>${window}`,
-        }),
+      expect(stripeApi.charges.list).toHaveBeenCalledWith(
+        expect.objectContaining({ created: { gte: window, lte: cutoff } }),
       )
+      // One pass over the charges covers both services, so no search asks for taken payments.
+      for (const [{ query }] of stripeApi.paymentIntents.search.mock.calls) {
+        expect(String(query)).not.toContain("status:'succeeded'")
+      }
+    })
+
+    /**
+     * The window is on the charge - when the money moved - not on the payment intent. The
+     * website creates its intent when the checkout's details are filled in, so a page open
+     * for days pays against an intent far outside the window; searching for payments created
+     * in it skipped that customer on this run and on every run after it.
+     */
+    it("refunds a payment taken minutes ago against an intent created days ago", async () => {
+      taken("pi_old_intent", "", {
+        metadata: { source: "website", itemCount: "2" },
+        created: Math.floor((NOW - 3 * 24 * 60 * 60 * 1000) / 1000),
+        latest_charge: {
+          id: "ch_old_intent",
+          amount_refunded: 0,
+          created: Math.floor((NOW - 40 * 60 * 1000) / 1000),
+        },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).toHaveBeenCalledWith(
+        { payment_intent: "pi_old_intent" },
+        { idempotencyKey: "order-refund:pi_old_intent" },
+      )
+    })
+
+    /**
+     * The other half of that window: money taken before it is out of reach, whatever the age
+     * of the intent it was taken against. Payments that old were settled in the shop long ago.
+     */
+    it("leaves money taken longer ago than the window, however new its intent", async () => {
+      const user = await makeUser()
+      taken("pi_settled_by_hand", user.id, {
+        created: Math.floor((NOW - 60 * 1000) / 1000),
+        latest_charge: {
+          id: "ch_settled_by_hand",
+          amount_refunded: 0,
+          created: Math.floor((NOW - 3 * 24 * 60 * 60 * 1000) / 1000),
+        },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
+    })
+
+    /**
+     * Charges are every charge on the account, and a membership invoice has no order either.
+     * The search used to keep those out by tag; now the payment itself is asked.
+     */
+    it("never refunds a charge that is not an order's, such as a membership", async () => {
+      const user = await makeUser()
+      taken("pi_membership", user.id, {
+        metadata: { purpose: "membership", userId: user.id },
+      })
+
+      await sweepStrandedPayments(NOW)
+
+      expect(stripeApi.refunds.create).not.toHaveBeenCalled()
     })
   })
 
@@ -362,19 +454,13 @@ describeIfDb("sweepStrandedPayments", () => {
    * checkout leaves exactly what an abandoned app checkout does.
    */
   describe("website payments", () => {
-    it("asks for website holds and taken payments as well as the app's", async () => {
+    it("asks for website holds as well as the app's", async () => {
       await sweepStrandedPayments(NOW)
 
       const cutoff = Math.floor((NOW - STRANDED_AFTER_MS) / 1000)
-      const window = Math.floor((NOW - REFUND_WINDOW_MS) / 1000)
       expect(stripeApi.paymentIntents.search).toHaveBeenCalledWith(
         expect.objectContaining({
           query: `status:'requires_capture' AND metadata['source']:'website' AND created<${cutoff}`,
-        }),
-      )
-      expect(stripeApi.paymentIntents.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: `status:'succeeded' AND metadata['source']:'website' AND created<${cutoff} AND created>${window}`,
         }),
       )
     })

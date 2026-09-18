@@ -42,6 +42,7 @@ export const stripeApi = {
   invoices: { list: vi.fn(), pay: vi.fn(), retrieve: vi.fn() },
   prices: { retrieve: vi.fn() },
   ephemeralKeys: { create: vi.fn() },
+  charges: { list: vi.fn() },
   refunds: { create: vi.fn() },
 }
 

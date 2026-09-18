@@ -46,6 +46,18 @@ export const ORDER_PAYMENT_TAGS = [
 
 type OrderPaymentTag = (typeof ORDER_PAYMENT_TAGS)[number]
 
+/**
+ * Whether a payment was made for an order at all - an app one or a website one.
+ *
+ * The hold pass asks Stripe for its candidates by tag, so it needs no such check. The refund
+ * pass finds its candidates by charge, and the account's charges include memberships and
+ * anything else that is not an order: without this it would refund them, since they have no
+ * `Order` row either.
+ */
+const isOrderPayment = (intent: Stripe.PaymentIntent) =>
+  intent.metadata?.purpose === ORDER_PAYMENT_PURPOSE ||
+  intent.metadata?.source === WEBSITE_PAYMENT_SOURCE
+
 /** Who a payment was for, for the log: an app user, or a website checkout, which has none. */
 const payer = (intent: Stripe.PaymentIntent) =>
   intent.metadata?.userId ? `user ${intent.metadata.userId}` : "a website checkout"
@@ -56,9 +68,9 @@ const payer = (intent: Stripe.PaymentIntent) =>
  * Search can only ask when the payment intent was created. The app creates its payment right
  * before the card is confirmed, so the two are seconds apart - but the website creates its
  * payment as soon as the checkout's details are filled in, which can be long before Pay. By
- * the payment's age alone, a website hold made a moment ago could be released, or its money
- * refunded, in the seconds before its order is written. Needs the charge expanded; a charge
- * whose time cannot be read leaves it to the search's own filter.
+ * the payment's age alone, a website hold made a moment ago could be released in the seconds
+ * between the card being held and the order that captures it. Needs the charge expanded; a
+ * charge whose time cannot be read leaves it to the search's own filter.
  */
 const heldLongEnoughAgo = (intent: Stripe.PaymentIntent, now: number) => {
   const charge = intent.latest_charge
@@ -82,6 +94,27 @@ async function searchAll(query: string): Promise<Stripe.PaymentIntent[]> {
     found.push(...result.data)
     if (!result.has_more || !result.next_page) return found
     page = result.next_page
+  }
+}
+
+/** Every charge taken in a window, across pages. */
+async function chargesTakenBetween(
+  from: number,
+  to: number,
+): Promise<Stripe.Charge[]> {
+  const found: Stripe.Charge[] = []
+  let startingAfter: string | undefined
+
+  for (;;) {
+    const page = await stripe.charges.list({
+      created: { gte: unixSeconds(from), lte: unixSeconds(to) },
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    })
+    found.push(...page.data)
+    const last = page.data[page.data.length - 1]
+    if (!page.has_more || !last) return found
+    startingAfter = last.id
   }
 }
 
@@ -156,49 +189,70 @@ async function releaseAbandonedHolds(tag: OrderPaymentTag, now: number) {
  * is found taken and the order placed without capturing again — but a customer who closes
  * the app, or changes their cart first, would otherwise wait for staff to notice. The same
  * holds for the website's checkout.
+ *
+ * **Candidates come from the charges taken in the window, not from a search for payments
+ * created in it.** A search can only ask when the payment *intent* was created, and the
+ * website creates its intent when the checkout's details are filled in - a page left open
+ * longer than the window pays against an intent already outside it, and that payment would
+ * be skipped by this run and by every run after it. A charge's time is when the money moved,
+ * which is what the window is meant to mean. It also keeps the window's other job: money
+ * taken before it is out of reach, so a first run cannot reach back into payments the shop
+ * settled by hand.
+ *
+ * Listing rather than searching has a second benefit - the list API is immediately
+ * consistent, while search lags about a minute.
  */
-async function refundOrderlessPayments(tag: OrderPaymentTag, now: number) {
-  const taken = await searchAll(
-    `status:'succeeded' AND ${tag} ` +
-      `AND created<${unixSeconds(now - STRANDED_AFTER_MS)} ` +
-      `AND created>${unixSeconds(now - REFUND_WINDOW_MS)}`,
+async function refundOrderlessPayments(now: number) {
+  const taken = (
+    await chargesTakenBetween(now - REFUND_WINDOW_MS, now - STRANDED_AFTER_MS)
+  ).filter(
+    (charge) =>
+      charge.paid &&
+      charge.captured &&
+      charge.amount_refunded === 0 &&
+      typeof charge.payment_intent === "string",
   )
   if (taken.length === 0) return
+
+  const paymentIntentIds = [
+    ...new Set(taken.map((charge) => charge.payment_intent as string)),
+  ]
 
   // One query for the lot: nearly every taken payment has its order.
   const ordered = new Set(
     (
       await db.order.findMany({
-        where: { paymentIntentId: { in: taken.map((intent) => intent.id) } },
+        where: { paymentIntentId: { in: paymentIntentIds } },
         select: { paymentIntentId: true },
       })
     ).map((order) => order.paymentIntentId),
   )
 
-  for (const found of taken) {
-    if (ordered.has(found.id)) continue
+  for (const paymentIntentId of paymentIntentIds) {
+    if (ordered.has(paymentIntentId)) continue
 
     try {
       await db.$transaction(async (tx) => {
-        await lockPayment(tx, found.id)
+        await lockPayment(tx, paymentIntentId)
 
         // Asked again under the lock: a retry of this order may have committed since.
         const order = await tx.order.findUnique({
-          where: { paymentIntentId: found.id },
+          where: { paymentIntentId },
           select: { id: true },
         })
         if (order) return
 
         const intent = await orNullIfMissing(
-          stripe.paymentIntents.retrieve(found.id, {
+          stripe.paymentIntents.retrieve(paymentIntentId, {
             expand: ["latest_charge"],
           }),
         )
         if (
           !intent ||
+          // Not an order's payment: a membership invoice, or anything else on the account.
+          !isOrderPayment(intent) ||
           intent.status !== "succeeded" ||
-          refundOf(intent) > 0 ||
-          !heldLongEnoughAgo(intent, now)
+          refundOf(intent) > 0
         ) {
           return
         }
@@ -211,7 +265,7 @@ async function refundOrderlessPayments(tag: OrderPaymentTag, now: number) {
       }, TRANSACTION_OPTIONS)
     } catch (error) {
       console.error(
-        `Could not settle taken payment ${found.id}:`,
+        `Could not settle taken payment ${paymentIntentId}:`,
         getErrorMessage(error),
       )
     }
@@ -225,6 +279,8 @@ async function refundOrderlessPayments(tag: OrderPaymentTag, now: number) {
  * captures and refunds are idempotent on the payment.
  */
 export async function sweepStrandedPayments(now = Date.now()) {
+  // Holds are searched for by tag, one query each. Taken payments are not: they are found by
+  // charge, which covers both services at once.
   for (const tag of ORDER_PAYMENT_TAGS) {
     try {
       await releaseAbandonedHolds(tag, now)
@@ -234,14 +290,14 @@ export async function sweepStrandedPayments(now = Date.now()) {
         getErrorMessage(error),
       )
     }
+  }
 
-    try {
-      await refundOrderlessPayments(tag, now)
-    } catch (error) {
-      console.error(
-        `Could not look for payments taken without an order (${tag}):`,
-        getErrorMessage(error),
-      )
-    }
+  try {
+    await refundOrderlessPayments(now)
+  } catch (error) {
+    console.error(
+      "Could not look for payments taken without an order:",
+      getErrorMessage(error),
+    )
   }
 }

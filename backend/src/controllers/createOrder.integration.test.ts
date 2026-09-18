@@ -509,11 +509,25 @@ describeIfDb("POST /api/auth/createOrder", () => {
       it("is refused once the stranded-payment sweep has refunded it", async () => {
         const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
         await payFor(user.id, "pi_stranded", 1200, taken(1200))
-        stripeApi.paymentIntents.search.mockImplementation(async ({ query }) => ({
-          data: String(query).includes("succeeded") ? [intents.get("pi_stranded")] : [],
+        stripeApi.paymentIntents.search.mockResolvedValue({
+          data: [],
           has_more: false,
           next_page: null,
-        }))
+        })
+        // The sweep finds taken payments by their charge, not by searching for payments.
+        stripeApi.charges.list.mockResolvedValue({
+          data: [
+            {
+              id: "ch_stranded",
+              created: Math.floor(Date.now() / 1000) - 60 * 60,
+              paid: true,
+              captured: true,
+              amount_refunded: 0,
+              payment_intent: "pi_stranded",
+            },
+          ],
+          has_more: false,
+        })
         stripeApi.refunds.create.mockImplementation(async () => {
           Object.assign(intents.get("pi_stranded")!, {
             latest_charge: { id: "ch_stranded", amount_refunded: 1200 },
