@@ -1,5 +1,6 @@
 import { AppState, AppStateStatus } from "react-native"
 import { QueryClient, focusManager } from "@tanstack/react-query"
+import { AppUpdateRequiredError } from "./apiClient"
 
 /**
  * How long a result is served without a background refetch.
@@ -23,7 +24,11 @@ export const queryClient = new QueryClient({
       // Kept well past staleTime so returning to a screen paints from cache
       // and revalidates behind the content, rather than showing a spinner.
       gcTime: 30 * 60 * 1000,
-      retry: 2,
+      // A build the server has retired will be refused again, so retrying is
+      // only a way of turning a dozen blocked launch requests into thirty-odd.
+      // Everything else keeps the two retries it had.
+      retry: (failureCount, error) =>
+        !(error instanceof AppUpdateRequiredError) && failureCount < 2,
       refetchOnReconnect: true,
     },
   },

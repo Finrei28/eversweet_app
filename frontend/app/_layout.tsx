@@ -1,6 +1,6 @@
 import { SplashScreen, Stack, useRouter } from "expo-router"
 import "./global.css"
-import { AppState, StatusBar } from "react-native"
+import { AppState, StatusBar, View } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import Toast, { BaseToast } from "react-native-toast-message"
@@ -22,6 +22,9 @@ import { Announcements } from "@/utils/types"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { queryClient, subscribeAppStateFocus } from "@/services/queryClient"
+import { useAppUpdateStore } from "@/store/appUpdate"
+import UpdateRequiredScreen from "@/_components/updateRequiredScreen"
+import UpdateNudgeModal from "@/_components/updateNudgeModal"
 
 SplashScreen.preventAutoHideAsync()
 
@@ -68,6 +71,18 @@ export default function RootLayout() {
   const fetchPoints = useLoyaltyStore((state) => state.fetchPoints)
   const fetchCart = useCartStore((state) => state.fetchCart)
 
+  // Subscribing the root layout re-renders the whole tree when this moves, which
+  // it does at most twice in a session. The rest of the store is read through
+  // getState() below, so it adds no further subscriptions.
+  const updateStatus = useAppUpdateStore((state) => state.status)
+  // The dismissal is read back from AsyncStorage asynchronously. Offering the
+  // nudge before that lands would ask again about a build already turned down.
+  const updateStoreHydrated = useAppUpdateStore((state) => state.hydrated)
+  const [showUpdateNudge, setShowUpdateNudge] = useState(false)
+  const [launchPopupsResolved, setLaunchPopupsResolved] = useState(false)
+  // Offered once per launch, whatever else happens afterwards.
+  const nudgeOffered = useRef(false)
+
   useEffect(() => {
     mounted.current = true // mark that the router layout is mounted
   }, [])
@@ -76,6 +91,12 @@ export default function RootLayout() {
   // pointed at it or refetch-on-focus never fires.
   useEffect(() => subscribeAppStateFocus(), [])
 
+  // This wave is also what tells a retired build that it is one: getAnnouncements
+  // goes through apiRequest, so the server's refusal is recorded before the
+  // splash screen comes down. The .catch() below swallows the error, but
+  // apiFetch has already marked the store by then — which is why that marking
+  // lives in apiFetch and not in any caller. If this call ever goes away, a
+  // blocked build would look normal until the customer touched something.
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -143,7 +164,16 @@ export default function RootLayout() {
   // also used to run in series behind hasMembershipPopupExpired(), which is
   // itself a network call.
   useEffect(() => {
-    if (!isAuthenticated) return
+    // Still reading the stored token; nothing has been decided yet.
+    if (isAuthenticated === null) return
+
+    if (!isAuthenticated) {
+      // A signed-out customer never runs the wave below, so without this
+      // nothing would ever report the launch popups as settled and the update
+      // nudge would wait for a membership check that is not coming.
+      setLaunchPopupsResolved(true)
+      return
+    }
 
     const loadPostLaunchData = async () => {
       const [popupResult] = await Promise.allSettled([
@@ -159,8 +189,44 @@ export default function RootLayout() {
       }
     }
 
-    void loadPostLaunchData()
+    void loadPostLaunchData().finally(() => setLaunchPopupsResolved(true))
   }, [isAuthenticated, fetchPoints, fetchCart])
+
+  /**
+   * The nudge is a launch-time decision; the wall is a live one.
+   *
+   * A recommendation rides on whatever response happens to carry it, which can
+   * be a cart quantity sync while the customer is on checkout with the payment
+   * sheet open — no moment to suggest a trip to the App Store. So it is offered
+   * only once the launch popups have settled, and behind both of them: unseen
+   * shop news and the membership offer both matter more than "there is a newer
+   * build". Because this re-runs as they close, it still appears in the same
+   * session rather than waiting for the next launch.
+   */
+  useEffect(() => {
+    if (nudgeOffered.current) return
+    if (!launchPopupsResolved || !updateStoreHydrated) return
+    if (modalVisible || showAnnounceModal) return
+
+    const { status, recommendedBuild, dismissedBuild } =
+      useAppUpdateStore.getState()
+
+    if (status !== "recommended" || recommendedBuild === null) return
+    if (recommendedBuild === dismissedBuild) return
+
+    nudgeOffered.current = true
+    setShowUpdateNudge(true)
+  }, [
+    launchPopupsResolved,
+    updateStoreHydrated,
+    modalVisible,
+    showAnnounceModal,
+    // Not read in the body — getState() is not reactive — but it is what makes
+    // this re-run when a recommendation lands after the popups have settled.
+    // Removing it as "unused" would mean the nudge only ever appeared on a
+    // launch where the answer arrived first.
+    updateStatus,
+  ])
 
   useEffect(() => {
     // listen when app state changes (when user switches apps)
@@ -226,18 +292,47 @@ export default function RootLayout() {
                 headerTintColor: "#e6aa6b",
               }}
             />
-            {modalVisible && (
-              <MembershipPopup
-                modalVisible={modalVisible}
-                setModalVisible={setModalVisible}
-              />
-            )}
-            {showAnnounceModal && (
-              <AnnouncementsPopup
-                showAnnounceModal={showAnnounceModal}
-                setShowAnnounceModal={setShowAnnounceModal}
-                announcements={announcements}
-              />
+
+            {/*
+              Over the Stack, not instead of it. Unmounting the navigator would
+              leave expo-router with none — the notification listener above still
+              calls router.replace — and would throw away where the customer was,
+              which matters because this wall can be lifted: the server only has
+              to stop refusing, and "I've already updated" is what asks it.
+
+              What is behind carries on rendering, but nothing behind can be
+              reached, and every request it makes is refused and not retried.
+
+              The launch popups are suppressed rather than covered: a React Native
+              Modal is its own native window and would otherwise draw on top of
+              the wall. Announcements especially, since dismissing one writes
+              "last seen" and would quietly use up news nobody saw.
+            */}
+            {updateStatus === "required" ? (
+              <View className="absolute inset-0">
+                <UpdateRequiredScreen />
+              </View>
+            ) : (
+              <>
+                {modalVisible && (
+                  <MembershipPopup
+                    modalVisible={modalVisible}
+                    setModalVisible={setModalVisible}
+                  />
+                )}
+                {showAnnounceModal && (
+                  <AnnouncementsPopup
+                    showAnnounceModal={showAnnounceModal}
+                    setShowAnnounceModal={setShowAnnounceModal}
+                    announcements={announcements}
+                  />
+                )}
+                {showUpdateNudge && (
+                  <UpdateNudgeModal
+                    onClose={() => setShowUpdateNudge(false)}
+                  />
+                )}
+              </>
             )}
 
             <Toast config={toastConfig} />

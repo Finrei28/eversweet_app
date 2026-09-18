@@ -278,6 +278,55 @@ blip at boot broke limiting until the process restarted, however soon Redis reco
 `ResilientStore` calls `init` again on recovery rather than trusting that promise — keep it
 doing so.
 
+**Minimum app version.** `middleware/appVersionGate` (mounted globally in `app.ts`, right
+after `requestTiming`) retires customer app builds. The app sends `X-App-Build` and
+`X-App-Platform` on every request; below `MIN_APP_BUILD_<IOS|ANDROID>` it gets
+`426 { code: "APP_UPDATE_REQUIRED" }` and puts up a blocking screen, and below
+`RECOMMENDED_APP_BUILD_<IOS|ANDROID>` it is let through carrying
+`X-App-Update-Recommended` and offers a dismissible nudge. Thresholds are in
+`lib/appVersion`; unset gates nothing, which is how they ship.
+
+- **Everything about it fails open.** A missing, unreadable or duplicated header is waved
+  through, because the staff app and the website call this same server on these same paths
+  and send none. `/api/admin` and `/api/internal` are skipped outright, and the Stripe
+  webhook is already out of reach — it is registered above `express.json()`, and Express
+  matches in registration order. That is the opposite direction from
+  `middleware/serviceAuth`, deliberately: an unset secret costs one integration, a gate armed
+  by mistake blanks every customer at once.
+- **It shipped before the customer app launched**, so unlike most such gates there is no
+  install base it can never reach. Every build a customer has ever had carries it. Keep it
+  that way: anything that would let a build talk to this server without the header puts that
+  back.
+- **Build numbers, not `expo.version`.** EAS owns the build number (`appVersionSource:
+  "remote"` with `autoIncrement`) and never touches `expo.version`, which changes only when
+  somebody edits `app.json`. Bump `expo.version` on **every** store submission — the listing,
+  crash reports and support need it — but the gate does not depend on anyone remembering,
+  and is unaffected by two releases claiming the same version.
+- **The block is not one-way.** A 200 with no recommendation header means "up to date" and
+  lifts the wall; once it is up nothing else in the app is fetching, so the update screen's
+  "I've already updated" re-check is the only thing that would notice a threshold rolled
+  back. Only the nudge's dismissal is persisted, never the block.
+- **The gate is only as prompt as the first request.** `app/_layout.tsx`'s launch
+  `getAnnouncements()` is what trips it before the splash hides; if that call ever goes, a
+  blocked build looks normal until the customer touches something.
+- **Take the number from the store, not from EAS.** `eas build:version:get` answers "what
+  will the next build be" — EAS increments its counter when a build *runs*, not when one is
+  submitted, so a build made and never shipped leaves it ahead of anything a customer has.
+  Setting `MIN_*` from it blocks everybody, newest release included. The live number is the
+  one App Store Connect shows against the released version and the one in the Play Console's
+  release.
+- **Raising `MIN_*`:** only to a build already live in that store, never above one still in
+  staged rollout on Android, and outside Auckland trading hours — a block landing mid-checkout
+  unmounts `checkout.tsx` and leaves an authorised hold the stranded-payment sweep releases
+  within 30 minutes. Remember TestFlight builds are production builds and spend the same
+  counter, so a minimum can lock testers out too. Let `RECOMMENDED_*` lead by a week or two.
+  Rollback is one env change and a restart, which is the whole argument for env over a table.
+- The in-band `authoriseOnly` 426 in `createPaymentIntent` stays. This gate is configuration
+  and can be switched off by an unset variable or a header stripped in front of the server;
+  that one is proved by the request itself and cannot. Both share the code, and the app blocks
+  on either. **A capability one build lacks gets its own status and code, never a 426** —
+  `APP_UPDATE_REQUIRED` means the whole build is unsupported.
+
 **`lib/db.ts`** exports an extended client cast back to `PrismaClient`. Type signatures
 that accept a client must use the exported `Db` / `DbTransactionClient`, not Prisma's own
 `TransactionClient`, which describes an unextended client.
@@ -811,7 +860,9 @@ For permission reviews: the audio library is used only to play new-order alert t
   `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `ALLOWED_ORIGINS` (CORS whitelist, comma
   separated; requests with no `Origin` — the native apps — are always allowed, and a
   browser from anywhere else gets a 403), `INTERNAL_SERVICE_SECRET`, `CLOUDINARY_*`,
-  `SERVER_URL`; plus
+  `SERVER_URL`; optional `MIN_APP_BUILD_IOS` / `MIN_APP_BUILD_ANDROID` /
+  `RECOMMENDED_APP_BUILD_IOS` / `RECOMMENDED_APP_BUILD_ANDROID` (see **Minimum app
+  version**, unset gates nothing); plus
   `TEST_DATABASE_URL` and optional `SQL_TIMING` for development.
 - `frontend/`: `EXPO_PUBLIC_URL` (API base), `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
   `EXPO_PUBLIC_EXPO_PROJECT_ID`, `EXPO_PUBLIC_CLOUDINARY_*`, `EXPO_PUBLIC_FILLER_IMAGE_URL`.

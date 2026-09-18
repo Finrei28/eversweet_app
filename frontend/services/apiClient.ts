@@ -1,7 +1,56 @@
 import { getErrorMessage } from "@/utils/getError"
+import { APP_VERSION_HEADERS } from "@/lib/appVersion"
+import { useAppUpdateStore } from "@/store/appUpdate"
 import { getToken } from "./authToken"
 
 export const API_URL = process.env.EXPO_PUBLIC_URL!
+
+/**
+ * Thrown when the server has retired this build.
+ *
+ * A class rather than a message so `services/queryClient` can recognise it and
+ * stop retrying — a refusal is not going to come back any differently, and a
+ * blocked launch would otherwise spend three attempts on each of a dozen
+ * requests. Lives beside its thrower, as `DuplicateOrderError` does in
+ * `stripe-api.ts`.
+ */
+export class AppUpdateRequiredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "AppUpdateRequiredError"
+  }
+}
+
+const UPDATE_RECOMMENDED_HEADER = "X-App-Update-Recommended"
+
+/**
+ * Records what this response said about the build, on every response.
+ *
+ * Absence of the recommendation header means "up to date", not "no news" — it
+ * is the only thing that ever lifts the wall once the server stops refusing.
+ *
+ * Nothing is written when a request never got a response: an abort or a network
+ * error throws before this runs, so a launch with no signal behaves exactly as
+ * it did before any of this existed. That is the right direction — an update
+ * cannot be applied offline either.
+ */
+const noteUpdateState = (res: Response, data: any) => {
+  const update = useAppUpdateStore.getState()
+
+  if (res.status === 426 && data?.code === "APP_UPDATE_REQUIRED") {
+    update.noteRequired()
+    return
+  }
+
+  const recommended = Number(res.headers.get(UPDATE_RECOMMENDED_HEADER))
+
+  if (Number.isSafeInteger(recommended) && recommended > 0) {
+    update.noteRecommended(recommended)
+    return
+  }
+
+  update.noteUpToDate()
+}
 
 /**
  * Without this a request that stalls rather than fails hangs until the OS
@@ -58,6 +107,10 @@ export async function apiFetch(
 ): Promise<{ res: Response; data: any }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    // Every request carries them, because this is the only fetch in the app —
+    // so the server can retire a build without the app having to ask whether it
+    // has been retired.
+    ...APP_VERSION_HEADERS,
   }
 
   if (idempotencyKey) {
@@ -99,6 +152,10 @@ export async function apiFetch(
   // that surfaces to the caller.
   const data = await res.json().catch(() => null)
 
+  // Here rather than in apiRequest, so the two callers that build on apiFetch
+  // directly — sign-in and order creation — also keep the wall current.
+  noteUpdateState(res, data)
+
   return { res, data }
 }
 
@@ -115,6 +172,15 @@ export async function apiRequest<T>(
   const { res, data } = await apiFetch(path, options)
 
   if (!res.ok) {
+    // Above the logging below, which is what keeps a blocked launch from
+    // putting a redbox on screen for every one of its dozen requests. The root
+    // layout has already been told; this only has to stop the caller.
+    if (res.status === 426 && data?.code === "APP_UPDATE_REQUIRED") {
+      throw new AppUpdateRequiredError(
+        getErrorMessage(data, "Please update the Eversweet app."),
+      )
+    }
+
     // Only for endpoints marked authenticated: apiFetch throws before sending
     // when one of those has no token at all, so a 401 reaching here means a
     // token was sent and rejected. A 401 from a public endpoint (a failed sign

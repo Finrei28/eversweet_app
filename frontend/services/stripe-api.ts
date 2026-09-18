@@ -13,7 +13,7 @@ import {
   SetUpIntent,
   UsersMembership,
 } from "@/utils/types"
-import { apiFetch, apiRequest } from "./apiClient"
+import { apiFetch, apiRequest, AppUpdateRequiredError } from "./apiClient"
 import { getErrorMessage } from "@/utils/getError"
 
 const UNAUTHENTICATED = "Unauthenticated"
@@ -149,6 +149,17 @@ export const createPaymentIntent = async (
 
   if (res.status === 409 && data?.code === "POSSIBLE_DUPLICATE") {
     throw new DuplicateOrderError(data.existingOrder)
+  }
+
+  // Either the version gate or this endpoint's own check that the build expects
+  // a hold. apiRequest raises this for itself; on this path it has to be done
+  // by hand, so checkout can tell it apart from a payment that actually failed.
+  // Nothing was charged and no hold was placed — the refusal comes before
+  // Stripe is touched at all.
+  if (res.status === 426 && data?.code === "APP_UPDATE_REQUIRED") {
+    throw new AppUpdateRequiredError(
+      getErrorMessage(data, "Please update the Eversweet app."),
+    )
   }
 
   if (!res.ok) {

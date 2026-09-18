@@ -6,16 +6,30 @@ Backlog for eversweet_app. Each item covers where it stands today, the options, 
 
 ## 1. App update mechanism
 
-**Where it stands**
-- There is no way to make customers update. No `expo-updates`, and no version check. `app.json` is still `1.0.0`.
-- The only lever is refusing old builds feature by feature. For example, `createPaymentIntent` answers `426 APP_UPDATE_REQUIRED` to builds that don't send `authoriseOnly: true` (hold-then-capture). Every future breaking change would need its own flag.
+**Done: the minimum-version gate.** `middleware/appVersionGate` on the server, mounted
+globally. The app sends `X-App-Build` and `X-App-Platform` on every request (`apiFetch` is
+the only `fetch` in it); below `MIN_APP_BUILD_<IOS|ANDROID>` the server answers
+`426 APP_UPDATE_REQUIRED` and the app puts up a blocking update screen, and below
+`RECOMMENDED_APP_BUILD_<IOS|ANDROID>` it carries `X-App-Update-Recommended` and the app
+offers a dismissible nudge once a launch. Thresholds are env vars — unset gates nothing —
+so raising or rolling one back is a restart, not a deploy. See **Minimum app version** in
+CLAUDE.md for the fail-open rules and for how to raise `MIN_*` safely.
 
-**Options**
-- **Minimum-version gate (recommended first):** the app sends its version (`expo-application`, `nativeApplicationVersion`) as a header on every request. The server knows the minimum supported version. Below it, the app shows a blocking "Update Eversweet" screen linking to the store. Covers native changes too.
-- **OTA updates (`expo-updates` / EAS Update):** push JS-only fixes without store review. Needs a `runtimeVersion` policy, and can't ship native changes.
-- Probably both: OTA for quick fixes, the version gate for forcing.
+It compares EAS build numbers rather than `expo.version`, because EAS increments those on
+every build and nobody has to remember. `expo.version` should still be bumped on every store
+submission, for the listing and for support, but the gate does not depend on it — which is
+why launching at `1.0.0` costs nothing.
 
-**Note:** only builds that include this can ever be forced, so ship it as early as possible.
+The note about shipping early paid off: this landed **before the customer app launched**, so
+there is no install base it can never reach. Every build a customer has ever had carries the
+header. A request without one still has to be waved through, since the staff app and the
+website send none either — so the thing to protect is that customer builds always send it.
+
+**Still outstanding: OTA (`expo-updates` / EAS Update).** Push JS-only fixes without store
+review. Needs a `runtimeVersion` policy and changes to every build profile, and it cannot
+ship native changes — so it complements the gate rather than replacing it. Worth noting
+that if it is added, the gate keeps working unchanged: it reads `nativeBuildVersion`, which
+describes the installed binary rather than whatever JS bundle is running on top of it.
 
 ---
 
