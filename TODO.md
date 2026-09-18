@@ -97,3 +97,25 @@ The website keeps its own privacy policy page and opening-hours component, so th
 - **Sharing:** point the website at the same tables, so there is one source.
 
 **Decide:** which of these staff actually need to change without a deploy. Rates, hours and benefits likely yes; legal text rarely.
+
+---
+
+## 6. The stranded-payment sweep measures its 48 hours from the wrong clock
+
+**Where it stands**
+- `refundOrderlessPayments` searches `status:'succeeded' AND <tag> AND created<now-30min AND created>now-48h`, and `created` there is the **payment intent's**, not the charge's.
+- For app payments the two are the same instant: `createPaymentIntent` runs seconds before the customer confirms.
+- For website payments they are not. The website creates its payment when the checkout's details are filled in, so a page left open longer than two days pays against an intent already older than the window. If the capture then succeeds and the order's commit fails, the money is taken, no order exists, and every sweep from then on excludes that payment: the customer is charged with nothing to show for it and no automatic refund.
+- The hold half of the sweep is unaffected. It has no lower bound, and it already judges a hold's age by the charge (`heldLongEnoughAgo`).
+- Reaching this takes a checkout open for more than 48 hours **and** the capture-to-commit gap. The customer's own retry repairs that gap first - the checkout finds the order already placed, or places it - so the sweep is the third line of defence, and the failure is logged either way.
+
+**Do not simply widen `REFUND_WINDOW_MS`.** The window is what keeps the sweep out of history. Website payments taken without an order in the past have already been settled by hand in the shop - those orders were made and handed over - so a wider search would refund customers who got their dessert.
+
+**Approach**
+- Keep the search window as a cheap superset; it only bounds how much Stripe is asked for.
+- Decide on the **charge's** `created`, which is when the money actually moved: refund only a charge between `STRANDED_AFTER_MS` and `REFUND_WINDOW_MS` old. The sweep already reads the expanded charge for `refundOf` and `heldLongEnoughAgo`, so this is a second bound beside that one.
+- An old intent paid ten minutes ago is then found and refunded, while a payment genuinely taken three days ago is skipped whatever its intent's age - so a first run cannot touch anything staff settled by hand.
+
+**Before shipping it:** check Stripe for website payments taken in the last 48 hours that have no order, as the deploy notes on Finrei28/eversweet#19 say. That is the same question this widening asks, and the answer has to be "none that staff already handled".
+
+**Decide:** whether the extra searching is worth it at all, given how narrow the case is. Leaving it means a customer in that corner waits for staff to notice the log line.
