@@ -314,6 +314,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // this device starts with the previous user's cart and balance.
       useLoyaltyStore.getState().reset()
       useCartStore.setState({ items: [], cartOperations: 0, error: null })
+      // useAppUpdateStore is deliberately NOT cleared here. It is about the
+      // binary, not the session — whoever signs in next is on the same build —
+      // and clearing it would throw away a "Not now" and nudge them again on
+      // every sign-out.
       // Same hazard, one layer up. Every per-customer query is gated on the
       // token, so signing out disables them — but react-query keeps the data
       // for gcTime, and the next account to sign in re-enables those same keys

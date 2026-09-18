@@ -27,7 +27,7 @@ import {
 import { formatDayStamp } from "@/lib/formatters"
 import { normaliseStoreHours } from "@/lib/businessHours"
 import { getErrorMessage } from "@/utils/getError"
-import { apiFetch, apiRequest } from "./apiClient"
+import { apiFetch, apiRequest, AppUpdateRequiredError } from "./apiClient"
 
 // Messages used by more than one endpoint.
 const UNAUTHENTICATED = "Unauthenticated"
@@ -297,6 +297,16 @@ export async function createOrder(
     authMessage: UNAUTHENTICATED,
     idempotencyKey,
   })
+
+  // First, because it supersedes every other reading of the failure: the build
+  // has been retired and the root layout is already showing the update wall, so
+  // this only has to stop checkout raising an alert over it. Any hold placed
+  // before the threshold moved is let go by the stranded-payment sweep.
+  if (res.status === 426 && data?.code === "APP_UPDATE_REQUIRED") {
+    throw new AppUpdateRequiredError(
+      getErrorMessage(data, "Please update the Eversweet app."),
+    )
+  }
 
   if (res.status === 401) {
     throw new Error("Please sign in to place an order")

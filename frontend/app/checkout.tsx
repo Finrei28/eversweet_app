@@ -25,6 +25,7 @@ import {
   checkPaymentStatus,
   DuplicateOrderError,
 } from "@/services/stripe-api"
+import { AppUpdateRequiredError } from "@/services/apiClient"
 import {
   flushPendingQuantitySyncs,
   useCartStore,
@@ -945,6 +946,16 @@ function CheckoutContent() {
 
   const reportOrderFailure = (error: unknown, intentId: string | null) => {
     setPaymentSuccess(false)
+
+    if (error instanceof AppUpdateRequiredError) {
+      // The root layout has already put the update wall up over this screen, so
+      // an alert would only be a second thing to dismiss behind it. Refused at
+      // createPaymentIntent means no hold was ever placed; refused at
+      // createOrder leaves one, which the stranded-payment sweep releases.
+      pendingOrderRef.current = null
+      setPaymentIntentId(null)
+      return
+    }
 
     if (error instanceof PaymentReleasedError || error instanceof PaymentRefundedError) {
       // Settled, not in doubt: no order, and either nothing was taken or it is on its
