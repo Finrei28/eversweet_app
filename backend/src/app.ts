@@ -11,6 +11,7 @@ import internalRoutes from "./routes/internal.routes"
 import { stripeWebhook } from "./controllers/stripe.controller"
 import { getIo } from "./lib/socket"
 import { requestTiming } from "./middleware/requestTiming"
+import { appVersionGate } from "./middleware/appVersionGate"
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || []
 
@@ -22,6 +23,7 @@ interface CorsOptions {
   methods: string
   credentials: boolean
   allowedHeaders: string[]
+  exposedHeaders: string[]
 }
 
 const corsOptions: CorsOptions = {
@@ -41,7 +43,20 @@ const corsOptions: CorsOptions = {
     }
   }, // maintains a whitelist of approved clients, which is vital for security and reliability
   methods: "GET,POST,PATCH,PUT",
-  allowedHeaders: ["Content-Type", "Authorization"],
+  // Idempotency-Key has been sent by the app since order creation was made
+  // repeatable and was never listed here. It costs nothing today, because the
+  // native apps send no Origin and cors() never applies to them, but a browser
+  // build would have had its preflight refused.
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Idempotency-Key",
+    "X-App-Build",
+    "X-App-Platform",
+  ],
+  // A browser cannot read a response header it was not offered. The native
+  // apps are not subject to CORS and would see it either way.
+  exposedHeaders: ["X-App-Update-Recommended"],
   credentials: false, // do not allow cookies
 }
 
@@ -69,6 +84,18 @@ app.set("trust proxy", 1) // Crucial for accurate IP tracking behind proxies
 
 // Before the routes, so every query a request makes is counted against it.
 app.use(requestTiming)
+
+// After requestTiming, so a refused request is still timed and logged, and
+// before every router — including sign-in — so a build that is too old to be
+// supported cannot get as far as a session. It also sits above the rate
+// limiters, which are mounted inside the routers, so a retired build's requests
+// do not spend anyone's limit budget.
+//
+// The Stripe webhook is out of reach by construction: it is registered above
+// express.json() and Express matches in registration order, so a global
+// app.use() here can never see it. That is worth saying out loud, because it is
+// load-bearing and invisible.
+app.use(appVersionGate)
 
 app.use((req, res, next) => {
   const io = getIo()
