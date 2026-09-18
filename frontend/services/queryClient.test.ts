@@ -1,7 +1,7 @@
 // Pulled in through apiClient, which reads the build number from the binary.
 jest.mock("expo-application", () => ({
   nativeBuildVersion: "114",
-  nativeApplicationVersion: "1.1.0",
+  nativeApplicationVersion: "1.0.0",
 }))
 
 jest.mock("@react-native-async-storage/async-storage", () =>

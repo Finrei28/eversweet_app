@@ -1,7 +1,7 @@
 // expo-application reads native constants that do not exist under jest.
 jest.mock("expo-application", () => ({
   nativeBuildVersion: "114",
-  nativeApplicationVersion: "1.1.0",
+  nativeApplicationVersion: "1.0.0",
 }))
 
 // Reading the token crosses the native bridge into SecureStore.

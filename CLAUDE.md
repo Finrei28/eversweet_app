@@ -287,18 +287,21 @@ after `requestTiming`) retires customer app builds. The app sends `X-App-Build` 
 `lib/appVersion`; unset gates nothing, which is how they ship.
 
 - **Everything about it fails open.** A missing, unreadable or duplicated header is waved
-  through, because the staff app, the website and every build predating the gate send none
-  and there is no telling them apart. `/api/admin` and `/api/internal` are skipped outright,
-  and the Stripe webhook is already out of reach — it is registered above `express.json()`,
-  and Express matches in registration order. The cost is that the gate can reach no build
-  that exists today; its value starts with the next one. That is the opposite direction from
+  through, because the staff app and the website call this same server on these same paths
+  and send none. `/api/admin` and `/api/internal` are skipped outright, and the Stripe
+  webhook is already out of reach — it is registered above `express.json()`, and Express
+  matches in registration order. That is the opposite direction from
   `middleware/serviceAuth`, deliberately: an unset secret costs one integration, a gate armed
   by mistake blanks every customer at once.
+- **It shipped before the customer app launched**, so unlike most such gates there is no
+  install base it can never reach. Every build a customer has ever had carries it. Keep it
+  that way: anything that would let a build talk to this server without the header puts that
+  back.
 - **Build numbers, not `expo.version`.** EAS owns the build number (`appVersionSource:
-  "remote"` with `autoIncrement`) and never touches `expo.version`, so every build shipped
-  before 1.1.0 reports `1.0.0`. Still bump `expo.version` on **every** store submission —
-  the listing, crash reports and support need it — but the gate does not depend on anyone
-  remembering.
+  "remote"` with `autoIncrement`) and never touches `expo.version`, which changes only when
+  somebody edits `app.json`. Bump `expo.version` on **every** store submission — the listing,
+  crash reports and support need it — but the gate does not depend on anyone remembering,
+  and is unaffected by two releases claiming the same version.
 - **The block is not one-way.** A 200 with no recommendation header means "up to date" and
   lifts the wall; once it is up nothing else in the app is fetching, so the update screen's
   "I've already updated" re-check is the only thing that would notice a threshold rolled
@@ -309,10 +312,13 @@ after `requestTiming`) retires customer app builds. The app sends `X-App-Build` 
 - **Raising `MIN_*`:** only to a build already live in that store, never above one still in
   staged rollout on Android, and outside Auckland trading hours — a block landing mid-checkout
   unmounts `checkout.tsx` and leaves an authorised hold the stranded-payment sweep releases
-  within 30 minutes. Let `RECOMMENDED_*` lead by a week or two. Rollback is one env change
-  and a restart, which is the whole argument for env over a table.
-- The in-band `authoriseOnly` 426 in `createPaymentIntent` stays: it is proved by the request
-  itself, so it reaches the builds this gate cannot. Both share the code, and the app blocks
+  within 30 minutes. Never above the newest build, or you block everybody, TestFlight
+  included: those are production builds and spend the same counter. Let `RECOMMENDED_*` lead
+  by a week or two. Rollback is one env change and a restart, which is the whole argument for
+  env over a table.
+- The in-band `authoriseOnly` 426 in `createPaymentIntent` stays. This gate is configuration
+  and can be switched off by an unset variable or a header stripped in front of the server;
+  that one is proved by the request itself and cannot. Both share the code, and the app blocks
   on either. **A capability one build lacks gets its own status and code, never a 426** —
   `APP_UPDATE_REQUIRED` means the whole build is unsupported.
 

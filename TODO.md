@@ -16,13 +16,14 @@ so raising or rolling one back is a restart, not a deploy. See **Minimum app ver
 CLAUDE.md for the fail-open rules and for how to raise `MIN_*` safely.
 
 It compares EAS build numbers rather than `expo.version`, because EAS increments those on
-every build and nobody has to remember. `expo.version` is still bumped on every store
-submission (it went to `1.1.0` with this), for the listing and for support.
+every build and nobody has to remember. `expo.version` should still be bumped on every store
+submission, for the listing and for support, but the gate does not depend on it — which is
+why launching at `1.0.0` costs nothing.
 
-As predicted, **no build that existed before this can ever be blocked** — a request with no
-version header has to be waved through, since the staff app and the website send none
-either. The gate starts biting with the build after `1.1.0`, which is why the in-band
-`authoriseOnly` 426 in `createPaymentIntent` stays.
+The note about shipping early paid off: this landed **before the customer app launched**, so
+there is no install base it can never reach. Every build a customer has ever had carries the
+header. A request without one still has to be waved through, since the staff app and the
+website send none either — so the thing to protect is that customer builds always send it.
 
 **Still outstanding: OTA (`expo-updates` / EAS Update).** Push JS-only fixes without store
 review. Needs a `runtimeVersion` policy and changes to every build profile, and it cannot

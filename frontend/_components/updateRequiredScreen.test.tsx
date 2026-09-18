@@ -10,7 +10,7 @@ jest.mock("@expo/vector-icons", () => ({ Feather: "Feather" }))
 // expo-application reads constants out of the native binary.
 jest.mock("expo-application", () => ({
   nativeBuildVersion: "114",
-  nativeApplicationVersion: "1.1.0",
+  nativeApplicationVersion: "1.0.0",
 }))
 
 jest.mock("@react-native-async-storage/async-storage", () =>

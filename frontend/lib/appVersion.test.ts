@@ -9,7 +9,7 @@ const headersWith = (nativeBuildVersion: string | null) => {
   jest.isolateModules(() => {
     jest.doMock("expo-application", () => ({
       nativeBuildVersion,
-      nativeApplicationVersion: "1.1.0",
+      nativeApplicationVersion: "1.0.0",
     }))
     headers = require("./appVersion").APP_VERSION_HEADERS
   })
