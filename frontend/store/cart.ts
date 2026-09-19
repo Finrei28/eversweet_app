@@ -639,16 +639,20 @@ export const useCartStore = create<CartState>((set, get) => ({
     // Cached: incrementing or decrementing an item re-runs this, and the
     // uncached version put a request on the wire for every tap.
     const rates = await fetchLoyaltyRates()
+    // The inline fallbacks this used to carry are gone. They could not fire - the endpoint
+    // always sends all three keys - and the rate one guessed 5 where the server has always
+    // used 6, so had it ever fired it would have quoted a number the order then contradicted.
+    // The server holds the only fallback now, in `lib/loyaltyRates`.
     return get().items.reduce(
       (acc, item) =>
         acc +
         Math.floor(
           (netUnitPriceInCents(item) / 100) * // points is calculated per dollar
-            (rates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
+            rates.rate *
             item.quantity *
             (usersMembership?.isActive
-              ? (rates.modifier ?? 1) * rates.memberRate // if !rates.modifier ? fallback to 1
-              : (rates.modifier ?? 1)),
+              ? rates.modifier * rates.memberRate
+              : rates.modifier),
         ),
       0,
     )

@@ -558,6 +558,67 @@ Change the cases first, then `cmp -s` the copies.
   computed once when the server started, so the app's "Open Now" badge showed whatever the
   shop had been at the last deploy.
 
+**Legal documents: one file, copied, and every sentence has to be true of the code.**
+`src/legal/legalDocuments.ts` holds the Terms and the Privacy Policy as data, and is copied
+**byte-for-byte** into the website's `src/lib/legalDocuments.ts`. It imports nothing, so
+copying it is all there is to it. `npm run verify:legal` in either repo compares the two and
+exits non-zero when they differ.
+
+- **Both platforms render the same words.** Sections that genuinely apply to one channel
+  carry `appliesTo: ["app"]` or `["web"]` and are labelled in the UI — points, membership,
+  offers, prizes and notifications are app-only, cookies are website-only. A second document
+  is never the answer.
+- **The wire shape is additive only.** Installed builds parse `{ heading, content | list }`;
+  `appliesTo` is optional so an older build shows the section unlabelled rather than
+  breaking. `appliesTo` is per **section**, never per list item — `list` is `string[]` on the
+  wire, and an object in it renders as `[object Object]` on a build already out there.
+- **The shop's details are tokens**, `{{name}}`, `{{email}}`, `{{phone}}`, `{{address}}`,
+  `{{website}}`, resolved from `ShopProfile` by `resolveLegalDocument` before serving. Never
+  write an address into the text; `legalDocuments.test.ts` fails if you do.
+- **`legalDocuments.test.ts` holds the content to the standard the old documents failed**,
+  and every case in it is a bug that shipped: a section whose whole body was "We have put in
+  place appropriate security measures...", three sections numbered "8.", a terms document
+  describing a delivery service that does not exist, an erasure promise no endpoint can
+  keep, and a named analytics product the code does not use. Read it before editing the
+  documents — it is the specification.
+- **TypeScript, not JSON**, because this tsconfig does not resolve JSON imports and
+  `tsc -p tsconfig.build.json` would not copy a `.json` into `dist`. And the website lists
+  its copy in `.prettierignore`: that repo's Prettier adds semicolons and this one's does
+  not, so `format:write` would otherwise break the copy silently.
+- The documents change rarely and belong in code rather than the database, for the review,
+  diff and revert a pull request gives them. Bump `LEGAL_LAST_UPDATED` when the text
+  changes, and only then.
+
+**Shop settings come from the database, and the website writes them.** The loyalty rates
+(`LoyaltySetting`), the shop's details (`ShopProfile`), the launch announcements
+(`Announcement`) and the membership benefits (`MembershipPlan.benefits`) were all compiled
+in until `20260919000000_shop_settings_from_code`. They are edited from the website's
+`/admin/settings`, which writes the rows directly — there is no `/api/internal` hop, because
+unlike prize assignment nothing here has a guard only this server can apply.
+
+- **Each reader is the `getPrepTimes` shape**: `lib/loyaltyRates`, `lib/storeInfo` and
+  `lib/announcements` each cache for 60 seconds in memory, fall back to a `DEFAULT_*`
+  constant holding exactly what used to be hardcoded, and **never cache a failure**.
+- **In memory, not Redis, deliberately.** The writer is a different process in a different
+  repo and cannot invalidate this one's Redis, so a TTL would be the only mechanism anyway.
+  A change made on the website is live here within a minute — the same arrangement, and the
+  same caveat, as the trading hours.
+- **Announcements fall back to an empty list**, not to the old constants. Those were
+  placeholder copy, and showing a customer a stale pop-up is worse than showing none. This
+  is also the app's first request on a cold start (the one that trips the version gate), so
+  it answers rather than failing.
+- **Four wire shapes are frozen** because installed builds parse them, and the app has no
+  over-the-air updates: `/api/getLoyaltyRates` is `{ rate, memberRate, modifier }` as plain
+  numbers, `/api/getStoreInfo` carries the profile's fields plus a computed `isOpen`,
+  `/api/getAnnouncements` is `[{ title, text1, text2?, updatedAt }]` with `updatedAt`
+  parseable by `new Date()`, and `getMembershipDetails` carries `membershipBenefits:
+  string[]`. `shopSettings.integration.test.ts` pins all four.
+- **An announcement's `updatedAt` on the wire is the row's `publishedAt`, not its
+  `updatedAt`.** The app compares it against the last announcement it showed, so writing it
+  on every save would pop the modal for every customer each time a typo was fixed.
+- **The legal text is not here.** `src/legal/*.ts` stays in code on purpose — see TODO.md
+  item 5.
+
 **Membership.** Stripe owns the truth; the webhook writes what it reads back from Stripe
 rather than adjusting the row, so a redelivered or out-of-order event changes nothing.
 `Membership.totalMonths` is the run of monthly invoices **paid in a row** on the current
@@ -619,9 +680,20 @@ is a free-form string, **not** an enum), `LoyaltyWinner` (one row per place per 
 **The lifecycle, in order**
 
 1. **Earn** — inside `createOrder`'s transaction, so points commit or roll back with the
-   order. Per line: `floor(net dollars × rate × quantity × memberMultiplier)`, from
-   `lib/loyaltyRates` (`rate` 6, `memberRate` 1.5 for an active membership). Written as
+   order. Per line: `pointsForLine` in `lib/loyaltyRates`,
+   `floor(net dollars × rate × quantity × modifier × memberRate)`. Written as
    `reason: "EARNED"`. **Website orders earn nothing** — only app orders reach the board.
+
+   The rates are the `LoyaltySetting` row, edited from the website's `/admin/settings`
+   (`rate` 6, `memberRate` 1.5 for an active membership, `modifier` 1 — the last being the
+   lever for a double-points weekend). Stored as whole numbers — `memberBonusPercent` 150,
+   not `1.5` — for the same reason `Offer.discountAmount` is, and divided by 100 at the
+   edge so `/api/getLoyaltyRates` still serves the shape installed builds parse.
+   **Resolve them before the transaction**, alongside the existing
+   `Promise.all([getDaysOffKeys(), getTradingHours()])`: it holds an advisory lock on the
+   payment intent until commit, and these almost always answer from a one-minute cache.
+   `getLoyaltyRates` falls back to `DEFAULT_LOYALTY_RATES` and never throws, so a settings
+   table that cannot be read costs nobody their points.
 2. **Rank** — `GET /api/auth/getLeaderBoard`: top ten plus the viewer's own position, from
    `lib/leaderboardRanking.rankMonth` over the month from `nzMonthRange`. It filters on
    `change > 0` **and** `reason: "EARNED"`: a refunded redemption is written back as a

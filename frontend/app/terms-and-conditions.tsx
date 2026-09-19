@@ -1,53 +1,16 @@
 "use client"
-import { View, Text, ScrollView } from "react-native"
-import CustomHeader from "@/_components/custom-header"
+import LegalDocumentScreen from "@/_components/legalDocumentScreen"
 import { useTermsAndConditionsQuery } from "@/services/queries"
-import BouncingLoader from "@/_components/loader"
 
 export default function TermsAndConditions() {
-  const { data: termsAndConditions, isLoading: loading } =
-    useTermsAndConditionsQuery()
-
-  if (loading) {
-    return (
-      <View className="flex-1 bg-background">
-        <CustomHeader />
-        <View className="flex-1 items-center justify-center">
-          <BouncingLoader />
-        </View>
-      </View>
-    )
-  }
+  const { data, isLoading, isError, refetch } = useTermsAndConditionsQuery()
 
   return (
-    <View className="flex-1 bg-background pb-5">
-      <CustomHeader />
-      <ScrollView className="px-4">
-        <View className="mt-6 mb-4">
-          <Text className="text-2xl font-bold">
-            {termsAndConditions?.title}
-          </Text>
-          <Text className="text-gray-500">
-            Last updated: {termsAndConditions?.lastUpdated}
-          </Text>
-        </View>
-
-        {termsAndConditions?.sections.map((section, index) => (
-          <View key={index} className="bg-white p-4 rounded-xl mb-4">
-            <Text className="text-lg font-medium mb-2">{section.heading}</Text>
-
-            {section.content && (
-              <Text className="text-gray-700 mb-2">{section.content}</Text>
-            )}
-
-            {section.list?.map((item, i) => (
-              <Text key={i} className="text-gray-700 mb-1">
-                • {item}
-              </Text>
-            ))}
-          </View>
-        ))}
-      </ScrollView>
-    </View>
+    <LegalDocumentScreen
+      document={data}
+      isLoading={isLoading}
+      isError={isError}
+      onRetry={() => void refetch()}
+    />
   )
 }

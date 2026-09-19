@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
-import { membershipBenefits } from "../lib/membership"
+import { DEFAULT_MEMBERSHIP_BENEFITS } from "../lib/membership"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -714,6 +714,13 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
   try {
     const membershipPlan = await db.membershipPlan.findFirst({
       where: { name: "Monthly_Membership" },
+      // Listed rather than selected wholesale, so a client generated either side of an
+      // unapplied migration cannot ask for a column the database lacks.
+      select: {
+        id: true,
+        stripePriceId: true,
+        benefits: true,
+      },
     })
     if (!membershipPlan) {
       res.status(404).json({ message: "Membership plan not found" })
@@ -732,7 +739,11 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       id: membershipPlan.id,
       price: price.unit_amount,
       stripePriceId: membershipPlan.stripePriceId,
-      membershipBenefits,
+      // An unseeded plan falls back, rather than showing the join screen an empty
+      // tick-list that reads as a membership offering nothing.
+      membershipBenefits: membershipPlan.benefits.length
+        ? membershipPlan.benefits
+        : DEFAULT_MEMBERSHIP_BENEFITS,
     }
     res.status(200).json(membershipDetails)
     return

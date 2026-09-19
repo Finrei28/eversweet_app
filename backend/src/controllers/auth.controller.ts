@@ -9,7 +9,8 @@ import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../lib/socket"
 import { Status } from "../types/types"
-import { loyaltyRates } from "../lib/loyaltyRates"
+import { getLoyaltyRates, pointsForLine } from "../lib/loyaltyRates"
+import { CACHE_KEYS, invalidate } from "../lib/cache"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
 import { getErrorMessage } from "../utils/getError"
@@ -408,6 +409,16 @@ export const updateAnonymousStatus = async (req: Request, res: Response) => {
       data: { anonymousEnabled: value },
       select: { anonymousEnabled: true },
     })
+
+    // The public banner is cached, and it is the one place a name reaches people who are
+    // not signed in - `/getLeaderboardDetails` is unauthenticated and sent
+    // `Cache-Control: public`. Without this, a customer who switches anonymity on went on
+    // being named from the cached copy until its TTL ran out, and the privacy policy now
+    // tells them the switch takes effect. The 60s any intermediary was told it could hold
+    // the response for is still out of reach, which is why the policy says "a few minutes"
+    // rather than "at once".
+    await invalidate(CACHE_KEYS.leaderboardDetails)
+
     res.status(200).json({ value: user.anonymousEnabled })
     return
   } catch (error) {
@@ -760,9 +771,14 @@ export const createOrder = async (req: Request, res: Response) => {
       }
     }
 
-    const [daysOffKeys, hours] = await Promise.all([
+    // Resolved here rather than inside the transaction below. That transaction holds a
+    // Postgres advisory lock on the payment intent until it commits, so every await inside
+    // it is time the lock is held; the rates are settings that almost always answer from a
+    // one-minute cache, and there is no reason for them to be read under it.
+    const [daysOffKeys, hours, loyaltyRates] = await Promise.all([
       getDaysOffKeys(),
       getTradingHours(),
+      getLoyaltyRates(),
     ])
     const pickUpCheck = checkPickUpTime(parsedBody.pickUpTime, {
       eatIn: parsedBody.eatIn,
@@ -958,11 +974,15 @@ export const createOrder = async (req: Request, res: Response) => {
           const membership = await tx.membership.findUnique({ where: { userId } })
           let earnablePoints = 0
 
+          // The inline fallbacks this used to carry (`rate ?? 5`, `modifier ?? 1`) are
+          // gone: `getLoyaltyRates` always answers, falling back to the values that were
+          // hardcoded here, so a missing rate can no longer reach this. They were also
+          // wrong — the rate they guessed was 5 where the real one was 6.
           earnablePoints = cart.cartItems.reduce(
             (acc, item) =>
               acc +
-              Math.floor(
-                ((item.itemPriceInCents -
+              pointsForLine(
+                item.itemPriceInCents -
                   item.discountedAmountInCents +
                   item.customisations.reduce(
                     (acc, c) =>
@@ -973,13 +993,10 @@ export const createOrder = async (req: Request, res: Response) => {
                           c.quantity
                         : 0),
                     0,
-                  )) /
-                  100) * // points is calculated per dollar
-                  (loyaltyRates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
-                  item.quantity *
-                  (membership?.isActive
-                    ? (loyaltyRates.modifier ?? 1) * loyaltyRates.memberRate // if !rates.modifier ? fallback to 1
-                    : (loyaltyRates.modifier ?? 1)),
+                  ),
+                item.quantity,
+                !!membership?.isActive,
+                loyaltyRates,
               ),
             0,
           )

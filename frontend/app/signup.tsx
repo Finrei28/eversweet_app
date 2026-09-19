@@ -23,6 +23,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js"
 import isEmail from "validator/lib/isEmail"
 import { getErrorMessage } from "@/utils/getError"
 import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
+import Checkbox from "expo-checkbox"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
@@ -36,6 +37,12 @@ export default function SignUp() {
   const [verifyEmail, setVerifyEmail] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  /**
+   * Until this existed, a customer could create an account, order and pay having never been
+   * asked to accept anything. The only acceptance in the app sat behind the *membership*
+   * purchase, which most customers never reach.
+   */
+  const [agree, setAgree] = useState(false)
   const router = useRouter()
 
   const handleSignUp = async () => {
@@ -66,6 +73,15 @@ export default function SignUp() {
     }
     if (!signupForm.lastName) {
       Alert.alert("Error", "Please enter your last name.")
+      return
+    }
+    // Last, so the customer is not asked to agree to anything until the rest of the form
+    // is one they could actually submit.
+    if (!agree) {
+      Alert.alert(
+        "Please agree to continue",
+        "You need to accept the Terms & Conditions and Privacy Policy to create an account.",
+      )
       return
     }
     const signupData = {
@@ -201,6 +217,30 @@ export default function SignUp() {
                         }))
                       }
                     />
+                  </View>
+                  <View className="w-3/4 mb-6 flex-row items-start">
+                    <Checkbox
+                      value={agree}
+                      onValueChange={setAgree}
+                      color={agree ? "#e6aa6b" : undefined}
+                    />
+                    <Text className="flex-1 ml-4 text-gray-700">
+                      I agree to the{" "}
+                      <Text
+                        className="text-primary underline"
+                        onPress={() => router.push("/terms-and-conditions")}
+                      >
+                        Terms &amp; Conditions
+                      </Text>{" "}
+                      and{" "}
+                      <Text
+                        className="text-primary underline"
+                        onPress={() => router.push("/privacy-policy")}
+                      >
+                        Privacy Policy
+                      </Text>
+                      .
+                    </Text>
                   </View>
                   <TouchableOpacity
                     onPress={handleSignUp}

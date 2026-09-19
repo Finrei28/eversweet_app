@@ -157,3 +157,17 @@ export const fetchLoyaltyRates = () =>
     queryFn: getLoyaltyRates,
     staleTime: SHARED_DATA_STALE_TIME,
   })
+
+/**
+ * The same rates, for screens that describe them rather than calculate with them.
+ *
+ * Worth having as a hook so copy like "members earn 1.5x points" is derived from what the
+ * server actually applies. The membership offers screen claimed "double loyalty points"
+ * against a 1.5x rate for months, because the sentence was typed rather than computed.
+ */
+export const useLoyaltyRatesQuery = () =>
+  useQuery({
+    queryKey: queryKeys.loyaltyRates,
+    queryFn: getLoyaltyRates,
+    staleTime: SHARED_DATA_STALE_TIME,
+  })

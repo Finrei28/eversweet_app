@@ -109,36 +109,41 @@ export default function StoreInfo() {
             delicious handmade desserts
           </Text>
 
-          <View className="flex-row items-center mb-2">
-            <Feather name="globe" size={18} color="#6B7280" className="mr-2" />
-            <TouchableOpacity
-              onPress={() =>
-                Linking.openURL(storeInfo?.website ?? "https://eversweet.co.nz")
-              }
-            >
-              <Text className="text-primary ml-2">{storeInfo?.website}</Text>
-            </TouchableOpacity>
-          </View>
+          {/*
+            Each row appears only once its value has arrived. They used to render
+            unconditionally with a hard-coded fallback behind the tap - so while the details
+            were loading the row showed nothing at all and still dialled a number baked into
+            the build, which is the copy that would be wrong if the shop ever changed it.
+            The details are the ShopProfile table now, edited from the website's admin.
+          */}
+          {storeInfo?.website && (
+            <View className="flex-row items-center mb-2">
+              <Feather name="globe" size={18} color="#6B7280" className="mr-2" />
+              <TouchableOpacity
+                onPress={() => Linking.openURL(storeInfo.website)}
+              >
+                <Text className="text-primary ml-2">{storeInfo.website}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <View className="flex-row items-center mb-2">
-            <Feather name="mail" size={18} color="#6B7280" className="mr-2" />
-            <TouchableOpacity
-              onPress={() =>
-                emailStore(storeInfo?.email ?? "eversweet@eversweet.co.nz")
-              }
-            >
-              <Text className="text-primary ml-2">{storeInfo?.email}</Text>
-            </TouchableOpacity>
-          </View>
+          {storeInfo?.email && (
+            <View className="flex-row items-center mb-2">
+              <Feather name="mail" size={18} color="#6B7280" className="mr-2" />
+              <TouchableOpacity onPress={() => emailStore(storeInfo.email)}>
+                <Text className="text-primary ml-2">{storeInfo.email}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <View className="flex-row items-center">
-            <Feather name="phone" size={18} color="#6B7280" className="mr-2" />
-            <TouchableOpacity
-              onPress={() => callStore(storeInfo?.phone ?? "+6499491050")}
-            >
-              <Text className="text-primary ml-2">{storeInfo?.phone}</Text>
-            </TouchableOpacity>
-          </View>
+          {storeInfo?.phone && (
+            <View className="flex-row items-center">
+              <Feather name="phone" size={18} color="#6B7280" className="mr-2" />
+              <TouchableOpacity onPress={() => callStore(storeInfo.phone)}>
+                <Text className="text-primary ml-2">{storeInfo.phone}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
         {/* Store Locations */}
         <Text className="text-xl font-medium mb-3">Our Locations</Text>

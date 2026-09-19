@@ -11,10 +11,12 @@ import React, { useCallback, useMemo, useState } from "react"
 import {
   RefreshControl,
   ScrollView,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native"
+import { updateAnonymousStatus } from "@/services/api"
 
 type LeaderBoardEntry = LeaderBoard[number]
 type LeaderBoardUser = LeaderBoardEntry["user"]
@@ -396,10 +398,51 @@ YourStandingCard.displayName = "YourStandingCard"
 
 export default function LeaderBoardPage() {
   const router = useRouter()
-  const { token, authLoading, dataLoading, userDetails, leaderboardDetails } =
-    useAuth()
+  const {
+    token,
+    authLoading,
+    dataLoading,
+    userDetails,
+    setUserDetails,
+    leaderboardDetails,
+  } = useAuth()
 
   const [refreshing, setRefreshing] = useState(false)
+  const [changingAnonymity, setChangingAnonymity] = useState(false)
+
+  /**
+   * Applied locally first so the switch moves under the finger, then sent. The same
+   * endpoint account details calls; the server is what decides whose name it sends, so a
+   * failure here leaves the switch where the server actually stands.
+   */
+  const setAnonymous = useCallback(
+    async (value: boolean) => {
+      setChangingAnonymity(true)
+      // Captured rather than inferred as `!value`: the switch is what the *server* holds,
+      // and putting it back where it actually was is the only honest thing to do when the
+      // write fails. A customer who thinks they are anonymous and is not has been misled
+      // about something this screen has just promised them.
+      let restore: boolean | undefined
+      try {
+        setUserDetails((prev) => {
+          if (!prev) return prev
+          restore = prev.anonymousEnabled
+          return { ...prev, anonymousEnabled: value }
+        })
+        await updateAnonymousStatus(value)
+      } catch (error) {
+        console.error("Failed to update anonymous status: ", error)
+        setUserDetails((prev) =>
+          prev && restore !== undefined
+            ? { ...prev, anonymousEnabled: restore }
+            : prev,
+        )
+      } finally {
+        setChangingAnonymity(false)
+      }
+    },
+    [setUserDetails],
+  )
 
   const {
     data,
@@ -564,6 +607,31 @@ export default function LeaderBoardPage() {
           <Text className="text-gray-500 mt-1">
             Top point earners this month
           </Text>
+        </View>
+
+        {/*
+          The anonymity switch lives here as well as in account details, because this is
+          the screen where a customer finds out their name is on a public list and wonders
+          how to take it off. Last month's podium is served to anyone on the internet, not
+          only to people signed in, so burying the control two screens away was the wrong
+          place for it. Both copies call the same endpoint.
+        */}
+        <View className="flex-row items-center justify-between bg-white rounded-xl px-4 py-3 mb-4">
+          <View className="flex-1 pr-3">
+            <Text className="text-base font-medium">Show my name</Text>
+            <Text className="text-sm text-gray-500 mt-0.5">
+              {userDetails?.anonymousEnabled
+                ? "You appear as Anonymous here and on our website."
+                : "Your name can be seen by anyone, including on our website."}
+            </Text>
+          </View>
+          <Switch
+            value={!userDetails?.anonymousEnabled}
+            onValueChange={(showName) => void setAnonymous(!showName)}
+            disabled={changingAnonymity}
+            trackColor={{ false: "#D1D5DB", true: "#10B981" }}
+            thumbColor="#FFFFFF"
+          />
         </View>
 
         {/* A strip, not a card: this is a hook, and it must not out-weigh the
