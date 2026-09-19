@@ -89,25 +89,90 @@ describes the installed binary rather than whatever JS bundle is running on top 
 
 ## 5. Move hard-coded shop data into the database
 
-**Hard-coded in the backend today** (changing any of it needs a deploy):
-- `backend/src/lib/loyaltyRates.ts`: points per dollar and the member multiplier. Used inside `createOrder`'s transaction.
-- `backend/src/lib/membership.ts`: the `membershipBenefits` list.
-- `backend/src/legal/term-and-conditions.ts` and `backend/src/legal/privacy-policy.ts`.
-- `backend/src/lib/storeInfo.ts`: `storeHours` (drives `checkPickUpTime` and trading hours) and `storeInfo` (address, phone).
+**Done**, in `20260919000000_shop_settings_from_code`. Four things that needed a deploy to
+change now live in the database, edited from a new **`/admin/settings`** page on the website:
 
-The website keeps its own privacy policy page and opening-hours component, so the two can already drift apart.
+| Was | Now |
+| --- | --- |
+| `backend/src/lib/loyaltyRates.ts` | `LoyaltySetting` — one row, whole numbers |
+| `backend/src/lib/membership.ts` | `MembershipPlan.benefits` |
+| `backend/src/lib/announcements.ts` | `Announcement` — many rows, ordered |
+| `backend/src/lib/storeInfo.ts` | `ShopProfile` — one row |
 
-**There's a precedent:** `PrepTimeSetting` and `RestaurantStatus` already live in the database, edited from the website admin.
+(The `storeHours` half of that last line was already done, by the `TradingHours` migration on
+2026-09-18. `announcements` was not in this list and should have been: it was placeholder
+text — "We are just testing this announcement..." — being served to customers.)
 
-**Approach**
-- **Schema change** goes through the website repo: its migrations, then mirror `schema.prisma` here and run `prisma generate` (see CLAUDE.md). Seed each table from the current constants in the migration.
-- **Storage:**
-  - Typed columns for rates and hours.
-  - Text or JSON for the legal documents, with an effective date, so a T&C change is traceable (and the app can say "updated").
-- **Reading:**
-  - Go through `lib/cache` (shop-wide, long TTL, invalidated on admin edit). These are read on launch, and a database round trip from Singapore to Sydney is expensive.
-  - Keep a safe default if a row is missing, the way `getPrepTimes` falls back to `DEFAULT_PREP_TIMES`. Trading hours and loyalty rates must never fail an order.
-- **Editing:** a screen in the website admin (like prep times), or the admin app.
-- **Sharing:** point the website at the same tables, so there is one source.
+Each module is now a cached reader in the `getPrepTimes` shape: a one-minute in-memory
+cache, a `DEFAULT_*` constant holding exactly what used to be compiled in, and no caching of
+a failure. **Not Redis, deliberately** — the writer is in the website repo and cannot
+invalidate a cache in the order server's process, so a TTL would be the only mechanism
+anyway. The order server sees a change within a minute, as it already does for the hours.
 
-**Decide:** which of these staff actually need to change without a deploy. Rates, hours and benefits likely yes; legal text rarely.
+The rates are resolved **before** `createOrder`'s transaction, which holds an advisory lock
+on the payment intent until it commits.
+
+**Where it is edited, and why there.** Preparation times stay in the staff app: the kitchen
+adjusts them as service speeds up or slows down. These four are on the website instead, so
+they cannot be changed from the tablet on the counter.
+
+**Two customer-facing inaccuracies fixed on the way past:**
+- Members earn 1.5x, but the benefits list and `app/offers.tsx` both advertised "2x" /
+  "double". The wording is corrected and now **derived** from the rate rather than typed, and
+  the admin screen flags a benefit claiming a multiplier the rates do not give.
+- The website's privacy policy printed `new Date()` as its "Last Updated", so it claimed to
+  have been updated today, every day.
+
+### The legal text: in code, but now one copy
+
+Left in the database's place deliberately — a legal document wants the review, diff and
+revert a pull request gives it, none of which an admin textarea has. But the two *copies*
+were the problem, and that is now fixed: `backend/src/legal/legalDocuments.ts` holds both
+documents, is copied byte-for-byte into the website's `src/lib/legalDocuments.ts`, and
+`npm run verify:legal` in either repo fails if they stop matching.
+
+The app and the website now render the same Terms and the same Privacy Policy. Sections
+that genuinely apply to one channel — points, membership, offers, prizes and notifications
+are app-only; cookies are website-only — carry a visible label instead of a second document
+being written.
+
+The documents were also rewritten against the code, because the old ones said things that
+were not true. See **Legal documents** in CLAUDE.md for the rules that keeps them honest.
+
+**The staff app's printed receipt** (`admin/services/receipt.ts`) still writes out the
+address. It prints over Bluetooth to a printer that may have no network behind it, so wiring
+it up means giving the app a last-known copy to print from when offline and re-checking the
+line wrap on the physical printer.
+
+### Still outstanding
+
+- **The website checkout still names the Terms as plain text, not a link.**
+  `checkout/_components/paymentSection.tsx` says, in both languages, that completing a
+  purchase means agreeing to them. The page now exists at `/terms-and-conditions`, so this
+  is a two-line change nobody has made yet.
+- **No automated check proves the two copies match.** `verify:legal` is a local gate that
+  has to be run; two repos on two CI runners with no shared checkout cannot compare files.
+  Hardening it means the app repo's workflow checking out the website repo with a token.
+  The same gap applies to `pickUpTimeCases.json` and `schema.prisma`, neither of which has
+  even this much.
+- **There is still no way for a customer to delete their account.** The Privacy Policy now
+  says so plainly and describes the manual process instead of promising a button. A real
+  endpoint has to unwind in order — `LoyaltyRecord` defaults to `Restrict` and blocks
+  deleting anyone who has ever earned a point — and anonymise the order rows rather than
+  removing them.
+- **Membership refunds within 24 hours.** The Terms currently say membership payments are
+  not refunded at all, because that is what the code does - `cancelMembership` only sets
+  `cancel_at_period_end` and there is no refund path anywhere on the membership. The
+  intended policy is a refund within 24 hours of purchase **provided no membership benefit
+  has been used**, which needs: a way to tell whether a member-priced order, a member-only
+  offer or a member-rate points earn has happened since they joined; a refund of the Stripe
+  invoice; and cancelling the subscription immediately rather than at period end. Until
+  that exists the Terms must keep saying no refunds - the one thing they must not do is
+  promise it first.
+- **Nothing yet triggers the new-offer notification.** `sendOfferNotifications` is restored
+  and the app routes `NEW_OFFER` to the offers screen, but no code calls it: offers are
+  authored in the website admin, so the trigger needs an `/api/internal` route on the order
+  server and a call from the offers router when an offer is published. Worth thinking about
+  before wiring: it is a broadcast to every customer, there is no opt-out short of the
+  phone's settings, and a save that fires twice should not notify twice.
+- The staff app's receipt, above.

@@ -4,21 +4,33 @@ import { Expo } from "expo-server-sdk"
 
 const expo = new Expo()
 
+/**
+ * Tells customers about a new offer.
+ *
+ * A broadcast, unlike everything else in this file: the other two notifications go to one
+ * customer about something they did. It is the one message the shop sends because it wants
+ * to, which is why the privacy policy names it specifically and why the only way to stop it
+ * is the phone's own notification settings.
+ *
+ * `isMembersOffer` narrows it to active members, for an offer nobody else could redeem.
+ * That is deliberately coarser than `lib/offerAudience`: a NEW_USERS offer goes to everyone
+ * rather than to customers with no orders, because "everyone who has never ordered" is a
+ * list this shop should not be singling out.
+ *
+ * Failures are logged and swallowed. Nobody is waiting on this, and a push that does not
+ * arrive must never take an admin's save down with it.
+ */
 export const sendOfferNotifications = async (
   title: string,
   body: string,
   isMembersOffer: boolean,
 ) => {
   try {
-    // 1. Load all push tokens
     const users = await db.user.findMany({
-      where: isMembersOffer
-        ? { membership: { isActive: true } } // only members
-        : {}, // everyone
+      where: isMembersOffer ? { membership: { isActive: true } } : {},
       select: { pushToken: true },
     })
 
-    // 2. Filter out null / invalid tokens
     const validTokens = users
       .map((u) => u.pushToken)
       .filter((token) => Expo.isExpoPushToken(token))
@@ -28,16 +40,17 @@ export const sendOfferNotifications = async (
       return
     }
 
-    // 3. Build message array
     const messages = validTokens.map((token) => ({
       to: token,
       sound: "default",
       title,
       body,
-      data: {}, // or add custom data
+      // The app routes on `type` and ignores anything it does not recognise, so an empty
+      // data object made this notification do nothing when tapped - which for a message
+      // whose whole purpose is "come and look at this offer" is most of the point lost.
+      data: { type: "NEW_OFFER" },
     }))
 
-    // 4. Chunk messages
     const chunks = expo.chunkPushNotifications(messages)
 
     const tickets = []

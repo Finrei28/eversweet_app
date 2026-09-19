@@ -103,9 +103,11 @@ describe("the app version gate, mounted", () => {
     expect(res.status).not.toBe(426)
   })
 
-  // getPrivacyPolicy answers from a module constant, so the cases that expect
-  // to reach a controller use it rather than one of the reads that would need
-  // the database this file deliberately does without.
+  // getPrivacyPolicy is the cheapest read that still reaches a controller, so the cases
+  // that need to prove the gate let a request *through* use it. It answers from a module
+  // constant with the shop's details filled in, and `getShopProfile` falls back to the
+  // values that used to be hardcoded rather than throwing - so it answers either way, with
+  // or without the database this file deliberately does without.
   it("lets a build that is current through untouched", async () => {
     vi.stubEnv("MIN_APP_BUILD_IOS", "10")
 

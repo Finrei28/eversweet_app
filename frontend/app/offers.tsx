@@ -17,7 +17,11 @@ import AudienceBadge from "@/_components/audienceBadge"
 import OfferModal from "@/_components/offerModal"
 import { PrizeCard } from "@/_components/prizeCard"
 import { PrizeCodeModal } from "@/_components/prizeCodeModal"
-import { useMyPrizesQuery, useOffersQuery } from "@/services/queries"
+import {
+  useLoyaltyRatesQuery,
+  useMyPrizesQuery,
+  useOffersQuery,
+} from "@/services/queries"
 import { useAuth } from "@/store/authProvider"
 import { Offer, Offers, OfferViewer, Prize } from "@/utils/types"
 import { getOfferState, groupOffers } from "@/lib/offerHelpers"
@@ -53,6 +57,14 @@ export default function OffersPage() {
   // and defeat the grouping memo below.
   const offers = useMemo<Offers>(() => data?.offers ?? [], [data])
   const viewer = useMemo<OfferViewer>(() => data?.viewer ?? NO_PERKS, [data])
+
+  // Derived, not typed out. This line read "double loyalty points" while the server gave
+  // members 1.5x, because nothing tied the sentence to the rate. Falls back to the plain
+  // wording rather than a wrong number while the rates are still loading.
+  const { data: loyaltyRates } = useLoyaltyRatesQuery()
+  const memberPointsClaim = loyaltyRates
+    ? `${loyaltyRates.memberRate}x`
+    : "bonus"
 
   // Only when the cached copy has gone stale — this used to refetch the whole
   // payload on every focus, including straight after the mount fetch.
@@ -214,7 +226,7 @@ export default function OffersPage() {
                     </Text>
                     <Text className="text-gray-500 text-sm mt-1">
                       Members get exclusive offers, a growing discount on every
-                      order, and double loyalty points.
+                      order, and {memberPointsClaim} loyalty points.
                     </Text>
                     <TouchableOpacity
                       className="bg-primary py-2 px-4 rounded-lg items-center mt-3"

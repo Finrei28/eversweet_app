@@ -3,13 +3,17 @@ import { db } from "../lib/db"
 import ResetPasswordEmail from "../email/ResetPasswordEmail"
 import bcrypt from "bcrypt"
 import crypto from "crypto"
-import { storeInfo } from "../lib/storeInfo"
+import { getShopProfile } from "../lib/storeInfo"
 import { quoteMinutes } from "../lib/orderTiming"
 import { getPrepTimes } from "../lib/prepTimes"
-import { loyaltyRates } from "../lib/loyaltyRates"
-import { announcements } from "../lib/announcements"
-import { privacyPolicy } from "../legal/privacy-policy"
-import { termAndConditions } from "../legal/term-and-conditions"
+import { getLoyaltyRates } from "../lib/loyaltyRates"
+import { getAnnouncements } from "../lib/announcements"
+import {
+  type LegalContact,
+  privacyPolicy,
+  resolveLegalDocument,
+  termAndConditions,
+} from "../legal/legalDocuments"
 import VerifyEmail from "../email/verifyEmail"
 import emailSender from "../lib/emailSender"
 import { organiseLeaderboardDetails } from "../lib/leaderboardDetails"
@@ -348,13 +352,14 @@ export const getStoreHours = async (req: Request, res: Response) => {
 /** The shop's details, with whether it is open right now worked out per request. */
 export const getStoreInfo = async (req: Request, res: Response) => {
   try {
-    const [hours, daysOffKeys] = await Promise.all([
+    const [profile, hours, daysOffKeys] = await Promise.all([
+      getShopProfile(),
       getTradingHours(),
       getDaysOffKeys(),
     ])
     res
       .status(200)
-      .json({ ...storeInfo, isOpen: isOpenAt(new Date(), hours, daysOffKeys) })
+      .json({ ...profile, isOpen: isOpenAt(new Date(), hours, daysOffKeys) })
   } catch (error) {
     console.error("Error reading store info:", error)
     res.status(500).json({ message: "Could not load the store details" })
@@ -389,8 +394,20 @@ export const restaurantStatus = async (req: Request, res: Response) => {
   return
 }
 
-export const getLoyaltyRates = (req: Request, res: Response) => {
-  res.status(200).json(loyaltyRates)
+/**
+ * The earn rates, in the `{ rate, memberRate, modifier }` shape installed builds parse.
+ * The row holds whole numbers; `getLoyaltyRates` converts.
+ */
+export const getLoyaltyRatesForClient = async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await getLoyaltyRates())
+  } catch (error) {
+    // getLoyaltyRates falls back rather than throwing, so reaching here means something
+    // else did. The cart's points preview reads this, and a wrong number is worse than
+    // none, so it is not answered with a guess.
+    console.error("Error reading loyalty rates:", error)
+    res.status(500).json({ message: "Could not load the loyalty rates" })
+  }
   return
 }
 
@@ -405,8 +422,13 @@ export const getLeaderboardDetails = async (req: Request, res: Response) => {
   return
 }
 
-export const getAnnouncements = (req: Request, res: Response) => {
-  res.status(200).json(announcements)
+/**
+ * The launch pop-up's messages. This is the app's first request on a cold start — the one
+ * that trips the version gate before the splash hides — so it answers from a cached read
+ * and never fails: an unreadable table shows no announcements rather than an error.
+ */
+export const getAnnouncementsForClient = async (req: Request, res: Response) => {
+  res.status(200).json(await getAnnouncements())
   return
 }
 
@@ -486,13 +508,35 @@ export const showOfferForClient = async (req: Request, res: Response) => {
   }
 }
 
-export const getPrivacyPolicy = (req: Request, res: Response) => {
-  res.status(200).json(privacyPolicy)
+/**
+ * The shop's details as the legal documents quote them.
+ *
+ * Read from `ShopProfile` rather than written into the documents, so the address in a
+ * privacy policy cannot fall out of step with the address on the store screen - they had
+ * already drifted across five copies in two formats before that table existed.
+ * `getShopProfile` falls back to the values that used to be hardcoded and never throws, so
+ * a legal page still renders when the database does not answer.
+ */
+const legalContact = async (): Promise<LegalContact> => {
+  const shop = await getShopProfile()
+  return {
+    name: shop.name,
+    email: shop.email,
+    phone: shop.phone,
+    address: `${shop.address}, ${shop.city} ${shop.postal}`,
+    website: shop.website,
+  }
+}
+
+export const getPrivacyPolicy = async (req: Request, res: Response) => {
+  res.status(200).json(resolveLegalDocument(privacyPolicy, await legalContact()))
   return
 }
 
-export const getTermAndConditions = (req: Request, res: Response) => {
-  res.status(200).json(termAndConditions)
+export const getTermAndConditions = async (req: Request, res: Response) => {
+  res
+    .status(200)
+    .json(resolveLegalDocument(termAndConditions, await legalContact()))
   return
 }
 

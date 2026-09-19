@@ -7,9 +7,9 @@ import {
   resetPassword,
   getStoreHours,
   restaurantStatus,
-  getLoyaltyRates,
+  getLoyaltyRatesForClient,
   getLeaderboardDetails,
-  getAnnouncements,
+  getAnnouncementsForClient,
   showOfferForClient,
   getPrivacyPolicy,
   getTermAndConditions,
@@ -55,9 +55,9 @@ router.post(
 router.get("/getStoreHours", getStoreHours)
 router.get("/getStoreInfo", getStoreInfo)
 router.get("/restaurantStatus", restaurantStatus)
-router.get("/getLoyaltyRates", getLoyaltyRates)
+router.get("/getLoyaltyRates", getLoyaltyRatesForClient)
 router.get("/getLeaderboardDetails", getLeaderboardDetails)
-router.get("/getAnnouncements", getAnnouncements)
+router.get("/getAnnouncements", getAnnouncementsForClient)
 router.get("/showOfferForClient", showOfferForClient)
 router.get("/getPrivacyPolicy", getPrivacyPolicy)
 router.get("/getTermAndConditions", getTermAndConditions)
