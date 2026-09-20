@@ -176,4 +176,11 @@ line wrap on the physical printer.
   the moment it becomes visible. Worth knowing if you touch it: `closeRun` clears
   `notifiedAt` so a re-run is announced again, and the migration backfilled every existing
   offer as announced so the first deploy did not push the back catalogue at everyone.
+- **Legal acceptance is recorded but not required.** `User.acceptedLegalVersion` and
+  `acceptedLegalAt` hold which documents a customer accepted at sign-up, and the app sends
+  the version it displayed. A request without one still creates the account, because a build
+  already installed sends nothing and refusing would lock those customers out of signing up
+  entirely. Once every build sends it, the `null` branch in `signUp` becomes a 400 - a
+  one-line change. Existing accounts are deliberately not backfilled: stamping them with the
+  current version would record an acceptance that never happened.
 - The staff app's receipt, above.

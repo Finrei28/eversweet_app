@@ -102,6 +102,27 @@ export const signUp = async (req: Request, res: Response) => {
     return
   }
 
+  /**
+   * Which Terms and Privacy Policy the customer accepted, as the documents' own
+   * `lastUpdated` string. The app sends the version it actually displayed.
+   *
+   * **Not required, yet.** A build already installed does not send one, and refusing its
+   * sign-ups would lock those customers out of the product entirely - signup is the flow
+   * that can least afford it. Absent means no acceptance is recorded, which is the honest
+   * answer rather than stamping the current version on somebody who was never shown it.
+   * Once every build sends this, the `undefined` branch becomes a 400.
+   *
+   * Anything that is not a plain, sane string is dropped rather than refused, for the same
+   * reason: a malformed field must not be the thing that stops somebody signing up.
+   */
+  const claimedVersion = req.body?.acceptedLegalVersion
+  const acceptedLegalVersion =
+    typeof claimedVersion === "string" &&
+    claimedVersion.trim().length > 0 &&
+    claimedVersion.trim().length <= 60
+      ? claimedVersion.trim()
+      : null
+
   const { email, firstName, lastName, phone } = fields.values
   const normalisedEmail = email.toLowerCase()
 
@@ -128,6 +149,10 @@ export const signUp = async (req: Request, res: Response) => {
         role: "USER",
         otp,
         otpExpiresAt,
+        acceptedLegalVersion,
+        // Stamped together, so a version with no time - or the reverse - is not a state
+        // this table can reach.
+        acceptedLegalAt: acceptedLegalVersion ? new Date() : null,
         Loyalty: {
           create: {
             points: 0,

@@ -58,6 +58,18 @@ model User {
   phone                     String?
   stripeCustomerId          String?
   pushToken                 String?
+  /// The Terms and Privacy Policy the customer accepted when they signed up, as the
+  /// documents' own `lastUpdated` - "19 September 2026" - and when they accepted.
+  ///
+  /// NULL means no acceptance was recorded, which is the honest answer for an account
+  /// created before the sign-up screen asked, or by anything that is not the app. It is
+  /// deliberately **not** backfilled: stamping existing accounts with the current version
+  /// would record an acceptance that never happened, which is worse than no record.
+  ///
+  /// Not required yet, so that a build already installed cannot be locked out of signing
+  /// up. Once every build sends it, the check in `signUp` becomes a refusal.
+  acceptedLegalVersion      String?
+  acceptedLegalAt           DateTime?
   createdAt                 DateTime        @default(now())
   accounts                  Account[]
   Authenticator             Authenticator[]

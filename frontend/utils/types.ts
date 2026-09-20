@@ -3,6 +3,16 @@ export type createAccountData = {
   lastName: string
   email: string
   password: string
+  /** E.164, as `parsePhoneNumberFromString` formats it. Sent all along, never declared. */
+  phoneNumber: string
+  /**
+   * The `lastUpdated` of the Terms the sign-up screen displayed, so the account records
+   * which version was accepted rather than only that a box was ticked.
+   *
+   * Optional because the documents may not have loaded yet. The server records no
+   * acceptance in that case rather than inventing one.
+   */
+  acceptedLegalVersion?: string
 }
 
 export type AccountData = {

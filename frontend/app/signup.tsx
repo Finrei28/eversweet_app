@@ -23,6 +23,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js"
 import isEmail from "validator/lib/isEmail"
 import { getErrorMessage } from "@/utils/getError"
 import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
+import { useTermsAndConditionsQuery } from "@/services/queries"
 import Checkbox from "expo-checkbox"
 
 export default function SignUp() {
@@ -44,6 +45,16 @@ export default function SignUp() {
    */
   const [agree, setAgree] = useState(false)
   const router = useRouter()
+
+  /**
+   * Fetched so the account can record *which* version was accepted, not just that a box was
+   * ticked - an acceptance nobody can identify is not much of an acceptance.
+   *
+   * Already cached for five minutes and shared with the two screens this form links to, so
+   * it costs nothing here. If it has not arrived, the sign-up still goes through and the
+   * server records no acceptance rather than guessing one.
+   */
+  const { data: terms } = useTermsAndConditionsQuery()
 
   const handleSignUp = async () => {
     if (!signupForm.email || !signupForm.password) {
@@ -90,6 +101,7 @@ export default function SignUp() {
       email: signupForm.email,
       phoneNumber: phone.format("E.164"),
       password: signupForm.password,
+      acceptedLegalVersion: terms?.lastUpdated,
     }
     try {
       setIsCreating(true)
