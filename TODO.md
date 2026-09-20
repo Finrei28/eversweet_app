@@ -183,4 +183,17 @@ line wrap on the physical printer.
   entirely. Once every build sends it, the `null` branch in `signUp` becomes a 400 - a
   one-line change. Existing accounts are deliberately not backfilled: stamping them with the
   current version would record an acceptance that never happened.
+- **A flaky test worth knowing about.** `stripeEndpoints.integration.test.ts` >
+  "creates one subscription when a first-time member's join is sent twice at once" asserts
+  the two responses are exactly `[201, 409]`. It failed once in CI as `[201, 500]`, in a run
+  whose log also carried `connection reset` and `connection terminated unexpectedly` from
+  Postgres and Redis. That is consistent with the design rather than a bug in it:
+  `createMembership` turns **only** P2002 into a 409 and rethrows everything else as a 500,
+  so under infrastructure failure the losing request legitimately produces a third outcome.
+  It passes locally and on a re-run.
+
+  Deliberately **not** relaxed to "one 201 and one non-201". The 409 is the designed answer,
+  and weakening the assertion to quieten CI would hide a real regression where the second
+  request starts erroring. The invariant that actually matters - one subscription, never two
+  - is asserted separately on the same test and has never wavered.
 - The staff app's receipt, above.
