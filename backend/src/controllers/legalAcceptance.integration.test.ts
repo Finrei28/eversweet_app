@@ -100,6 +100,59 @@ describeIfDb("recording legal acceptance at sign-up", () => {
   })
 
   /**
+   * `/signup` is unauthenticated, so anything can post to it. A claim of a version nobody
+   * was ever shown would leave the account carrying a confident record of an acceptance
+   * that did not happen - which is worse than the empty column it replaced, because it
+   * reads as an answer.
+   */
+  it("records nothing for a version this server does not serve", async () => {
+    const email = "grace.fabricated@example.com"
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    const res = await signUp({
+      email,
+      acceptedLegalVersion: "1 January 1999",
+    })
+
+    expect(res.status).toBe(201)
+    const stored = await storedFor(email)
+    expect(stored.acceptedLegalVersion).toBeNull()
+    expect(stored.acceptedLegalAt).toBeNull()
+
+    vi.restoreAllMocks()
+  })
+
+  /**
+   * The same branch covers an honest client whose cached documents are a few minutes behind
+   * a deploy that changed them. Recording nothing is right for both: we cannot say which
+   * version they saw.
+   */
+  it("records nothing for a version that is merely out of date", async () => {
+    const email = "grace.stale@example.com"
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    await signUp({ email, acceptedLegalVersion: "12 June 2026" })
+
+    expect((await storedFor(email)).acceptedLegalVersion).toBeNull()
+
+    vi.restoreAllMocks()
+  })
+
+  /** A refused claim must not be a refused sign-up. */
+  it("still creates the account when the version is rejected", async () => {
+    const email = "grace.rejected@example.com"
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    await signUp({ email, acceptedLegalVersion: "not a version" })
+
+    await expect(
+      db.user.findUniqueOrThrow({ where: { email } }),
+    ).resolves.toBeTruthy()
+
+    vi.restoreAllMocks()
+  })
+
+  /**
    * A malformed field is dropped rather than refused. It is a record, not a credential,
    * and it must not be the thing that stops somebody signing up.
    */
@@ -111,10 +164,14 @@ describeIfDb("recording legal acceptance at sign-up", () => {
   ])("ignores %s without refusing the sign-up", async (_name, value) => {
     const email = `grace.${String(_name).replace(/\W/g, "")}@example.com`
 
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+
     const res = await signUp({ email, acceptedLegalVersion: value })
 
     expect(res.status).toBe(201)
     expect((await storedFor(email)).acceptedLegalVersion).toBeNull()
+
+    vi.restoreAllMocks()
   })
 
   it("trims what it stores", async () => {

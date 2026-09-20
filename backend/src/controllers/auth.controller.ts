@@ -25,6 +25,7 @@ import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
 import { generateOtp } from "../lib/otp"
+import { LEGAL_LAST_UPDATED } from "../legal/legalDocuments"
 import {
   captureOrderPayment,
   EXPIRED_HOLD,
@@ -106,22 +107,33 @@ export const signUp = async (req: Request, res: Response) => {
    * Which Terms and Privacy Policy the customer accepted, as the documents' own
    * `lastUpdated` string. The app sends the version it actually displayed.
    *
-   * **Not required, yet.** A build already installed does not send one, and refusing its
-   * sign-ups would lock those customers out of the product entirely - signup is the flow
-   * that can least afford it. Absent means no acceptance is recorded, which is the honest
-   * answer rather than stamping the current version on somebody who was never shown it.
-   * Once every build sends this, the `undefined` branch becomes a 400.
+   * **Checked against what this server serves, not taken on trust.** `/signup` is
+   * unauthenticated, so anything can post to it; a claim of some version nobody was ever
+   * shown would leave the account carrying a confident record of an acceptance that did not
+   * happen - worse than the empty column it replaced, because it looks like an answer. Only
+   * a claim matching the documents currently being served is recorded.
    *
-   * Anything that is not a plain, sane string is dropped rather than refused, for the same
-   * reason: a malformed field must not be the thing that stops somebody signing up.
+   * A mismatch records nothing rather than refusing the sign-up, and covers two cases that
+   * are worth telling apart in the log: a client fabricating a version, and an honest one
+   * whose cached copy of the documents is a few minutes behind a deploy that changed them.
+   * The second is real and harmless, and both are safest recorded as "no verified
+   * acceptance" rather than as a version.
+   *
+   * **Not required, yet.** A build already installed sends nothing, and refusing its
+   * sign-ups would lock those customers out of the product entirely - signup is the flow
+   * that can least afford it. Once every build sends this, the `null` branch becomes a 400.
    */
   const claimedVersion = req.body?.acceptedLegalVersion
-  const acceptedLegalVersion =
+  const claimsCurrentDocuments =
     typeof claimedVersion === "string" &&
-    claimedVersion.trim().length > 0 &&
-    claimedVersion.trim().length <= 60
-      ? claimedVersion.trim()
-      : null
+    claimedVersion.trim() === LEGAL_LAST_UPDATED
+  const acceptedLegalVersion = claimsCurrentDocuments ? LEGAL_LAST_UPDATED : null
+
+  if (claimedVersion !== undefined && !claimsCurrentDocuments) {
+    console.warn(
+      `Sign-up claimed a legal version this server does not serve; recording none. Current: ${LEGAL_LAST_UPDATED}.`,
+    )
+  }
 
   const { email, firstName, lastName, phone } = fields.values
   const normalisedEmail = email.toLowerCase()
