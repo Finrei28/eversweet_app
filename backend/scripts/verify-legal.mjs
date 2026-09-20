@@ -23,11 +23,12 @@ const backendRoot = resolve(here, "..")
 
 const MINE = join(backendRoot, "src", "legal", "legalDocuments.ts")
 
-const CANDIDATES = [
-  process.env.EVERSWEET_WEB_REPO,
-  "C:/Personal Projects/eversweet",
-  resolve(backendRoot, "..", "..", "eversweet"),
-].filter(Boolean)
+// An explicit override is the only candidate when it is set. Falling through to the
+// guesses below would let a CI job that pointed at the wrong path quietly compare against
+// something else, or - worse - find nothing and be told to skip.
+const CANDIDATES = process.env.EVERSWEET_WEB_REPO
+  ? [process.env.EVERSWEET_WEB_REPO]
+  : ["C:/Personal Projects/eversweet", resolve(backendRoot, "..", "..", "eversweet")]
 
 const read = (path) => {
   try {
@@ -59,6 +60,18 @@ for (const candidate of CANDIDATES) {
 }
 
 if (!theirs) {
+  // Skipping is right on a developer machine that has only one of the two repos
+  // checked out. In CI it is not: a job that cannot find the other copy has proved
+  // nothing, and passing would make this check decorative - which is exactly what it
+  // was before, when no workflow ran it at all.
+  if (process.env.CI) {
+    console.error(
+      "verify:legal - running in CI with no copy of the website to compare against. " +
+        "The workflow must check out the other repository.",
+    )
+    process.exit(1)
+  }
+
   console.log(
     "verify:legal - the website's checkout is not on this machine, so there is nothing " +
       "to compare against. Set EVERSWEET_WEB_REPO to check.",

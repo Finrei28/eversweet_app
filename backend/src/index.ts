@@ -17,6 +17,7 @@ import {
 import { settleMonthlyWinners } from "./controllers/client.controller"
 import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 import { sweepStrandedPayments } from "./lib/strandedPayments"
+import { announceNewOffers } from "./lib/announceOffers"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -75,6 +76,13 @@ try {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * 1", renewWeeklyOffers, {
+    timezone: "Pacific/Auckland",
+  })
+  // Offers that have become available and not been announced. A sweep rather than a hook on
+  // the write, because an offer with a future startsAt goes live with nothing written - see
+  // lib/announceOffers. Wrapped for the same reason as the two below: node-cron would hand
+  // the task a TaskContext, which would arrive as `now` and decide liveness by it.
+  cron.schedule("*/5 * * * *", () => announceNewOffers(), {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 0 * * *", updateDailySpecial, {

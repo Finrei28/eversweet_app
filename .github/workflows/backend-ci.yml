@@ -101,3 +101,45 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # The Terms and the Privacy Policy are one file, copied byte-for-byte between this repo
+  # and the website. Nothing inside a single repository can prove the two copies match, so
+  # this job fetches the other one and compares. Both repos are public, so no token.
+  #
+  # No `working-directory: backend` default here: the script resolves paths from its own
+  # location, and the sibling checkout lands at the workspace root.
+  verify-legal:
+    name: Legal documents match the website
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # A paired change lands on a branch of the same name in both repos, and that branch is
+      # tried first. Comparing only against the website's main would deadlock the pair: each
+      # PR would be checked against a main that does not have the other half yet.
+      - name: Check out the website
+        uses: actions/checkout@v4
+        with:
+          repository: Finrei28/eversweet
+          ref: ${{ github.head_ref || github.ref_name }}
+          path: .eversweet_web
+        continue-on-error: true
+
+      - name: Fall back to the website's default branch
+        if: hashFiles('.eversweet_web/src/lib/legalDocuments.ts') == ''
+        uses: actions/checkout@v4
+        with:
+          repository: Finrei28/eversweet
+          path: .eversweet_web
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare the legal documents
+        env:
+          EVERSWEET_WEB_REPO: ${{ github.workspace }}/.eversweet_web
+        run: node backend/scripts/verify-legal.mjs

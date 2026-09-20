@@ -142,6 +142,18 @@ model Offer {
   /// Replaces OfferRedemption.renewsAt, dropped as dead in the migration before this:
   /// per-offer is the level this question is actually asked at.
   renewsWeekly     Boolean            @default(false)
+  /// When customers were told this offer exists. NULL means they have not been.
+  ///
+  /// The order server sweeps for live offers with this unset, pushes a notification and
+  /// stamps it, so an offer is announced once however it came to be live. It cannot be
+  /// done when an offer is written: an offer saved with a future `startsAt` becomes live
+  /// at that instant with no mutation, no write and nobody touching it, and both
+  /// createOffer and updateOffer can set `isActive` directly without setActive ever being
+  /// called. There is no single "goes live" event to hook.
+  ///
+  /// `closeRun` clears it, because that is the one path that deliberately starts an offer
+  /// over and a second run should be announced like the first.
+  notifiedAt       DateTime?
   requirements     OfferRequirement[]
   cartItems        CartItem[]
   category         Category?          @relation(fields: [categoryId], references: [id])

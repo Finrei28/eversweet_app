@@ -169,10 +169,11 @@ line wrap on the physical printer.
   invoice; and cancelling the subscription immediately rather than at period end. Until
   that exists the Terms must keep saying no refunds - the one thing they must not do is
   promise it first.
-- **Nothing yet triggers the new-offer notification.** `sendOfferNotifications` is restored
-  and the app routes `NEW_OFFER` to the offers screen, but no code calls it: offers are
-  authored in the website admin, so the trigger needs an `/api/internal` route on the order
-  server and a call from the offers router when an offer is published. Worth thinking about
-  before wiring: it is a broadcast to every customer, there is no opt-out short of the
-  phone's settings, and a save that fires twice should not notify twice.
+- **The new-offer notification now sends.** `announceNewOffers` sweeps every five minutes
+  for offers that are live and not yet announced, claims each one with a conditional update
+  and pushes. It is a sweep rather than a hook on the write because an offer with a future
+  `startsAt` goes live with nothing written, and neither `createOffer` nor `updateOffer` is
+  the moment it becomes visible. Worth knowing if you touch it: `closeRun` clears
+  `notifiedAt` so a re-run is announced again, and the migration backfilled every existing
+  offer as announced so the first deploy did not push the back catalogue at everyone.
 - The staff app's receipt, above.

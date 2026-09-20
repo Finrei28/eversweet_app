@@ -3,7 +3,11 @@ import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
-import { DEFAULT_MEMBERSHIP_BENEFITS } from "../lib/membership"
+import {
+  DEFAULT_MEMBERSHIP_BENEFITS,
+  resolveMembershipBenefits,
+} from "../lib/membership"
+import { getLoyaltyRates } from "../lib/loyaltyRates"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -734,16 +738,25 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       // tried to answer a second time.
       return
     }
-    const price = await stripe.prices.retrieve(membershipPlan.stripePriceId)
+    const [price, rates] = await Promise.all([
+      stripe.prices.retrieve(membershipPlan.stripePriceId),
+      getLoyaltyRates(),
+    ])
     const membershipDetails = {
       id: membershipPlan.id,
       price: price.unit_amount,
       stripePriceId: membershipPlan.stripePriceId,
-      // An unseeded plan falls back, rather than showing the join screen an empty
-      // tick-list that reads as a membership offering nothing.
-      membershipBenefits: membershipPlan.benefits.length
-        ? membershipPlan.benefits
-        : DEFAULT_MEMBERSHIP_BENEFITS,
+      // Resolved against the live rates, so a benefit saying "{{memberRate}}x loyalty
+      // points" cannot advertise a multiplier orders no longer earn. An unseeded plan falls
+      // back rather than showing the join screen an empty tick-list that reads as a
+      // membership offering nothing - and the fallback goes through the same resolution,
+      // because it used to bake the rate in at module load and drifted the same way.
+      membershipBenefits: resolveMembershipBenefits(
+        membershipPlan.benefits.length
+          ? membershipPlan.benefits
+          : DEFAULT_MEMBERSHIP_BENEFITS,
+        rates,
+      ),
     }
     res.status(200).json(membershipDetails)
     return

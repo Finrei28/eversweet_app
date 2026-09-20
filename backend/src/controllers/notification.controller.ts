@@ -12,22 +12,34 @@ const expo = new Expo()
  * to, which is why the privacy policy names it specifically and why the only way to stop it
  * is the phone's own notification settings.
  *
- * `isMembersOffer` narrows it to active members, for an offer nobody else could redeem.
- * That is deliberately coarser than `lib/offerAudience`: a NEW_USERS offer goes to everyone
- * rather than to customers with no orders, because "everyone who has never ordered" is a
- * list this shop should not be singling out.
+ * `isMembersOffer` narrows it to active members, for an offer nobody else could redeem. A
+ * member here is `isActive` **and** paid up, the same test `getOffersForClient` builds its
+ * viewer from - it used to be `isActive` alone, which pushed a members-only offer to someone
+ * whose renewal had failed and who would be refused at the cart. It is deliberately coarser
+ * than `lib/offerAudience` in the other direction: a NEW_USERS offer goes to everyone rather
+ * than to customers with no orders, because "everyone who has never ordered" is a list this
+ * shop should not be singling out.
  *
- * Failures are logged and swallowed. Nobody is waiting on this, and a push that does not
- * arrive must never take an admin's save down with it.
+ * Staff are excluded. They are `User` rows like anyone else, and an EVERYONE offer used to
+ * buzz every kitchen phone.
+ *
+ * Returns how many customers it reached, so a caller has something to log. Failures are
+ * logged and swallowed - nobody is waiting on this, and a push that does not arrive must
+ * never take an admin's save down with it.
  */
 export const sendOfferNotifications = async (
   title: string,
   body: string,
   isMembersOffer: boolean,
-) => {
+): Promise<number> => {
   try {
     const users = await db.user.findMany({
-      where: isMembersOffer ? { membership: { isActive: true } } : {},
+      where: {
+        role: { not: "ADMIN" },
+        ...(isMembersOffer
+          ? { membership: { isActive: true, paymentStatus: "SUCCESS" } }
+          : {}),
+      },
       select: { pushToken: true },
     })
 
@@ -37,7 +49,7 @@ export const sendOfferNotifications = async (
 
     if (validTokens.length === 0) {
       console.log("No valid push tokens")
-      return
+      return 0
     }
 
     const messages = validTokens.map((token) => ({
@@ -51,6 +63,8 @@ export const sendOfferNotifications = async (
       data: { type: "NEW_OFFER" },
     }))
 
+    // One chunk per request, each in its own try: a chunk Expo refuses must not stop the
+    // rest of the customer base being told.
     const chunks = expo.chunkPushNotifications(messages)
 
     const tickets = []
@@ -63,9 +77,22 @@ export const sendOfferNotifications = async (
       }
     }
 
-    console.log("Push tickets:", tickets)
+    // A ticket can come back as an error even when the request succeeded - most often
+    // DeviceNotRegistered, meaning the customer uninstalled the app. These were collected
+    // and logged wholesale, so a broadcast to a thousand stale tokens looked like a
+    // success. Counted the way `sendPushToUser` does.
+    const failed = tickets.filter((ticket) => ticket.status === "error")
+    if (failed.length > 0) {
+      console.error(
+        `${failed.length} of ${tickets.length} offer pushes were rejected:`,
+        failed[0]?.message,
+      )
+    }
+
+    return tickets.length - failed.length
   } catch (err) {
     console.error("Notification error:", err)
+    return 0
   }
 }
 

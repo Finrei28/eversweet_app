@@ -659,7 +659,18 @@ Cron (`index.ts`) all runs in `Pacific/Auckland`:
 - admin socket re-check every minute;
 - stranded-payment sweep every 5 minutes;
 - `renewWeeklyOffers` on Monday at 00:00, the daily special, and `settleMonthlyWinners` at
-  00:00 on the 1st.
+  00:00 on the 1st;
+- `announceNewOffers` every 5 minutes.
+
+**Announcing a new offer is a sweep, not a hook on the write** (`lib/announceOffers`). An
+offer saved with a future `startsAt` becomes live at that instant with nothing written, and
+`offerScalars` passes `isActive` straight through so `createOffer` and `updateOffer` can
+both take one live without `setActive` being called - there is no single "goes live" event.
+The sweep takes live offers with `notifiedAt` unset, claims each with a conditional
+`updateMany` (cron runs in every instance, so two processes race it), then pushes. It claims
+*before* sending: a crash in between loses one announcement, which is quiet, where a
+duplicate is a second push to every customer and cannot be taken back. `closeRun` in the
+website clears `notifiedAt`, so a re-run is announced again.
 
 ### Loyalty points, the monthly leaderboard and prizes
 
