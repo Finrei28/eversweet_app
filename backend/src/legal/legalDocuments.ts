@@ -92,7 +92,7 @@ export const LEGAL_TOKENS = [
  * Written the long way round because it is rendered raw by the app, and "12-06-2026" reads
  * as 12 June to a New Zealander and 6 December to an American with equal confidence.
  */
-export const LEGAL_LAST_UPDATED = "19 September 2026"
+export const LEGAL_LAST_UPDATED = "24 September 2026"
 
 const fill = (text: string, contact: LegalContact): string =>
   text.replace(/\{\{(\w+)\}\}/g, (whole, token: string) =>
@@ -146,13 +146,24 @@ export const termAndConditions: LegalDocument = {
     },
     HOW_TO_READ,
     {
-      heading: "3. Your account",
+      heading: "3. Age",
+      content:
+        "You must be at least 13 years old to use our app or to order from our website.",
+      list: [
+        "If you are 13 to 17 years old, you may use the app and place orders only under the supervision of a parent or legal guardian, who must agree to these terms on your behalf.",
+        "That parent or guardian accepts financial responsibility for every order placed, and any membership bought, by someone aged 13 to 17 in their care, as if they had placed it themselves.",
+        "We do not check anyone's age, and we cannot see whether a parent or guardian is supervising. By creating an account or placing an order you confirm that you meet these requirements - it is a promise you make to us rather than something we verify.",
+        "If we learn that an account belongs to someone under 13, we will close it and remove what we can, as our Privacy Policy describes.",
+      ],
+    },
+    {
+      heading: "4. Your account",
       appliesTo: ["app"],
       content:
         "Ordering in the app needs an account. One account belongs to one person and one email address.",
       list: [
         "You need to confirm your email address before you can sign in. We send a six-digit code that is valid for 15 minutes.",
-        "You must be at least 16 years old to hold an account. We do not check anyone's age, so this is a promise you make to us rather than something we verify.",
+        "You must meet the age requirements in the section above to hold an account, including the supervision of a parent or legal guardian if you are 13 to 17.",
         "Keep your password to yourself. You are responsible for what happens under your account.",
         "The name on your account is printed on the kitchen receipt and may be shown on the public leaderboard, so please use your real name and nothing offensive.",
         "You can change your first name, last name and phone number yourself in the app. Changing the email address on an account needs us to do it, so that nobody can move an account to an inbox they do not own.",
@@ -161,13 +172,13 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "4. Ordering without an account",
+      heading: "5. Ordering without an account",
       appliesTo: ["web"],
       content:
         "The website does not have customer accounts and you do not need to sign in to order. You give us your name, email address and phone number at the checkout so that we can prepare your order and contact you about it. Because there is no account, the website cannot show you your past orders, and Sweet Points, membership and offers are not available there.",
     },
     {
-      heading: "5. Orders",
+      heading: "6. Orders",
       list: [
         "An order is an offer to buy. It is accepted when we take payment and send it to the kitchen.",
         "Everything is subject to availability. We may refuse or cancel an order, and if we do and we have taken payment, we refund it.",
@@ -177,7 +188,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "6. Prices",
+      heading: "7. Prices",
       list: [
         "All prices are in New Zealand dollars and include GST.",
         "Every total is worked out on our own servers from the prices held there. Nothing your phone or browser calculates decides what you pay.",
@@ -186,7 +197,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "7. Paying",
+      heading: "8. Paying",
       content:
         "Confirming your card does not take any money. It places a hold - an authorisation - for the total of your order. We take the money only once your order has been written down and sent to the kitchen. That is the last thing that happens, so if anything stops the order, nothing has been taken.",
       list: [
@@ -200,7 +211,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "8. Collecting your order",
+      heading: "9. Collecting your order",
       content:
         "Every order placed through the Eversweet app or website is for collection from the shop or to eat in. We do not deliver.",
       list: [
@@ -213,7 +224,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "9. Changes, cancellations and refunds",
+      heading: "10. Changes, cancellations and refunds",
       content:
         "Neither the app nor the website has a way to change, cancel or refund an order once it has been placed. If something is wrong with your order, contact us at {{email}} or {{phone}} as soon as you can and we will put it right where we can.",
       list: [
@@ -224,7 +235,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "10. Allergies and dietary requirements",
+      heading: "11. Allergies and dietary requirements",
       list: [
         "Our food is made in one kitchen where dairy, gluten, eggs, nuts, soy and sesame are all handled.",
         "We cannot guarantee that anything is free of a given allergen, and we cannot offer an allergen-free environment.",
@@ -233,7 +244,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "11. Sweet Points",
+      heading: "12. Sweet Points",
       appliesTo: ["app"],
       content:
         "Sweet Points are our loyalty points. You earn them on orders placed in the Eversweet app, and you can spend them on selected desserts.",
@@ -250,7 +261,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "12. The monthly leaderboard and prizes",
+      heading: "13. The monthly leaderboard and prizes",
       appliesTo: ["app"],
       content:
         "Each calendar month we rank customers by the Sweet Points they earned that month, on New Zealand time, and the top three win a prize. Your name is shown publicly on the leaderboard unless you turn that off - our Privacy Policy explains how.",
@@ -265,7 +276,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "13. Membership",
+      heading: "14. Membership",
       appliesTo: ["app"],
       content:
         "Membership is a monthly subscription bought in the app. It renews automatically on the card you chose until you cancel it. The price is shown in the app before you join and on every renewal receipt from our payment provider.",
@@ -284,7 +295,7 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "14. Offers and discounts",
+      heading: "15. Offers and discounts",
       list: [
         "Offers in the app may be open to everyone, limited to members, or limited to customers who have not ordered before.",
         "Some offers have to be unlocked by placing a qualifying order first.",
@@ -298,14 +309,14 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "15. Our content",
+      heading: "16. Our content",
       list: [
         "The Eversweet name, logo, photographs, menu descriptions and recipes belong to us.",
         "You may not copy, republish or use them commercially without our written permission.",
       ],
     },
     {
-      heading: "16. Our responsibility to you",
+      heading: "17. Our responsibility to you",
       content:
         "Nothing in this section takes away rights you have under the Consumer Guarantees Act 1993 or the Fair Trading Act 1986. Where you are buying as a consumer, those rights come first and the limits below apply only so far as that Act allows.",
       list: [
@@ -316,17 +327,17 @@ export const termAndConditions: LegalDocument = {
       ],
     },
     {
-      heading: "17. Changes to these terms",
+      heading: "18. Changes to these terms",
       content:
         "We can update these terms. The date at the top of this document shows when they last changed. If you keep ordering after a change, you accept the updated terms. We suggest reading them again if the date has moved since you last looked.",
     },
     {
-      heading: "18. Which law applies",
+      heading: "19. Which law applies",
       content:
         "These terms are governed by New Zealand law, and the New Zealand courts deal with any dispute about them.",
     },
     {
-      heading: "19. Contact us",
+      heading: "20. Contact us",
       list: [
         "Eversweet Limited, trading as {{name}}",
         "{{address}}",
@@ -517,7 +528,7 @@ export const privacyPolicy: LegalDocument = {
     {
       heading: "17. Children",
       content:
-        "Our app and website are not intended for children under 16, and we do not knowingly collect information from them. We do not verify anyone's age. If you are a parent or guardian and believe your child has given us their information, contact us at {{email}} and we will remove what we can.",
+        "Our app and website are not intended for children under 13, and we do not knowingly collect information from them. People aged 13 to 17 may use them only under the supervision of a parent or legal guardian, as our Terms and Conditions set out. We do not verify anyone's age. If you are a parent or guardian and believe a child under 13 has given us their information, contact us at {{email}} and we will remove what we can. A parent or guardian of someone aged 13 to 17 can also contact us to see or correct what we hold about them.",
     },
     {
       heading: "18. Changes to this policy",

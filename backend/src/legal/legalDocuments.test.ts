@@ -343,3 +343,60 @@ describe("the claims that were wrong before", () => {
     expect(termsText).toContain("Consumer Guarantees Act 1993")
   })
 })
+
+/**
+ * Who may use the app and the website: 13 and over, with 13 to 17 year olds supervised by a
+ * parent or guardian who pays. Both documents state the minimum and neither may name another.
+ * They once both said 16, which was never the shop's actual limit - a figure written into the
+ * text with nothing behind it, and a second number beside the real one would leave nobody
+ * sure which applies.
+ */
+describe("age", () => {
+  const termsText = termAndConditions.sections.flatMap(bodies).join(" ")
+  const privacyText = privacyPolicy.sections.flatMap(bodies).join(" ")
+  const ageSection = termAndConditions.sections.find((section) =>
+    section.heading.endsWith(". Age"),
+  )
+
+  it("sets the minimum age at 13 in both documents", () => {
+    expect(termsText).toMatch(/at least 13 years old/)
+    expect(privacyText).toMatch(/children under 13/)
+  })
+
+  it("names no other minimum age", () => {
+    for (const text of [termsText, privacyText]) {
+      const ages = [...text.matchAll(/\b(?:at least|under|aged) (\d+)\b/gi)].map(
+        (match) => match[1],
+      )
+      expect(ages.length).toBeGreaterThan(0)
+      expect(new Set(ages)).toEqual(new Set(["13"]))
+    }
+  })
+
+  it("puts 13 to 17 year olds under a parent or guardian's supervision", () => {
+    expect(termsText).toMatch(
+      /13 to 17[^.]*supervision of a parent or legal guardian/,
+    )
+    expect(privacyText).toMatch(
+      /13 to 17[^.]*supervision of a parent or legal guardian/,
+    )
+  })
+
+  it("makes that parent or guardian responsible for paying", () => {
+    expect(termsText).toMatch(
+      /parent or guardian accepts financial responsibility for every order/,
+    )
+  })
+
+  /** A guest checkout on the website takes a card as readily as the app does. */
+  it("applies on both platforms", () => {
+    expect(ageSection).toBeDefined()
+    expect(ageSection?.appliesTo).toBeUndefined()
+  })
+
+  it("admits that nobody's age is checked", () => {
+    expect(ageSection && bodies(ageSection).join(" ")).toMatch(
+      /We do not check anyone's age/,
+    )
+  })
+})
