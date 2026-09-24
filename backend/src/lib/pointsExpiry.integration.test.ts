@@ -310,6 +310,77 @@ describeIfDb("points expiry", () => {
       expect(await balanceOf(loyalty.id)).toBe(120)
     })
 
+    /**
+     * The sweep decided on a membership it read earlier. A payment the webhook has activated
+     * since makes the customer exempt, and taking their points anyway takes a member's.
+     */
+    it("leaves a balance whose owner became a member since the decision", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-12-01T00:00:00.000Z"), {
+        isActive: true,
+        paymentStatus: "SUCCESS",
+      })
+
+      const taken = await expireBalance(
+        { id: loyalty.id, userId: user.id, points: 120 },
+        switchedOn,
+      )
+
+      expect(taken).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    /**
+     * An activation still in flight - written, not yet committed - is invisible to a plain
+     * read, so a check in the update alone would expire a customer a moment from becoming a
+     * member. The expiry has to wait for it and then see it.
+     *
+     * The activation is held open for longer than an unlocked expiry takes to finish. Read
+     * without the lock, the expiry would complete in that time against the old state and
+     * return true; locked, it cannot finish until the activation commits.
+     */
+    it("waits for an activation in progress, and honours it", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-12-01T00:00:00.000Z"), {
+        isActive: false,
+        paymentStatus: "PENDING",
+      })
+
+      let release!: () => void
+      const held = new Promise<void>((resolve) => (release = resolve))
+      let written!: () => void
+      const activationWritten = new Promise<void>((resolve) => (written = resolve))
+
+      const activation = db.$transaction(
+        async (tx) => {
+          await tx.membership.update({
+            where: { userId: user.id },
+            data: { isActive: true, paymentStatus: "SUCCESS" },
+          })
+          written()
+          await held
+        },
+        { timeout: 20_000 },
+      )
+      await activationWritten
+
+      const expiring = expireBalance(
+        { id: loyalty.id, userId: user.id, points: 120 },
+        switchedOn,
+      )
+      await Promise.race([
+        expiring,
+        new Promise((resolve) => setTimeout(resolve, 1_500)),
+      ])
+      release()
+      await activation
+
+      expect(await expiring).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
     /** The board counts points earned; an expiry is not un-earning them. */
     it("does not move the leaderboard", async () => {
       await switchOn()

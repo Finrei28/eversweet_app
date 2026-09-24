@@ -800,8 +800,12 @@ null means off, and the setting falls back to off, so an unreadable table expire
 - **The sweep claims by value.** `expireBalance` is one conditional `updateMany` on
   `points: observed` *and* "no app order after the anchor", then an `EXPIRED` ledger record.
   A second instance, a concurrent earn or refund, or a points-only order committed since the
-  read all make it match nothing. It touches only `Loyalty`, so the cart lock order is
-  unaffected. `EXPIRED` is negative and not `EARNED`, so the leaderboard cannot see it.
+  read all make it match nothing. Before that it reads the customer's `Membership` row
+  **`FOR SHARE`** and stands down for an active member: the webhook can activate a membership
+  after the sweep's read, and a condition in the update alone misses an activation committing
+  while that statement runs. The lock makes an in-flight activation finish first. It cannot
+  deadlock - every `Membership` write is its own statement and nothing takes `Loyalty` then
+  `Membership` - and the cart lock order is unaffected. `EXPIRED` is negative and not `EARNED`, so the leaderboard cannot see it.
 - **Points come back after expiry**, because a reward in the cart was already debited and is
   refunded when the cart empties or expires. Nothing special handles that: the deadline is
   still past, and the next night's run takes them.

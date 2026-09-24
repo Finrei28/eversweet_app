@@ -153,6 +153,14 @@ type Balance = { id: string; userId: string; points: number }
  *   customer earned a second ago.
  * - **No app order after the anchor.** A points-only order changes no balance, so the check
  *   above cannot see one committed since the read. This does.
+ * - **Still not an active member**, read under a lock. The sweep read the membership before
+ *   deciding; a first payment or a renewal the Stripe webhook activates after that read made
+ *   the customer exempt, and expiring them anyway takes a member's points. A condition in the
+ *   update alone would still miss an activation committing while that statement runs, so the
+ *   membership row is read `FOR SHARE` first: an activation already in progress is waited
+ *   for and then seen, and one arriving later waits for this to commit - at which point the
+ *   customer was not a member when the points went. No deadlock is possible: every Membership
+ *   write is a statement of its own, and nothing takes Loyalty and then Membership.
  */
 export const expireBalance = async (
   balance: Balance,
@@ -160,6 +168,13 @@ export const expireBalance = async (
 ): Promise<boolean> =>
   db.$transaction(
     async (tx) => {
+      const [membership] = await tx.$queryRaw<
+        { isActive: boolean; paymentStatus: string }[]
+      >`SELECT "isActive", "paymentStatus" FROM "Membership" WHERE "userId" = ${balance.userId} FOR SHARE`
+      if (membership?.isActive && membership.paymentStatus === "SUCCESS") {
+        return false
+      }
+
       const { count } = await tx.loyalty.updateMany({
         where: {
           id: balance.id,
@@ -179,7 +194,7 @@ export const expireBalance = async (
       })
       return true
     },
-    // The API is in Singapore and Postgres in Sydney: two round trips here are nearly two
+    // The API is in Singapore and Postgres in Sydney: three round trips here are nearly three
     // seconds, well past Prisma's 5s default once a pool is busy.
     { timeout: 20_000, maxWait: 10_000 },
   )
