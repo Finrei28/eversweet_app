@@ -41,7 +41,7 @@ import {
 } from "./pointsExpiry"
 import { nzMonthRange } from "./tradingHours"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
-import { makeUser } from "../test/factories"
+import { makeDessert, makeUser } from "../test/factories"
 
 /**
  * Sweet Points expiring after a month without an app order.
@@ -481,6 +481,125 @@ describeIfDb("points expiry", () => {
       await warnPointsExpiring(inWarningWeek)
 
       expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * Points leave the balance when a reward goes into the cart, so the nightly sweep cannot
+   * see them, and an abandoned cart is refunded only when the customer next opens it. Left
+   * alone, a customer could park rewards in a cart for months, come back, have them refunded
+   * and order that day - keeping points that expired long before. Past the deadline, what the
+   * cart gives back lands expired.
+   *
+   * The real clock, because the cart endpoints use it: switched on two months ago with no
+   * order since puts the deadline a month behind.
+   */
+  describe("points held in a cart", () => {
+    const longAgo = () => new Date(Date.now() - 60 * 86_400_000)
+    const auth = (userId: string) => ({
+      Authorization: `Bearer ${tokenFor(userId)}`,
+    })
+
+    /** 1,000 points, 500 of them put into the cart as a reward. */
+    const customerWithRewardInCart = async () => {
+      const user = await makeUser()
+      const loyalty = await db.loyalty.create({
+        data: { userId: user.id, points: 1000 },
+      })
+      const dessert = await makeDessert(1200)
+      const added = await request(app)
+        .post("/api/cart/addItemToCart")
+        .set(auth(user.id))
+        .send({
+          quantity: 1,
+          customisations: [],
+          dessertId: dessert.id,
+          itemPriceInCents: 0,
+          loyaltyPointsUsed: 500,
+        })
+      expect(added.status).toBe(201)
+      expect(await balanceOf(loyalty.id)).toBe(500)
+      return { user, loyalty, lineId: added.body.cartItem.id as string }
+    }
+
+    const ways: [string, (userId: string, lineId: string) => Promise<unknown>][] = [
+      [
+        "removing the item",
+        (userId, lineId) =>
+          request(app)
+            .delete(`/api/cart/removeItemFromCart/${lineId}`)
+            .set(auth(userId)),
+      ],
+      [
+        "clearing the cart",
+        (userId) => request(app).delete("/api/cart/clearCart").set(auth(userId)),
+      ],
+      [
+        "the cart expiring",
+        async (userId) => {
+          await db.cart.update({
+            where: { userId },
+            data: { expiresAt: new Date(Date.now() - 60_000) },
+          })
+          return request(app).get("/api/cart/getCartItems").set(auth(userId))
+        },
+      ],
+    ]
+
+    it.each(ways)(
+      "gives nothing back past the deadline: %s",
+      async (_name, giveBack) => {
+        await switchOn(longAgo())
+        const { user, loyalty, lineId } = await customerWithRewardInCart()
+
+        await giveBack(user.id, lineId)
+
+        expect(await balanceOf(loyalty.id)).toBe(500)
+        const records = await db.loyaltyRecord.findMany({
+          where: { loyaltyId: loyalty.id },
+          orderBy: { createdAt: "asc" },
+          select: { change: true, reason: true },
+        })
+        // What happened, in full: spent into the cart, handed back, expired.
+        expect(records.map((r) => `${r.reason} ${r.change}`).sort()).toEqual(
+          ["EXPIRED -500", "REFUND 500", "REWARDS -500"].sort(),
+        )
+      },
+    )
+
+    it.each(ways)(
+      "gives them back to a customer who ordered within the month: %s",
+      async (_name, giveBack) => {
+        await switchOn(longAgo())
+        const { user, loyalty, lineId } = await customerWithRewardInCart()
+        await orderAt(user.id, new Date(Date.now() - 86_400_000))
+
+        await giveBack(user.id, lineId)
+
+        expect(await balanceOf(loyalty.id)).toBe(1000)
+        expect(await expiredRecords(loyalty.id)).toHaveLength(0)
+      },
+    )
+
+    it("gives them back to an active member", async () => {
+      await switchOn(longAgo())
+      const { user, loyalty, lineId } = await customerWithRewardInCart()
+      await membershipFor(user.id, new Date(Date.now() + 20 * 86_400_000), {
+        isActive: true,
+        paymentStatus: "SUCCESS",
+      })
+
+      await ways[0]![1](user.id, lineId)
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
+    })
+
+    it("gives them back while expiry is off", async () => {
+      const { user, loyalty, lineId } = await customerWithRewardInCart()
+
+      await ways[1]![1](user.id, lineId)
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
     })
   })
 

@@ -1,6 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz"
 
-import { db } from "./db"
+import { db, type DbTransactionClient } from "./db"
 import { getPointsExpireFrom } from "./loyaltyRates"
 import { sendPushToUser } from "./pushToUser"
 import { NZ_TIMEZONE, nzCalendarDay, nzEndOfDayMonthsAfter } from "./tradingHours"
@@ -128,17 +128,74 @@ export const loadExpiryActivity = async (
   return activity
 }
 
-/** One customer's deadline, for the balance endpoint. */
+/**
+ * One customer's deadline, for the balance endpoint and the cart's refunds.
+ *
+ * The switch first, and nothing else while it is off. It almost always answers from the
+ * settings cache, so off costs no query at all - which matters because this runs on every
+ * balance fetch, and expiry ships switched off.
+ */
 export const pointsExpiryForUser = async (
   userId: string,
   now: Date = new Date(),
 ): Promise<Date | null> => {
-  const [expiryFrom, activity] = await Promise.all([
-    getPointsExpireFrom(),
-    loadExpiryActivity([userId]),
-  ])
+  const expiryFrom = await getPointsExpireFrom()
+  if (!expiryFrom) return null
+
+  const activity = await loadExpiryActivity([userId])
   return pointsExpireAt(activity.get(userId) ?? NO_ACTIVITY, expiryFrom, now)
 }
+
+/**
+ * Whether points the cart gives back now should land already expired.
+ *
+ * Points leave the balance when a reward goes into the cart, so the nightly sweep cannot
+ * see them, and an expired cart is only refunded when the customer next opens it. Without
+ * this a customer could leave rewards in a cart for months, come back, have them refunded and
+ * order that day - keeping points that expired weeks before. So a refund after the deadline
+ * gives nothing back: the points expired with the rest of the balance.
+ *
+ * Asked before the refund's transaction, and by a caller only when there is something to
+ * refund; free while expiry is off (see `pointsExpiryForUser`).
+ */
+export const refundLandsExpired = async (
+  userId: string,
+  now: Date = new Date(),
+): Promise<boolean> => {
+  const deadline = await pointsExpiryForUser(userId, now)
+  return deadline !== null && now.getTime() > deadline.getTime()
+}
+
+/**
+ * Hands points from the cart back - or, past the deadline, writes down that they expired.
+ *
+ * One `loyalty.update` either way, at the same point in the caller's transaction, so the
+ * cart's lock order (OfferRedemption, then Loyalty, then Cart) is exactly what it was. An
+ * expired refund leaves the balance alone and records both halves, REFUND then EXPIRED, so
+ * the history says what happened rather than showing points that silently never returned.
+ */
+export const creditRefund = (
+  tx: DbTransactionClient,
+  userId: string,
+  points: number,
+  landsExpired: boolean,
+) =>
+  tx.loyalty.update({
+    where: { userId },
+    data: landsExpired
+      ? {
+          records: {
+            create: [
+              { change: points, reason: "REFUND" },
+              { change: -points, reason: EXPIRED_REASON },
+            ],
+          },
+        }
+      : {
+          points: { increment: points },
+          records: { create: { change: points, reason: "REFUND" } },
+        },
+  })
 
 type Balance = { id: string; userId: string; points: number }
 

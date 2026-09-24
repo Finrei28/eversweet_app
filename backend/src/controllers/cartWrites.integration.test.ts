@@ -842,6 +842,29 @@ describeIfDb("cart write paths", () => {
       expect(await payable(user.id)).toBe(2000)
     })
 
+    it("will not remove another customer's line, and answers as for a missing one", async () => {
+      const owner = await makeUser()
+      const stranger = await makeUser()
+      const dessert = await makeDessert(1200)
+      const added = await addItem(owner.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 1200,
+      })
+
+      const foreign = await request(app)
+        .delete(`${REMOVE_ITEM}/${added.body.cartItem.id}`)
+        .set("Authorization", `Bearer ${tokenFor(stranger.id)}`)
+      const missing = await request(app)
+        .delete(`${REMOVE_ITEM}/no-such-line`)
+        .set("Authorization", `Bearer ${tokenFor(stranger.id)}`)
+
+      expect(foreign.status).toBe(404)
+      expect(foreign.body).toEqual(missing.body)
+      expect(
+        await db.cartItem.count({ where: { id: added.body.cartItem.id } }),
+      ).toBe(1)
+    })
+
     it("will not edit another customer's line", async () => {
       const owner = await makeUser()
       const stranger = await makeUser()

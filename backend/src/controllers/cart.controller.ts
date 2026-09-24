@@ -18,6 +18,7 @@ import {
 } from "../lib/offerAudience"
 import { isOfferLive } from "../lib/offerAvailability"
 import { offerUnitPriceInCents } from "../lib/offerPricing"
+import { creditRefund, refundLandsExpired } from "../lib/pointsExpiry"
 
 /**
  * Handing a held redemption back, as one `data` block because all four release paths -
@@ -766,6 +767,12 @@ export const getCartItems = async (req: Request, res: Response) => {
         return sum + (item.loyaltyPointsUsed ?? 0)
       }, 0)
 
+      // Past the customer's points deadline, those points expired with the rest of the
+      // balance - see refundLandsExpired. This path is the one that let them escape:
+      // an abandoned cart is only refunded here, whenever the customer comes back.
+      const landsExpired =
+        totalPointsToRefund > 0 && (await refundLandsExpired(userId))
+
       // An expired cart hands every held redemption back, whoever holds it.
       // The membership lookup this used to need is gone with the re-key — as
       // is the `break`, which abandoned the refund for every later item once
@@ -794,15 +801,7 @@ export const getCartItems = async (req: Request, res: Response) => {
             }
 
             if (totalPointsToRefund > 0) {
-              await tx.loyalty.update({
-                where: { userId },
-                data: {
-                  points: { increment: totalPointsToRefund },
-                  records: {
-                    create: { change: totalPointsToRefund, reason: "REFUND" },
-                  },
-                },
-              })
+              await creditRefund(tx, userId, totalPointsToRefund, landsExpired)
             }
 
             const { count } = await tx.cart.deleteMany({
@@ -960,6 +959,9 @@ export const clearCart = async (req: Request, res: Response) => {
     const totalPointsToRefund = cart.cartItems.reduce((sum, item) => {
       return sum + (item.loyaltyPointsUsed ?? 0)
     }, 0)
+    // Past the points deadline they expired with the balance - see refundLandsExpired.
+    const landsExpired =
+      totalPointsToRefund > 0 && (await refundLandsExpired(userId))
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
@@ -983,15 +985,7 @@ export const clearCart = async (req: Request, res: Response) => {
         }
 
         if (totalPointsToRefund > 0) {
-          await tx.loyalty.update({
-            where: { userId },
-            data: {
-              points: { increment: totalPointsToRefund },
-              records: {
-                create: { change: totalPointsToRefund, reason: "REFUND" },
-              },
-            },
-          })
+          await creditRefund(tx, userId, totalPointsToRefund, landsExpired)
         }
 
         await tx.cart.delete({ where: { userId } })
@@ -1029,13 +1023,22 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         loyaltyPointsUsed: true,
         itemPriceInCents: true,
         offerId: true,
+        cart: { select: { userId: true } },
       },
     })
 
-    if (!cartItem) {
+    // Someone else's line answers exactly as a missing one does, as it does on the edit
+    // path. The write below is scoped to this user's cart, so it never could remove another
+    // customer's item, but it reached that write and failed there as a 500 - after deciding
+    // this caller's points on a stranger's line.
+    if (!cartItem || cartItem.cart.userId !== userId) {
       res.status(404).json({ message: "cart item not found" })
       return
     }
+
+    // Past the points deadline they expired with the balance - see refundLandsExpired.
+    const landsExpired =
+      !!cartItem.loyaltyPointsUsed && (await refundLandsExpired(userId))
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
@@ -1057,20 +1060,12 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
         // This ran after the cart update until it began deadlocking against
         // adds, which take these same two rows the other way round.
         if (cartItem.loyaltyPointsUsed) {
-          await tx.loyalty.update({
-            where: { userId },
-            data: {
-              points: {
-                increment: cartItem.loyaltyPointsUsed,
-              },
-              records: {
-                create: {
-                  change: cartItem.loyaltyPointsUsed,
-                  reason: "REFUND",
-                },
-              },
-            },
-          })
+          await creditRefund(
+            tx,
+            userId,
+            cartItem.loyaltyPointsUsed,
+            landsExpired,
+          )
         }
 
         const updatedCart = await tx.cart.update({

@@ -806,9 +806,15 @@ null means off, and the setting falls back to off, so an unreadable table expire
   while that statement runs. The lock makes an in-flight activation finish first. It cannot
   deadlock - every `Membership` write is its own statement and nothing takes `Loyalty` then
   `Membership` - and the cart lock order is unaffected. `EXPIRED` is negative and not `EARNED`, so the leaderboard cannot see it.
-- **Points come back after expiry**, because a reward in the cart was already debited and is
-  refunded when the cart empties or expires. Nothing special handles that: the deadline is
-  still past, and the next night's run takes them.
+- **Points in a cart expire with the balance.** A reward is debited when it goes into the
+  cart, so the sweep cannot see those points, and an expired cart is refunded only when the
+  customer next opens it (`getCartItems`). Left alone, a customer could park rewards for
+  months, come back, be refunded and order that day. So every cart refund goes through
+  `creditRefund`, and past the deadline (`refundLandsExpired`) it gives nothing back and
+  writes `REFUND +n` then `EXPIRED -n`. One `loyalty.update` either way, at the same point in
+  the transaction, so the cart lock order is unchanged; and the check is made only when
+  there is something to refund, and is free while expiry is off. The sweep still takes any
+  balance past its deadline, as a backstop for points returned any other way.
 - **The warning** goes once per deadline, within the week before, mid-morning. It is claimed
   on `Loyalty.expiryWarnedFor` before sending; keyed on the deadline, so an order that moves
   it makes the next warning due. The claim needs its `OR expiryWarnedFor IS NULL` - SQL's

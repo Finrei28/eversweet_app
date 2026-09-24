@@ -92,7 +92,7 @@ export const LEGAL_TOKENS = [
  * Written the long way round because it is rendered raw by the app, and "12-06-2026" reads
  * as 12 June to a New Zealander and 6 December to an American with equal confidence.
  */
-export const LEGAL_LAST_UPDATED = "25 September 2026"
+export const LEGAL_LAST_UPDATED = "24 September 2026"
 
 const fill = (text: string, contact: LegalContact): string =>
   text.replace(/\{\{(\w+)\}\}/g, (whole, token: string) =>
@@ -256,7 +256,7 @@ export const termAndConditions: LegalDocument = {
         "Points expire if a month passes without an order from you in the app. The month runs from your most recent app order, and when it runs out your whole balance expires at once, at the end of that day, New Zealand time. Orders placed on the website do not count, because they are not linked to your account.",
         "While you have an active membership, your points do not expire. If your membership ends, your month runs from the day it ended.",
         "The app shows the date your points will expire. If you allow notifications, we also send one a week before.",
-        "If points come back to your balance from your cart after it has expired, they expire as well.",
+        "Points in your cart when your balance expires expire with it: if the item comes out of your cart, or the cart expires, after that date, those points do not come back.",
         "We may pause expiry, for example while the shop is closed for a holiday. No points expire while it is paused, and when it resumes, everyone's month starts again from that day.",
         "Points are taken from your balance when you add a reward item to your cart, not when you place the order. Remove the item, or leave the cart until it expires after 12 hours, and the points come back.",
         "An item bought with points is not discounted again by a membership or a promotion, and earns no points of its own.",
