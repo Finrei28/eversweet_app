@@ -564,6 +564,11 @@ Change the cases first, then `cmp -s` the copies.
 copying it is all there is to it. `npm run verify:legal` in either repo compares the two and
 exits non-zero when they differ.
 
+- **CI waits for the other half.** Each repo's `verify-legal` job compares against the other
+  repo, so on a paired change whichever is pushed first briefly sees the old copy. The job
+  fetches the other repo again every 30 seconds for about five minutes before failing - a
+  slow legal check is waiting for the second push, not hung. A real one-sided edit fails
+  after that, with an error saying so.
 - **Both platforms render the same words.** Sections that genuinely apply to one channel
   carry `appliesTo: ["app"]` or `["web"]` and are labelled in the UI — points, membership,
   offers, prizes and notifications are app-only, cookies are website-only. A second document
