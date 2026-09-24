@@ -2,7 +2,8 @@ import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
 import { SweetPointIcon } from "@/_components/sweetPointIcon"
 import { formatNumber } from "@/lib/formatters"
-import { useLeaderboardQuery } from "@/services/queries"
+import { queryKeys, useLeaderboardQuery } from "@/services/queries"
+import { queryClient } from "@/services/queryClient"
 import { useAuth } from "@/store/authProvider"
 import { LeaderBoard, UserLeaderBoardRank } from "@/utils/types"
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons"
@@ -430,6 +431,9 @@ export default function LeaderBoardPage() {
           return { ...prev, anonymousEnabled: value }
         })
         await updateAnonymousStatus(value)
+        // The board below is what this switch changes; without this the customer's own row
+        // keeps showing the old name until the screen next refocuses.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard })
       } catch (error) {
         console.error("Failed to update anonymous status: ", error)
         setUserDetails((prev) =>
@@ -621,8 +625,8 @@ export default function LeaderBoardPage() {
             <Text className="text-base font-medium">Show my name</Text>
             <Text className="text-sm text-gray-500 mt-0.5">
               {userDetails?.anonymousEnabled
-                ? "You appear as Anonymous here and on our website."
-                : "Your name can be seen by anyone, including on our website."}
+                ? "You appear as Anonymous on the leaderboard."
+                : "Other customers can see your name on the leaderboard."}
             </Text>
           </View>
           <Switch
