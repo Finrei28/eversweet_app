@@ -177,15 +177,26 @@ export async function checkVerificationCode({
   return data.name
 }
 
-export async function getUserLoyaltyPoints(): Promise<number> {
-  const data = await apiRequest<{ points: number }>(
+/**
+ * The balance, and when it expires. `expiresAt` is the last instant of an Auckland day, or
+ * null when nothing is due to expire. A server from before expiry sends no such field, which
+ * reads as null too.
+ */
+export async function getUserLoyaltyPoints(): Promise<{
+  points: number
+  expiresAt: string | null
+}> {
+  const data = await apiRequest<{ points: number; expiresAt?: string | null }>(
     "/api/auth/getUserLoyaltyPoints",
     {
       authMessage: UNAUTHENTICATED,
       statusMessages: { 401: UNAUTHENTICATED },
     },
   )
-  return data.points
+  return {
+    points: data.points,
+    expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null,
+  }
 }
 
 export async function getAvailableCustomisations(

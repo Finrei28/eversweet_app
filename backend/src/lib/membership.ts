@@ -16,6 +16,21 @@ import { type LoyaltyRates } from "./loyaltyRates"
 export const MEMBER_RATE_TOKEN = "{{memberRate}}"
 
 /**
+ * Marks a benefit that is true only while points expiry is switched on, and is shown only
+ * then.
+ *
+ * "Your Sweet Points never expire while you're a member" is an advantage when everyone
+ * else's points expire. With expiry switched off, nobody's points expire, and the same line
+ * would be claiming something members do not actually get over anyone else - the same kind
+ * of untrue claim as the "2x" line. So it is stored with this token in front, and served
+ * without the token while expiry is on and not at all while it is off.
+ */
+export const WHILE_POINTS_EXPIRE_TOKEN = "{{whilePointsExpire}}"
+
+/** Added by 20260925000000_points_expiry; the fallback below carries the same line. */
+export const POINTS_NEVER_EXPIRE_BENEFIT = `${WHILE_POINTS_EXPIRE_TOKEN}Your Sweet Points never expire while you're a member`
+
+/**
  * What the app lists on the join and manage screens when the plan row carries no benefits
  * of its own.
  *
@@ -34,19 +49,31 @@ export const DEFAULT_MEMBERSHIP_BENEFITS = [
   `Earn ${MEMBER_RATE_TOKEN}x loyalty points`,
   "Exclusive membership offers",
   "Cancel anytime",
+  POINTS_NEVER_EXPIRE_BENEFIT,
 ]
 
 /**
- * The benefits with the live rates filled in, ready to serve.
+ * The benefits with the live settings filled in, ready to serve.
  *
  * Trailing zeroes are dropped, so 1.5 reads as "1.5x" and 2 as "2x" rather than "2.0x".
+ * A line carrying `WHILE_POINTS_EXPIRE_TOKEN` is dropped unless `pointsExpire` is set -
+ * off by default, so a caller that forgets to say gets the line hidden rather than a claim
+ * that may not be true.
  */
 export const resolveMembershipBenefits = (
   benefits: readonly string[],
   rates: LoyaltyRates,
+  { pointsExpire = false }: { pointsExpire?: boolean } = {},
 ): string[] => {
   const memberRate = String(Number(rates.memberRate.toFixed(2)))
-  return benefits.map((benefit) =>
-    benefit.split(MEMBER_RATE_TOKEN).join(memberRate),
-  )
+  return benefits
+    .filter((benefit) => pointsExpire || !benefit.includes(WHILE_POINTS_EXPIRE_TOKEN))
+    .map((benefit) =>
+      benefit
+        .split(WHILE_POINTS_EXPIRE_TOKEN)
+        .join("")
+        .split(MEMBER_RATE_TOKEN)
+        .join(memberRate)
+        .trim(),
+    )
 }

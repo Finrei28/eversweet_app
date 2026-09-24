@@ -59,15 +59,12 @@ model User {
   stripeCustomerId          String?
   pushToken                 String?
   /// The Terms and Privacy Policy the customer accepted when they signed up, as the
-  /// documents' own `lastUpdated` - "19 September 2026" - and when they accepted.
+  /// documents' own `lastUpdated` string (`LEGAL_LAST_UPDATED`), and when they accepted.
   ///
-  /// NULL means no acceptance was recorded, which is the honest answer for an account
-  /// created before the sign-up screen asked, or by anything that is not the app. It is
-  /// deliberately **not** backfilled: stamping existing accounts with the current version
-  /// would record an acceptance that never happened, which is worse than no record.
-  ///
-  /// Not required yet, so that a build already installed cannot be locked out of signing
-  /// up. Once every build sends it, the check in `signUp` becomes a refusal.
+  /// `signUp` creates no account without one, so NULL now means an account created before
+  /// that rule. It is deliberately **not** backfilled: stamping existing accounts with the
+  /// current version would record an acceptance that never happened, which is worse than no
+  /// record. Nullable for exactly those accounts.
   acceptedLegalVersion      String?
   acceptedLegalAt           DateTime?
   createdAt                 DateTime        @default(now())
@@ -386,11 +383,15 @@ model Feedback {
 }
 
 model Loyalty {
-  id      String          @id @default(cuid())
-  points  Int
-  userId  String          @unique
-  User    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  records LoyaltyRecord[]
+  id              String          @id @default(cuid())
+  points          Int
+  userId          String          @unique
+  User            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records         LoyaltyRecord[]
+  /// The expiry deadline a warning has already been claimed for. Cron runs in every order
+  /// server instance, so the push needs a claim; keyed on the deadline rather than a flag, so
+  /// an order that moves the deadline makes the next warning due with nothing to reset.
+  expiryWarnedFor DateTime?
 }
 
 model LoyaltyRecord {
@@ -570,14 +571,18 @@ model DaysOff {
 /// CHECK constraints the schema cannot express (see 20260919000000_shop_settings_from_code):
 /// points and modifier not negative, and a member never earning less than a non-member.
 model LoyaltySetting {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   /// Points per dollar of net spend. Served as `rate`.
-  pointsPerDollar    Int      @default(6)
+  pointsPerDollar    Int       @default(6)
   /// An active member's multiplier, in whole percent: 150 is 1.5x. Served as `memberRate`.
-  memberBonusPercent Int      @default(150)
+  memberBonusPercent Int       @default(150)
   /// Applied to every earn, member or not. 200 is a double-points weekend. Served as `modifier`.
-  modifierPercent    Int      @default(100)
-  updatedAt          DateTime @updatedAt
+  modifierPercent    Int       @default(100)
+  /// When points expiry was switched on. NULL means off: nothing expires. It is also the
+  /// launch grace - nobody's month is counted from before this - so switching it on gives
+  /// every customer a full month, whatever they last ordered.
+  pointsExpireFrom   DateTime?
+  updatedAt          DateTime  @updatedAt
 }
 
 /// The shop's fixed details, as `/api/getStoreInfo` serves them. One row.

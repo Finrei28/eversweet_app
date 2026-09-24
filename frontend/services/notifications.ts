@@ -186,6 +186,10 @@ export function handleNotification(
       // Where the prize card lives, and where the code is read from.
       onNavigate("/offers")
       return
+    case "POINTS_EXPIRING":
+      // Where the balance and its expiry date are, and what there is to spend them on.
+      onNavigate("/rewards")
+      return
     default:
       return
   }

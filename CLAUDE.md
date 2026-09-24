@@ -620,7 +620,14 @@ unlike prize assignment nothing here has a guard only this server can apply.
   numbers, `/api/getStoreInfo` carries the profile's fields plus a computed `isOpen`,
   `/api/getAnnouncements` is `[{ title, text1, text2?, updatedAt }]` with `updatedAt`
   parseable by `new Date()`, and `getMembershipDetails` carries `membershipBenefits:
-  string[]`. `shopSettings.integration.test.ts` pins all four.
+  string[]`. `shopSettings.integration.test.ts` pins the first three and
+  `lib/pointsExpiry.integration.test.ts` the last - nothing tested it before that.
+- **Benefits carry tokens.** `{{memberRate}}` is filled in from the live rate.
+  `{{whilePointsExpire}}` marks a line that is only true while points expiry is on ("Your
+  Sweet Points never expire while you're a member" is no advantage when nobody's expire), so
+  `resolveMembershipBenefits` drops the line while it is off and strips the token while it
+  is on. Its option defaults to off: a caller that forgets gets the line hidden, never a
+  claim that may be false.
 - **An announcement's `updatedAt` on the wire is the row's `publishedAt`, not its
   `updatedAt`.** The app compares it against the last announcement it showed, so writing it
   on every save would pop the modal for every customer each time a typo was fixed.
@@ -668,7 +675,9 @@ Cron (`index.ts`) all runs in `Pacific/Auckland`:
 - stranded-payment sweep every 5 minutes;
 - `renewWeeklyOffers` on Monday at 00:00, the daily special, and `settleMonthlyWinners` at
   00:00 on the 1st;
-- `announceNewOffers` every 5 minutes.
+- `announceNewOffers` every 5 minutes;
+- `expireInactivePoints` at 00:05 and `warnPointsExpiring` at 10:00 daily (see **Expiry**
+  under the loyalty section).
 
 **Announcing a new offer is a sweep, not a hook on the write** (`lib/announceOffers`). An
 offer saved with a future `startsAt` becomes live at that instant with nothing written, and
@@ -768,6 +777,39 @@ screenshot). A collected prize cannot be changed, and a winner whose account is 
 cannot be given one — `LoyaltyWinner.userId` is `SetNull` on account deletion, so the podium
 row survives with nobody left to hand the prize to. Two writers assigning the same winner at
 once get a 409 rather than a 500.
+
+**Expiry** (`lib/pointsExpiry`)
+
+A customer's whole balance expires when a month passes without an app order. Switched on
+and off from the website's `/admin/settings`, which stamps `LoyaltySetting.pointsExpireFrom`;
+null means off, and the setting falls back to off, so an unreadable table expires nobody.
+
+- **One rule, `pointsExpireAt`,** feeds the balance endpoint's `expiresAt`, the warning push
+  and the sweep, so the date the app shows, the day the push names and the moment the points
+  go cannot disagree. The month runs from the latest of the last app order (any order,
+  points-only included), the end of a membership that has **ended**, and
+  `pointsExpireFrom` - the launch grace, so switching on gives everyone a full month.
+  Active members (`isActive && SUCCESS`) never expire.
+- **Only an ended membership anchors.** `createMembership` writes an `endDate` a month ahead
+  before the first payment is attempted, so a join that never paid carries a future date;
+  counting it would give a failed join a free month.
+- **The deadline is the last instant of an Auckland day** (`nzEndOfDayMonthsAfter`, beside
+  `nzMonthRange`), inclusive like an offer's `endsAt`, clamped for short months.
+- **"Last bought" is derived, not stored**: `order.groupBy` on the `(appUserId, createdAt)`
+  index. Nothing is added to the latency-bound order transaction.
+- **The sweep claims by value.** `expireBalance` is one conditional `updateMany` on
+  `points: observed` *and* "no app order after the anchor", then an `EXPIRED` ledger record.
+  A second instance, a concurrent earn or refund, or a points-only order committed since the
+  read all make it match nothing. It touches only `Loyalty`, so the cart lock order is
+  unaffected. `EXPIRED` is negative and not `EARNED`, so the leaderboard cannot see it.
+- **Points come back after expiry**, because a reward in the cart was already debited and is
+  refunded when the cart empties or expires. Nothing special handles that: the deadline is
+  still past, and the next night's run takes them.
+- **The warning** goes once per deadline, within the week before, mid-morning. It is claimed
+  on `Loyalty.expiryWarnedFor` before sending; keyed on the deadline, so an order that moves
+  it makes the next warning due. The claim needs its `OR expiryWarnedFor IS NULL` - SQL's
+  `<>` is never true against NULL, and without it no first warning is ever claimed.
+- The Terms describe all of this, pause included, and `legalDocuments.test.ts` requires it.
 
 **Things that must stay in step**
 

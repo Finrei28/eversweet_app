@@ -77,7 +77,7 @@ describe.each(documents)("%s", (_name, document) => {
   })
 
   /**
-   * Prose only. A bullet is allowed to be short - "Points do not expire." says everything
+   * Prose only. A bullet is allowed to be short - "Cancel anytime" would say everything
    * it needs to, and the contact block is a list of one-line details. What this is looking
    * for is a `content` paragraph that was never finished, which is the shape the stub
    * sections took.
@@ -313,8 +313,31 @@ describe("the claims that were wrong before", () => {
     expect(privacyText).not.toMatch(/do not send marketing notifications/i)
   })
 
-  it("says points do not expire, because they do not", () => {
-    expect(termsText).toContain("Points do not expire")
+  /**
+   * "Points do not expire" was true until expiry existed, and this case used to require it.
+   * Now the terms have to say what actually happens, in each of its parts.
+   */
+  it("says when points expire, because they now do", () => {
+    expect(termsText).not.toContain("Points do not expire")
+    expect(termsText).toMatch(/a month passes without an order from you in the app/)
+    expect(termsText).toMatch(/your whole balance expires at once/)
+    expect(termsText).toMatch(/Orders placed on the website do not count/)
+  })
+
+  it("says an active membership keeps points from expiring", () => {
+    expect(termsText).toMatch(/active membership, your points do not expire/)
+    expect(termsText).toMatch(/runs from the day it ended/)
+  })
+
+  it("says a customer is told before their points go", () => {
+    expect(termsText).toMatch(/shows the date your points will expire/)
+    expect(termsText).toMatch(/a week before/)
+    expect(privacyText).toMatch(/a week before your Sweet Points are due to expire/)
+  })
+
+  /** Points returning from a cart after expiry are taken by the next run, so say so. */
+  it("says points returning from the cart after expiry expire too", () => {
+    expect(termsText).toMatch(/come back to your balance from your cart after it has expired/)
   })
 
   it("says website orders earn no points", () => {

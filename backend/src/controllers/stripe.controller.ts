@@ -7,7 +7,7 @@ import {
   DEFAULT_MEMBERSHIP_BENEFITS,
   resolveMembershipBenefits,
 } from "../lib/membership"
-import { getLoyaltyRates } from "../lib/loyaltyRates"
+import { getLoyaltyRates, getPointsExpireFrom } from "../lib/loyaltyRates"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -738,9 +738,10 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       // tried to answer a second time.
       return
     }
-    const [price, rates] = await Promise.all([
+    const [price, rates, pointsExpireFrom] = await Promise.all([
       stripe.prices.retrieve(membershipPlan.stripePriceId),
       getLoyaltyRates(),
+      getPointsExpireFrom(),
     ])
     const membershipDetails = {
       id: membershipPlan.id,
@@ -756,6 +757,8 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
           ? membershipPlan.benefits
           : DEFAULT_MEMBERSHIP_BENEFITS,
         rates,
+        // The no-expiry benefit is only true while expiry is on - see lib/membership.
+        { pointsExpire: pointsExpireFrom !== null },
       ),
     }
     res.status(200).json(membershipDetails)

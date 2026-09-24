@@ -34,10 +34,31 @@ export const DEFAULT_LOYALTY_RATES: LoyaltyRates = {
  * change made on the website is in effect before anyone wonders why it is not. */
 const CACHE_TTL_MS = 60_000
 
-let cached: LoyaltyRates | null = null
+/**
+ * The whole row, as read. The rates are kept as their own object because
+ * `/api/getLoyaltyRates` serves `getLoyaltyRates()` exactly as returned: a field added beside
+ * them would reach a wire shape installed builds parse, and the tests pin it.
+ */
+type LoyaltySettings = {
+  rates: LoyaltyRates
+  /** When points expiry was switched on; null means off. See `lib/pointsExpiry`. */
+  pointsExpireFrom: Date | null
+}
+
+/**
+ * Off, deliberately. A settings table that cannot be read must never be the reason a
+ * customer's points disappear - the same direction as the rates falling back rather than
+ * failing an order.
+ */
+const DEFAULT_SETTINGS: LoyaltySettings = {
+  rates: DEFAULT_LOYALTY_RATES,
+  pointsExpireFrom: null,
+}
+
+let cached: LoyaltySettings | null = null
 let cachedAt = 0
 
-export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
+const getLoyaltySettings = async (): Promise<LoyaltySettings> => {
   if (cached && Date.now() - cachedAt < CACHE_TTL_MS) return cached
 
   try {
@@ -46,6 +67,7 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
         pointsPerDollar: true,
         memberBonusPercent: true,
         modifierPercent: true,
+        pointsExpireFrom: true,
       },
     })
 
@@ -53,25 +75,38 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> => {
     // this is not worth logging on every read.
     cached = row
       ? {
-          rate: row.pointsPerDollar,
-          // Whole percent on the way out: 150 is 1.5x. Dividing by 100 gives exactly the
-          // double the old constant held, so what an order earns is unchanged.
-          memberRate: row.memberBonusPercent / 100,
-          modifier: row.modifierPercent / 100,
+          rates: {
+            rate: row.pointsPerDollar,
+            // Whole percent on the way out: 150 is 1.5x. Dividing by 100 gives exactly the
+            // double the old constant held, so what an order earns is unchanged.
+            memberRate: row.memberBonusPercent / 100,
+            modifier: row.modifierPercent / 100,
+          },
+          pointsExpireFrom: row.pointsExpireFrom ?? null,
         }
-      : DEFAULT_LOYALTY_RATES
+      : DEFAULT_SETTINGS
     cachedAt = Date.now()
     return cached
   } catch (error) {
     console.error(
-      "Could not read loyalty rates; using defaults:",
+      "Could not read loyalty settings; using defaults:",
       getErrorMessage(error),
     )
     // Deliberately not cached: a transient failure should not pin the defaults in place for
     // the next minute.
-    return cached ?? DEFAULT_LOYALTY_RATES
+    return cached ?? DEFAULT_SETTINGS
   }
 }
+
+export const getLoyaltyRates = async (): Promise<LoyaltyRates> =>
+  (await getLoyaltySettings()).rates
+
+/**
+ * When points expiry was switched on, or null while it is off. From the same cached row as
+ * the rates, so it costs nothing on the paths that already read them.
+ */
+export const getPointsExpireFrom = async (): Promise<Date | null> =>
+  (await getLoyaltySettings()).pointsExpireFrom
 
 /** Called after a write, so the change is visible without waiting out the TTL. */
 export const invalidateLoyaltyRates = () => {

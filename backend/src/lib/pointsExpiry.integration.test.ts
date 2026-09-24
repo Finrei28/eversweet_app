@@ -1,0 +1,489 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+// Typed with the real signature, so `mock.calls[0][2]` is checked rather than inferred as an
+// empty tuple.
+const { sendPushToUser } = vi.hoisted(() => ({
+  sendPushToUser: vi.fn(
+    async (
+      _userId: string,
+      _title: string,
+      _body: string,
+      _data?: Record<string, unknown>,
+    ) => true,
+  ),
+}))
+vi.mock("./pushToUser", () => ({ sendPushToUser }))
+
+vi.mock("stripe", async (importOriginal) =>
+  (await import("../test/stripeStub.js")).fakeStripeModule(await importOriginal()),
+)
+
+import request from "supertest"
+
+import { redisStub as redis } from "../test/redisStub"
+import { resetStripeStub, stripeApi } from "../test/stripeStub"
+
+vi.mock("./redis", () => ({
+  get redis() {
+    return redis.redis
+  },
+}))
+
+import app from "../app"
+import { db } from "./db"
+import { invalidateLoyaltyRates } from "./loyaltyRates"
+import { rankMonth } from "./leaderboardRanking"
+import { POINTS_NEVER_EXPIRE_BENEFIT } from "./membership"
+import {
+  expireBalance,
+  expireInactivePoints,
+  warnPointsExpiring,
+} from "./pointsExpiry"
+import { nzMonthRange } from "./tradingHours"
+import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
+import { makeUser } from "../test/factories"
+
+/**
+ * Sweet Points expiring after a month without an app order.
+ *
+ * What has to be right is *whose* points and *once*. Taking a balance that should have
+ * stayed is taking something a customer earned; taking one twice is taking it from a
+ * balance they have since rebuilt. The rule itself is pinned in pointsExpiry.test.ts; these
+ * prove the sweep, the warning and the endpoint obey it against a real database.
+ *
+ * Times are fixed. The switch goes on at 3pm on 1 October in Auckland, so a balance with no
+ * orders expires at the end of 1 November - 2026-11-01T10:59:59.999Z.
+ */
+describeIfDb("points expiry", () => {
+  const switchedOn = new Date("2026-10-01T02:00:00.000Z")
+  /** 12:05am on 2 November in Auckland: the sweep's first run after that deadline. */
+  const afterDeadline = new Date("2026-11-01T11:05:00.000Z")
+  /** 11pm on 1 November: the last day is still theirs. */
+  const onLastDay = new Date("2026-11-01T10:00:00.000Z")
+
+  const switchOn = async (at: Date | null = switchedOn) => {
+    await db.loyaltySetting.update({
+      where: { id: "default" },
+      data: { pointsExpireFrom: at },
+    })
+    invalidateLoyaltyRates()
+  }
+
+  const customerWithPoints = async (points: number) => {
+    const user = await makeUser()
+    const loyalty = await db.loyalty.create({ data: { userId: user.id, points } })
+    return { user, loyalty }
+  }
+
+  let orderNumber = 7000
+  const orderAt = (userId: string, createdAt: Date, priceInCents = 1200) =>
+    db.order.create({
+      data: {
+        tempOrderId: String(orderNumber++),
+        priceInCents,
+        customerFirstName: "Ada",
+        customerLastName: "Lovelace",
+        customerEmail: "ada@example.test",
+        status: "PICKED_UP",
+        GST: 0,
+        source: "APP",
+        appUserId: userId,
+        createdAt,
+      },
+    })
+
+  const membershipFor = async (
+    userId: string,
+    endDate: Date,
+    state: { isActive: boolean; paymentStatus: "SUCCESS" | "PENDING" | "FAILED" },
+  ) => {
+    const plan = await db.membershipPlan.create({
+      data: {
+        // The name `getMembershipDetails` looks the plan up by.
+        name: "Monthly_Membership",
+        stripePriceId: `price_${Math.random().toString(36).slice(2)}`,
+        benefits: ["Cancel anytime", POINTS_NEVER_EXPIRE_BENEFIT],
+      },
+    })
+    await db.membership.create({
+      data: { userId, planId: plan.id, endDate, ...state },
+    })
+    return plan
+  }
+
+  const balanceOf = async (loyaltyId: string) =>
+    (await db.loyalty.findUniqueOrThrow({ where: { id: loyaltyId } })).points
+
+  const expiredRecords = (loyaltyId: string) =>
+    db.loyaltyRecord.findMany({ where: { loyaltyId, reason: "EXPIRED" } })
+
+  beforeEach(async () => {
+    await resetDatabase()
+    redis.clear()
+    redis.recover()
+    resetStripeStub()
+    sendPushToUser.mockClear()
+    vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+
+  describe("the sweep", () => {
+    it("expires a balance a month after the switch, and writes it down", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+
+      await expect(expireInactivePoints(afterDeadline)).resolves.toEqual({
+        expired: 1,
+      })
+
+      expect(await balanceOf(loyalty.id)).toBe(0)
+      const records = await expiredRecords(loyalty.id)
+      expect(records.map((r) => r.change)).toEqual([-120])
+    })
+
+    it("leaves the last day alone", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+
+      await expireInactivePoints(onLastDay)
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    it("expires nothing while switched off", async () => {
+      const { loyalty } = await customerWithPoints(120)
+
+      await expireInactivePoints(new Date("2030-01-01T00:00:00.000Z"))
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    it("takes a balance once, however often it runs", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+
+      await expireInactivePoints(afterDeadline)
+      await expireInactivePoints(new Date(afterDeadline.getTime() + 60_000))
+
+      expect(await expiredRecords(loyalty.id)).toHaveLength(1)
+    })
+
+    it("keeps the points of a customer who ordered within the month", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await orderAt(user.id, new Date("2026-10-20T02:00:00.000Z"))
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    /** Spending points is still coming back to the shop. */
+    it("counts an order paid entirely in points", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await orderAt(user.id, new Date("2026-10-20T02:00:00.000Z"), 0)
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    it("never takes an active member's points", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2027-06-01T00:00:00.000Z"), {
+        isActive: true,
+        paymentStatus: "SUCCESS",
+      })
+
+      await expireInactivePoints(new Date("2027-05-01T00:00:00.000Z"))
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    it("gives a lapsed member a month from the end of their membership", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-10-25T02:00:00.000Z"), {
+        isActive: false,
+        paymentStatus: "SUCCESS",
+      })
+
+      await expireInactivePoints(afterDeadline)
+      expect(await balanceOf(loyalty.id)).toBe(120)
+
+      // 12:05am on 26 November: the day after the month from 25 October ran out.
+      await expireInactivePoints(new Date("2026-11-25T11:05:00.000Z"))
+      expect(await balanceOf(loyalty.id)).toBe(0)
+    })
+
+    /**
+     * A join claimed but never paid carries an end date a month ahead. It must not keep a
+     * balance alive as though a membership had run.
+     */
+    it("gives nothing for a join that never paid", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-11-20T02:00:00.000Z"), {
+        isActive: false,
+        paymentStatus: "PENDING",
+      })
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await balanceOf(loyalty.id)).toBe(0)
+    })
+
+    /**
+     * Points in a cart were taken from the balance when the reward went in, and come back
+     * as a REFUND when the cart is emptied or expires - possibly after the sweep ran.
+     */
+    it("takes points refunded from a cart after expiry on the next run", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+      await expireInactivePoints(afterDeadline)
+
+      await db.loyalty.update({
+        where: { id: loyalty.id },
+        data: {
+          points: { increment: 50 },
+          records: { create: { change: 50, reason: "REFUND" } },
+        },
+      })
+      await expireInactivePoints(new Date("2026-11-02T11:05:00.000Z"))
+
+      expect(await balanceOf(loyalty.id)).toBe(0)
+      expect((await expiredRecords(loyalty.id)).map((r) => r.change)).toEqual([
+        -120, -50,
+      ])
+    })
+
+    /**
+     * Cron runs in every instance, so two processes reach one balance together. Asserted on
+     * the claim itself, because two sweeps started side by side do not reliably interleave -
+     * each can commit before the other reads, and pass for the wrong reason.
+     */
+    it("lets only one of two concurrent expiries take the balance", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+      const balance = { id: loyalty.id, userId: loyalty.userId, points: 120 }
+
+      const results = await Promise.all([
+        expireBalance(balance, switchedOn),
+        expireBalance(balance, switchedOn),
+      ])
+
+      expect(results.filter(Boolean)).toHaveLength(1)
+      expect(await expiredRecords(loyalty.id)).toHaveLength(1)
+    })
+
+    /** Zeroing a figure we never saw would take points the customer earned a second ago. */
+    it("leaves a balance that changed since it was read", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+      await db.loyalty.update({
+        where: { id: loyalty.id },
+        data: { points: { increment: 30 } },
+      })
+
+      const taken = await expireBalance(
+        { id: loyalty.id, userId: loyalty.userId, points: 120 },
+        switchedOn,
+      )
+
+      expect(taken).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(150)
+    })
+
+    /** A points-only order changes no balance, so only the relation check can see it. */
+    it("leaves a balance whose owner ordered since the decision", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await orderAt(user.id, new Date("2026-11-01T11:04:00.000Z"), 0)
+
+      const taken = await expireBalance(
+        { id: loyalty.id, userId: user.id, points: 120 },
+        switchedOn,
+      )
+
+      expect(taken).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    /** The board counts points earned; an expiry is not un-earning them. */
+    it("does not move the leaderboard", async () => {
+      await switchOn()
+      const { loyalty } = await customerWithPoints(120)
+      await db.loyaltyRecord.create({
+        data: {
+          loyaltyId: loyalty.id,
+          change: 120,
+          reason: "EARNED",
+          createdAt: new Date("2026-11-01T11:00:00.000Z"),
+        },
+      })
+      const november = nzMonthRange(afterDeadline)
+      const before = await rankMonth(november)
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await rankMonth(november)).toEqual(before)
+    })
+  })
+
+  describe("the warning", () => {
+    /** 10am on 26 October in Auckland: six days before a 1 November deadline. */
+    const inWarningWeek = new Date("2026-10-25T21:00:00.000Z")
+
+    it("warns once in the week before, naming the day", async () => {
+      await switchOn()
+      const { user } = await customerWithPoints(120)
+
+      await warnPointsExpiring(inWarningWeek)
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(1)
+      const [userId, , body, data] = sendPushToUser.mock.calls[0]!
+      expect(userId).toBe(user.id)
+      expect(body).toContain("120 points")
+      expect(body).toContain("Sunday 1 November")
+      expect(data).toEqual({ type: "POINTS_EXPIRING" })
+    })
+
+    it("says nothing earlier than the week before", async () => {
+      await switchOn()
+      await customerWithPoints(120)
+
+      await warnPointsExpiring(new Date("2026-10-20T21:00:00.000Z"))
+
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+
+    it("warns about a deadline once, however often it runs", async () => {
+      await switchOn()
+      await customerWithPoints(120)
+
+      await warnPointsExpiring(inWarningWeek)
+      await warnPointsExpiring(new Date("2026-10-26T21:00:00.000Z"))
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(1)
+    })
+
+    /** Keyed on the deadline, so an order that moves it makes the next warning due. */
+    it("warns again about a new deadline after an order moves it", async () => {
+      await switchOn()
+      const { user } = await customerWithPoints(120)
+      await warnPointsExpiring(inWarningWeek)
+
+      await orderAt(user.id, new Date("2026-10-28T02:00:00.000Z"))
+      await warnPointsExpiring(new Date("2026-11-22T21:00:00.000Z"))
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(2)
+      expect(sendPushToUser.mock.calls[1]?.[2]).toContain("28 November")
+    })
+
+    it("never warns an active member", async () => {
+      await switchOn()
+      const { user } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-11-20T02:00:00.000Z"), {
+        isActive: true,
+        paymentStatus: "SUCCESS",
+      })
+
+      await warnPointsExpiring(inWarningWeek)
+
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+
+    it("does not warn about points already gone, or none at all", async () => {
+      await switchOn()
+      await customerWithPoints(0)
+      await customerWithPoints(120)
+
+      await warnPointsExpiring(afterDeadline)
+
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+
+    it("says nothing while expiry is switched off", async () => {
+      await customerWithPoints(120)
+
+      await warnPointsExpiring(inWarningWeek)
+
+      expect(sendPushToUser).not.toHaveBeenCalled()
+    })
+  })
+
+  /** These use the real clock, because the endpoints do. */
+  describe("GET /api/auth/getUserLoyaltyPoints", () => {
+    const get = (userId: string) =>
+      request(app)
+        .get("/api/auth/getUserLoyaltyPoints")
+        .set("Authorization", `Bearer ${tokenFor(userId)}`)
+
+    it("serves the deadline beside the balance while expiry is on", async () => {
+      await switchOn(new Date())
+      const { user } = await customerWithPoints(120)
+
+      const res = await get(user.id)
+
+      expect(res.status).toBe(200)
+      expect(Object.keys(res.body).sort()).toEqual(["expiresAt", "points"])
+      expect(res.body.points).toBe(120)
+      const days = (Date.parse(res.body.expiresAt) - Date.now()) / 86_400_000
+      expect(days).toBeGreaterThan(27)
+      expect(days).toBeLessThan(33)
+    })
+
+    it.each([
+      ["expiry is off", false, 120, false],
+      ["there are no points", true, 0, false],
+      ["the customer is an active member", true, 120, true],
+    ])("serves no deadline when %s", async (_name, on, points, member) => {
+      if (on) await switchOn(new Date())
+      const { user } = await customerWithPoints(points)
+      if (member) {
+        await membershipFor(user.id, new Date(Date.now() + 20 * 86_400_000), {
+          isActive: true,
+          paymentStatus: "SUCCESS",
+        })
+      }
+
+      const res = await get(user.id)
+
+      expect(res.status).toBe(200)
+      expect(res.body.expiresAt).toBeNull()
+    })
+  })
+
+  describe("the no-expiry membership benefit", () => {
+    const benefitsFor = async () => {
+      const user = await makeUser()
+      await membershipFor(user.id, new Date(Date.now() + 86_400_000), {
+        isActive: false,
+        paymentStatus: "PENDING",
+      })
+      stripeApi.prices.retrieve.mockResolvedValue({ unit_amount: 999 })
+      const res = await request(app)
+        .get("/api/stripe/getMembershipDetails")
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+      expect(res.status).toBe(200)
+      return res.body.membershipBenefits as unknown
+    }
+
+    /** Only true while everyone else's points expire, so only shown then. */
+    it("is listed, without its token, while expiry is on", async () => {
+      await switchOn(new Date())
+
+      const benefits = await benefitsFor()
+
+      expect(benefits).toEqual([
+        "Cancel anytime",
+        "Your Sweet Points never expire while you're a member",
+      ])
+    })
+
+    it("is left out while expiry is off", async () => {
+      expect(await benefitsFor()).toEqual(["Cancel anytime"])
+    })
+  })
+})

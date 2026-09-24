@@ -92,7 +92,7 @@ export const LEGAL_TOKENS = [
  * Written the long way round because it is rendered raw by the app, and "12-06-2026" reads
  * as 12 June to a New Zealander and 6 December to an American with equal confidence.
  */
-export const LEGAL_LAST_UPDATED = "24 September 2026"
+export const LEGAL_LAST_UPDATED = "25 September 2026"
 
 const fill = (text: string, contact: LegalContact): string =>
   text.replace(/\{\{(\w+)\}\}/g, (whole, token: string) =>
@@ -253,7 +253,11 @@ export const termAndConditions: LegalDocument = {
         "Orders placed on the website do not earn Sweet Points. Points are an app feature, and the website has no accounts to hold them.",
         "Points are earned on what you actually pay for an item, after any discount, and are rounded down for each line. A small enough line can earn none.",
         "Members earn at a higher rate. The rates in force are shown in the app.",
-        "Points do not expire.",
+        "Points expire if a month passes without an order from you in the app. The month runs from your most recent app order, and when it runs out your whole balance expires at once, at the end of that day, New Zealand time. Orders placed on the website do not count, because they are not linked to your account.",
+        "While you have an active membership, your points do not expire. If your membership ends, your month runs from the day it ended.",
+        "The app shows the date your points will expire. If you allow notifications, we also send one a week before.",
+        "If points come back to your balance from your cart after it has expired, they expire as well.",
+        "We may pause expiry, for example while the shop is closed for a holiday. No points expire while it is paused, and when it resumes, everyone's month starts again from that day.",
         "Points are taken from your balance when you add a reward item to your cart, not when you place the order. Remove the item, or leave the cart until it expires after 12 hours, and the points come back.",
         "An item bought with points is not discounted again by a membership or a promotion, and earns no points of its own.",
         "Points have no cash value, cannot be exchanged for cash, and cannot be moved between accounts.",
@@ -440,7 +444,7 @@ export const privacyPolicy: LegalDocument = {
       heading: "9. Notifications",
       appliesTo: ["app"],
       content:
-        "If you allow them, we send notifications about your own orders - when one is accepted, when the kitchen starts it, and when it is ready - and when a prize has been assigned to you. We also send one about the shop: a notification when a new offer becomes available, which for a members-only offer goes to members. That is the only message we send that is not about something you did. You can turn notifications off in your phone's settings at any time, and the app keeps working without them. Signing out removes your device's notification token from our records.",
+        "If you allow them, we send notifications about your own orders - when one is accepted, when the kitchen starts it, and when it is ready - when a prize has been assigned to you, and a week before your Sweet Points are due to expire. We also send one about the shop: a notification when a new offer becomes available, which for a members-only offer goes to members. That is the only message we send that is not about your own account or orders. You can turn notifications off in your phone's settings at any time, and the app keeps working without them. Signing out removes your device's notification token from our records.",
     },
     {
       heading: "10. Cookies and analytics",

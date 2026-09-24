@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   DEFAULT_MEMBERSHIP_BENEFITS,
   MEMBER_RATE_TOKEN,
+  POINTS_NEVER_EXPIRE_BENEFIT,
+  WHILE_POINTS_EXPIRE_TOKEN,
   resolveMembershipBenefits,
 } from "./membership"
 
@@ -72,5 +74,58 @@ describe("resolveMembershipBenefits", () => {
     expect(resolveMembershipBenefits(DEFAULT_MEMBERSHIP_BENEFITS, rates(3))).toContain(
       "Earn 3x loyalty points",
     )
+  })
+})
+
+/**
+ * "Your Sweet Points never expire while you're a member" is an advantage only while everyone
+ * else's points expire. With expiry off it would claim something members do not get over
+ * anyone else, so the line is shown only while expiry is on.
+ */
+describe("the benefit that depends on points expiry", () => {
+  const list = ["Cancel anytime", POINTS_NEVER_EXPIRE_BENEFIT]
+
+  it("is shown without its token while expiry is on", () => {
+    expect(
+      resolveMembershipBenefits(list, rates(1.5), { pointsExpire: true }),
+    ).toEqual([
+      "Cancel anytime",
+      "Your Sweet Points never expire while you're a member",
+    ])
+  })
+
+  it("is dropped while expiry is off", () => {
+    expect(
+      resolveMembershipBenefits(list, rates(1.5), { pointsExpire: false }),
+    ).toEqual(["Cancel anytime"])
+  })
+
+  /** A caller that forgets to say gets the line hidden, never a claim that may be false. */
+  it("is dropped when the caller does not say", () => {
+    expect(resolveMembershipBenefits(list, rates(1.5))).toEqual(["Cancel anytime"])
+  })
+
+  it("never serves the token itself", () => {
+    for (const pointsExpire of [true, false]) {
+      const served = resolveMembershipBenefits(
+        [...DEFAULT_MEMBERSHIP_BENEFITS],
+        rates(1.5),
+        { pointsExpire },
+      )
+      expect(served.join(" ")).not.toContain("{{")
+    }
+  })
+
+  /** The token works on any line an admin writes, not just the seeded wording. */
+  it("hides an admin's own wording of it too", () => {
+    const own = `${WHILE_POINTS_EXPIRE_TOKEN}Members keep their points for good`
+    expect(resolveMembershipBenefits([own], rates(1.5))).toEqual([])
+    expect(
+      resolveMembershipBenefits([own], rates(1.5), { pointsExpire: true }),
+    ).toEqual(["Members keep their points for good"])
+  })
+
+  it("is in the fallback list, so an unseeded plan follows the switch too", () => {
+    expect(DEFAULT_MEMBERSHIP_BENEFITS).toContain(POINTS_NEVER_EXPIRE_BENEFIT)
   })
 })

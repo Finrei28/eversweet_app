@@ -10,6 +10,7 @@ import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../lib/socket"
 import { Status } from "../types/types"
 import { getLoyaltyRates, pointsForLine } from "../lib/loyaltyRates"
+import { pointsExpiryForUser } from "../lib/pointsExpiry"
 import { CACHE_KEYS, invalidate } from "../lib/cache"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
@@ -705,13 +706,23 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
       return
     }
 
-    const loyaltyPoints = await db.loyalty.findUnique({
-      where: { userId },
-      select: {
-        points: true,
-      },
+    // Together, so the deadline adds no wait of its own.
+    const [loyaltyPoints, expiresAt] = await Promise.all([
+      db.loyalty.findUnique({
+        where: { userId },
+        select: { points: true },
+      }),
+      pointsExpiryForUser(userId),
+    ])
+    const points = loyaltyPoints?.points ?? 0
+
+    // `expiresAt` is additive: installed builds read `points` and ignore it. Null when
+    // nothing expires - no points to lose, expiry switched off, or an active member - so the
+    // app shows a date only when there is one to act on.
+    res.status(200).json({
+      points,
+      expiresAt: points > 0 && expiresAt ? expiresAt.toISOString() : null,
     })
-    res.status(200).json({ points: loyaltyPoints?.points ?? 0 })
     return
   } catch (error) {
     // Logged, never sent: a serialised Prisma error carries its model, fields and query.

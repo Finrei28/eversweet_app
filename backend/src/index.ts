@@ -18,6 +18,7 @@ import { settleMonthlyWinners } from "./controllers/client.controller"
 import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 import { sweepStrandedPayments } from "./lib/strandedPayments"
 import { announceNewOffers } from "./lib/announceOffers"
+import { expireInactivePoints, warnPointsExpiring } from "./lib/pointsExpiry"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -92,6 +93,16 @@ try {
   // TaskContext, which would arrive as settleMonthlyWinners' `offset` and settle
   // some arbitrary month instead of the one that just ended.
   cron.schedule("0 0 1 * *", () => settleMonthlyWinners(), {
+    timezone: "Pacific/Auckland",
+  })
+  // Points expiry - see lib/pointsExpiry. The sweep runs just after midnight, once the last
+  // day of a deadline has ended; the warning mid-morning, because nobody should be woken by
+  // a points reminder. Both wrapped: a TaskContext arriving as `now` would decide every
+  // deadline by it.
+  cron.schedule("5 0 * * *", () => expireInactivePoints(), {
+    timezone: "Pacific/Auckland",
+  })
+  cron.schedule("0 10 * * *", () => warnPointsExpiring(), {
     timezone: "Pacific/Auckland",
   })
 } catch (err) {

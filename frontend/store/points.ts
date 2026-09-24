@@ -7,6 +7,8 @@ import { createJSONStorage, persist } from "zustand/middleware"
 
 type LoyaltyStore = {
   points: number
+  /** When the balance expires, as the server worked it out; null when nothing is due to. */
+  expiresAt: string | null
   fetchPoints: () => Promise<void>
   setPoints: (points: number) => void
   addPoints: (value: number) => void
@@ -28,20 +30,21 @@ export const useLoyaltyStore = create<LoyaltyStore>()(
   persist(
     (set) => ({
       points: 0,
+      expiresAt: null,
       fetchPoints: async () => {
         const startedAt = balanceRevision
 
         try {
           const token = await getToken()
           if (!token) return
-          const points = await getUserLoyaltyPoints()
+          const { points, expiresAt } = await getUserLoyaltyPoints()
 
           // Superseded while this was in the air. The caller that moved the
           // balance did so on the server's behalf and will have its own fetch
           // behind it, so dropping this one loses nothing.
           if (balanceRevision !== startedAt) return
 
-          set({ points })
+          set({ points, expiresAt })
         } catch (error) {
           // Most call sites fire this without awaiting it, so an escaping
           // rejection shows up as an unhandled promise rejection rather than a
@@ -61,7 +64,7 @@ export const useLoyaltyStore = create<LoyaltyStore>()(
         // Signing out counts: without this, a fetch still in the air from the
         // previous session could put their balance back on screen.
         balanceRevision += 1
-        set({ points: 0 })
+        set({ points: 0, expiresAt: null })
       },
     }),
     {
