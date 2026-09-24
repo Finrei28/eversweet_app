@@ -636,8 +636,22 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> =>
     errorMessage: "Error: Could not get loyalty rates",
   })
 
-export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> =>
-  apiRequest<LeaderBoardDetails>("/api/getLeaderboardDetails")
+/**
+ * Last month's podium, for the banner.
+ *
+ * The server sends this with `Cache-Control: public, max-age=60`, which the phone's own HTTP
+ * cache honours (iOS's URL cache does). So a refetch within a minute of the last one can be
+ * answered on the device without reaching the server at all - which is exactly when the
+ * customer has just switched anonymity and needs to see it. `fresh` adds a throwaway query
+ * parameter, a URL no cache has seen; the server ignores it, and its own cache was cleared
+ * by the switch.
+ */
+export const getLeaderboardDetails = async ({
+  fresh = false,
+}: { fresh?: boolean } = {}): Promise<LeaderBoardDetails> =>
+  apiRequest<LeaderBoardDetails>(
+    `/api/getLeaderboardDetails${fresh ? `?fresh=${Date.now()}` : ""}`,
+  )
 
 export const getAnnouncements = async (): Promise<Announcements> =>
   apiRequest<Announcements>("/api/getAnnouncements")

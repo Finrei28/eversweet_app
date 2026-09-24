@@ -435,7 +435,7 @@ export const privacyPolicy: LegalDocument = {
         "By default your first and last name are shown. New accounts start this way.",
         "You can turn this off. Turn off \"Show my name\" on the leaderboard screen, or turn on \"Anonymous Status\" in your account details - they are the same setting - and your name is replaced with \"Anonymous\" everywhere customers can see it.",
         "The choice is applied on our servers, so once it is on, your name is not sent to anyone's device at all.",
-        "Copies of the public list are held briefly to keep the app quick, so your name can linger in one for up to a few minutes after you switch anonymity on.",
+        "Copies of the public list are held briefly to keep the app quick, so your name can linger in one for a few minutes after you switch anonymity on, and on the screen of someone who already has the app open until the app next refreshes it.",
         "Our own staff still see real names, because somebody has to hand the right prize to the right person.",
         "Turning anonymity on does not affect your points, your ranking or your prize.",
       ],

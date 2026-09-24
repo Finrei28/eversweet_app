@@ -406,6 +406,7 @@ export default function LeaderBoardPage() {
     userDetails,
     setUserDetails,
     leaderboardDetails,
+    refetchLeaderboardDetails,
   } = useAuth()
 
   const [refreshing, setRefreshing] = useState(false)
@@ -434,6 +435,8 @@ export default function LeaderBoardPage() {
         // The board below is what this switch changes; without this the customer's own row
         // keeps showing the old name until the screen next refocuses.
         void queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard })
+        // And last month's podium above it, which is loaded separately, at launch.
+        void refetchLeaderboardDetails()
       } catch (error) {
         console.error("Failed to update anonymous status: ", error)
         setUserDetails((prev) =>
@@ -445,7 +448,7 @@ export default function LeaderBoardPage() {
         setChangingAnonymity(false)
       }
     },
-    [setUserDetails],
+    [setUserDetails, refetchLeaderboardDetails],
   )
 
   const {

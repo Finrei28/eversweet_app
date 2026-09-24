@@ -851,12 +851,25 @@ null means off, and the setting falls back to off, so an unreadable table expire
   boundary, and the website has checked the admin's session before calling.
 - Staff surfaces deliberately see real names: they have to hand a prize to a person.
 - **Customer-facing names are redacted on the server, never on the device.**
-  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx`.
+  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx` and
+  on the leaderboard screen itself (both call the same endpoint).
   The banner and the live board both withhold the name before it leaves the server —
   `getLeaderBoard` sends `firstName`/`lastName` as `null` for an opted-out customer, keeping
   the `id` (the app's "you" highlight compares it) and the flag (installed builds read
   "Anonymous" off it). The live board used to send the real name and hide it in the app, so
   it reached every signed-in phone.
+- **Switching anonymity reaches the banner in seconds, not at the next launch.** Three
+  caches stood in the way, one each:
+  - *Redis:* `updateAnonymousStatus` clears the banner's entry, then clears it again
+    `ANONYMITY_REINVALIDATE_MS` later, because a banner request already reading the old name
+    when the switch committed would otherwise write it back for the entry's five minutes.
+  - *The phone's HTTP cache:* the endpoint is sent `public, max-age=60`, which iOS honours,
+    so `getLeaderboardDetails({ fresh: true })` adds a throwaway query parameter; both
+    anonymity switches call `refetchLeaderboardDetails` with it.
+  - *Everyone else's app:* `AuthProvider` loaded the banner once, at launch, and kept it for
+    as long as the app stayed in memory. It now reloads it on returning to the foreground
+    once it is five minutes old. The privacy policy's "until the app next refreshes it" is
+    this.
 
 ### frontend/ (customer app)
 

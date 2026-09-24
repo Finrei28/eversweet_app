@@ -11,6 +11,7 @@ import React, {
   ReactNode,
 } from "react"
 import { jwtDecode } from "jwt-decode"
+import { AppState } from "react-native"
 import {
   LeaderBoardDetails,
   MembershipDetails,
@@ -54,6 +55,8 @@ interface AuthContextType {
   setUserDetails: React.Dispatch<React.SetStateAction<UserDetails | null>>
   refetchUserDetails: () => Promise<void>
   refetchUsersMembership: () => Promise<void>
+  /** Loads last month's podium again, past any cached copy - after an anonymity change. */
+  refetchLeaderboardDetails: () => Promise<void>
   signInProvider: (token: string) => Promise<void>
   signOutProvider: () => Promise<void>
   authLoading: boolean
@@ -74,6 +77,13 @@ interface AuthContextType {
 
 export type StoreHoursStatus = "loading" | "ready" | "error"
 
+/**
+ * How old the podium banner may get before returning to the app reloads it. The server's own
+ * copy lives five minutes (`LEADERBOARD_TTL_SECONDS`), so reloading sooner would only fetch
+ * the same thing.
+ */
+const BANNER_REFRESH_AFTER_MS = 5 * 60 * 1000
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -83,6 +93,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [dataLoading, setDataLoading] = useState(true)
   const [leaderboardDetails, setLeaderboardDetails] =
     useState<LeaderBoardDetails | null>(null)
+  /** When the banner was last loaded, for the foreground refresh. */
+  const bannerLoadedAt = useRef(0)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
   const [membershipDetails, setMembershipDetails] =
@@ -220,6 +232,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             ? leaderboardResult.value
             : { show: true, description: "", lastMonthsWinner: null },
         )
+        if (leaderboardResult.status === "fulfilled") {
+          bannerLoadedAt.current = Date.now()
+        }
       } catch (error) {
         console.error(error)
       } finally {
@@ -271,6 +286,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setDataLoading(false)
     }
   }, [token])
+
+  /**
+   * The podium banner used to load once, at launch, so a customer who switched anonymity on
+   * kept seeing their own name in it until the app was restarted. Silent and without
+   * `dataLoading`: this is a refresh of something already on screen, so a failure keeps
+   * what is there rather than blanking the screens that watch that flag.
+   */
+  const refetchLeaderboardDetails = useCallback(async () => {
+    try {
+      setLeaderboardDetails(await getLeaderboardDetails({ fresh: true }))
+      bannerLoadedAt.current = Date.now()
+    } catch (error) {
+      console.error("Failed to refresh the leaderboard banner:", error)
+    }
+  }, [])
+
+  /**
+   * Reloads the banner when the app comes back to the foreground with a stale copy.
+   *
+   * The switcher's own phone reloads at once (the anonymity switches call the refetch). This
+   * is for everyone else: a phone that already had the app open kept a podium naming someone
+   * who has since switched anonymity on, for as long as the app stayed in memory - which
+   * could be days, where the privacy policy promises minutes.
+   */
+  useEffect(() => {
+    if (!token) return
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (
+        state === "active" &&
+        Date.now() - bannerLoadedAt.current > BANNER_REFRESH_AFTER_MS
+      ) {
+        void refetchLeaderboardDetails()
+      }
+    })
+    return () => subscription.remove()
+  }, [token, refetchLeaderboardDetails])
 
   const signInProvider = useCallback(async (newToken: string) => {
     try {
@@ -346,6 +398,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserDetails,
       refetchUserDetails,
       refetchUsersMembership,
+      refetchLeaderboardDetails,
       signInProvider,
       signOutProvider,
       authLoading,
@@ -363,6 +416,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       leaderboardDetails,
       refetchUserDetails,
       refetchUsersMembership,
+      refetchLeaderboardDetails,
       signInProvider,
       signOutProvider,
       authLoading,

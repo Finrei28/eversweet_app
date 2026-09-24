@@ -440,6 +440,18 @@ export const getUser = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * How long after an anonymity change the banner's cache is cleared a second time.
+ *
+ * `cached()` reads the database and then writes Redis, and with the API in Singapore and
+ * Postgres in Sydney that read takes a second or two. A banner request that began just
+ * before the change committed reads the old name, and its write can land *after* the
+ * invalidation below - putting the name back for the entry's whole five minutes. The banner
+ * is fetched on every app launch, so that window is hit in practice. Clearing again once any
+ * such request must have finished bounds it to this. Exported for the test.
+ */
+export const ANONYMITY_REINVALIDATE_MS = 10_000
+
 export const updateAnonymousStatus = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
@@ -466,6 +478,13 @@ export const updateAnonymousStatus = async (req: Request, res: Response) => {
     // the response for is still out of reach, which is why the policy says "a few minutes"
     // rather than "at once".
     await invalidate(CACHE_KEYS.leaderboardDetails)
+    // And again, for a request that was already reading the old name - see above. `unref`,
+    // so a pending clear never holds a process open; losing one to a restart costs at most
+    // the TTL, which is where this was before.
+    setTimeout(
+      () => void invalidate(CACHE_KEYS.leaderboardDetails),
+      ANONYMITY_REINVALIDATE_MS,
+    ).unref()
 
     res.status(200).json({ value: user.anonymousEnabled })
     return

@@ -71,6 +71,7 @@ export default function AccountDetails() {
     setUserDetails,
     userDetails,
     refetchUserDetails,
+    refetchLeaderboardDetails,
   } = useAuth()
 
   const [isChanging, setIsChanging] = useState(false)
@@ -151,6 +152,8 @@ export default function AccountDetails() {
       await updateAnonymousStatus(value)
       // The board is cached for 30 seconds; without this their own row keeps the old name.
       void queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard })
+      // And last month's podium banner, which is loaded separately, at launch.
+      void refetchLeaderboardDetails()
     } catch (error) {
       console.error("Failed to update anonymous status: ", error)
       setUserDetails((prev) =>
