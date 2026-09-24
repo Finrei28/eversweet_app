@@ -392,18 +392,6 @@ export async function createOrder(
   return data.order
 }
 
-export const sendOrderStatusNotification = async (
-  orderId: string,
-  orderNumber: string,
-  newStatus: string,
-) =>
-  apiRequest("/api/notification/orderStatusChange", {
-    method: "POST",
-    body: { orderId, orderNumber, newStatus },
-    authMessage: UNAUTHENTICATED,
-    errorMessage: "Failed to send notification",
-  })
-
 export const checkOrderStatus = async (orderId: string) =>
   apiRequest<any>(`/api/auth/orderStatus/${orderId}`, {
     authMessage: "Please sign in to check order status",
