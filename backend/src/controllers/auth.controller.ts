@@ -105,35 +105,47 @@ export const signUp = async (req: Request, res: Response) => {
 
   /**
    * Which Terms and Privacy Policy the customer accepted, as the documents' own
-   * `lastUpdated` string. The app sends the version it actually displayed.
+   * `lastUpdated` string. The app sends the version it actually displayed, and no account is
+   * created without one: an account is where the Terms start to bind, so there is no such
+   * thing as a customer who has not accepted them.
    *
    * **Checked against what this server serves, not taken on trust.** `/signup` is
-   * unauthenticated, so anything can post to it; a claim of some version nobody was ever
-   * shown would leave the account carrying a confident record of an acceptance that did not
-   * happen - worse than the empty column it replaced, because it looks like an answer. Only
-   * a claim matching the documents currently being served is recorded.
+   * unauthenticated, so anything can post to it, and a claim of a version nobody was ever
+   * shown is not an acceptance of anything.
    *
-   * A mismatch records nothing rather than refusing the sign-up, and covers two cases that
-   * are worth telling apart in the log: a client fabricating a version, and an honest one
-   * whose cached copy of the documents is a few minutes behind a deploy that changed them.
-   * The second is real and harmless, and both are safest recorded as "no verified
-   * acceptance" rather than as a version.
+   * Two refusals, because they need different answers:
+   * - **None at all** is a build from before the sign-up screen asked - every build shipped
+   *   until this one. Its sign-up screen has no checkbox, so the only useful thing to tell
+   *   that customer is to update. A 400 with its own code, never a 426: `APP_UPDATE_REQUIRED`
+   *   means the whole build is retired, and this build still signs in and orders.
+   * - **Not the current version** is usually an honest client whose cached copy of the
+   *   documents is a few minutes behind a deploy that changed them. The app reloads them and
+   *   asks again on this code, so the customer accepts what they are actually agreeing to.
    *
-   * **Not required, yet.** A build already installed sends nothing, and refusing its
-   * sign-ups would lock those customers out of the product entirely - signup is the flow
-   * that can least afford it. Once every build sends this, the `null` branch becomes a 400.
+   * Both run before the email lookup, so a refusal says nothing about whether an address is
+   * registered.
    */
   const claimedVersion = req.body?.acceptedLegalVersion
-  const claimsCurrentDocuments =
-    typeof claimedVersion === "string" &&
-    claimedVersion.trim() === LEGAL_LAST_UPDATED
-  const acceptedLegalVersion = claimsCurrentDocuments ? LEGAL_LAST_UPDATED : null
-
-  if (claimedVersion !== undefined && !claimsCurrentDocuments) {
-    console.warn(
-      `Sign-up claimed a legal version this server does not serve; recording none. Current: ${LEGAL_LAST_UPDATED}.`,
-    )
+  if (typeof claimedVersion !== "string" || !claimedVersion.trim()) {
+    res.status(400).json({
+      code: "LEGAL_ACCEPTANCE_REQUIRED",
+      message: "Please update the Eversweet app to create an account.",
+    })
+    return
   }
+  if (claimedVersion.trim() !== LEGAL_LAST_UPDATED) {
+    // The claimed value is never echoed: it is unvalidated client input.
+    console.warn(
+      `Sign-up claimed a legal version this server does not serve; refused. Current: ${LEGAL_LAST_UPDATED}.`,
+    )
+    res.status(409).json({
+      code: "LEGAL_DOCUMENTS_UPDATED",
+      message:
+        "Our Terms and Conditions and Privacy Policy have been updated. Please review them and accept again.",
+    })
+    return
+  }
+  const acceptedLegalVersion = LEGAL_LAST_UPDATED
 
   const { email, firstName, lastName, phone } = fields.values
   const normalisedEmail = email.toLowerCase()
@@ -162,9 +174,7 @@ export const signUp = async (req: Request, res: Response) => {
         otp,
         otpExpiresAt,
         acceptedLegalVersion,
-        // Stamped together, so a version with no time - or the reverse - is not a state
-        // this table can reach.
-        acceptedLegalAt: acceptedLegalVersion ? new Date() : null,
+        acceptedLegalAt: new Date(),
         Loyalty: {
           create: {
             points: 0,

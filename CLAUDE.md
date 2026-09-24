@@ -588,6 +588,14 @@ exits non-zero when they differ.
 - The documents change rarely and belong in code rather than the database, for the review,
   diff and revert a pull request gives them. Bump `LEGAL_LAST_UPDATED` when the text
   changes, and only then.
+- **No account without an acceptance.** `signUp` requires `acceptedLegalVersion` and records
+  it with `acceptedLegalAt`. Missing is a 400 `LEGAL_ACCEPTANCE_REQUIRED` telling the customer
+  to update, because only a build from before the checkbox omits it; a version other than
+  `LEGAL_LAST_UPDATED` is a 409 `LEGAL_DOCUMENTS_UPDATED`, on which `app/signup.tsx` unticks
+  the box, reloads the documents and asks again. Neither is a 426 - the build still signs in
+  and orders. Both run before the email lookup, so a refusal cannot be used to ask whether an
+  address is registered. **So bumping `LEGAL_LAST_UPDATED` refuses every sign-up in flight on
+  the old documents**, once, until the app reloads them - which is the point.
 
 **Shop settings come from the database, and the website writes them.** The loyalty rates
 (`LoyaltySetting`), the shop's details (`ShopProfile`), the launch announcements

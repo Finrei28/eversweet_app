@@ -4,6 +4,7 @@ import request from "supertest"
 import { redisStub as redis } from "../test/redisStub"
 import app from "../app"
 import { db } from "../lib/db"
+import { LEGAL_LAST_UPDATED } from "../legal/legalDocuments"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeUser } from "../test/factories"
 
@@ -142,6 +143,8 @@ describeIfDb("POST /api/auth/signup", () => {
         firstName: "grace",
         lastName: "hopper",
         phoneNumber: "+64211234567",
+        // Valid, so a refusal these cases expect is the field's and not a missing acceptance.
+        acceptedLegalVersion: LEGAL_LAST_UPDATED,
         ...body,
       })
 

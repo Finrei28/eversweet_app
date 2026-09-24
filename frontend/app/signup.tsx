@@ -13,7 +13,7 @@ import {
 } from "react-native"
 import React, { useState } from "react"
 import { useRouter } from "expo-router"
-import { createAccount } from "@/services/api"
+import { createAccount, LegalDocumentsUpdatedError } from "@/services/api"
 import OTPInput from "@/_components/emailVerification"
 import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
@@ -47,14 +47,14 @@ export default function SignUp() {
   const router = useRouter()
 
   /**
-   * Fetched so the account can record *which* version was accepted, not just that a box was
-   * ticked - an acceptance nobody can identify is not much of an acceptance.
+   * Fetched so the account records *which* version was accepted, not just that a box was
+   * ticked. The server creates no account without it.
    *
    * Already cached for five minutes and shared with the two screens this form links to, so
-   * it costs nothing here. If it has not arrived, the sign-up still goes through and the
-   * server records no acceptance rather than guessing one.
+   * it usually costs nothing here. If it never arrived, submitting tries once more rather
+   * than sending a sign-up the server will refuse.
    */
-  const { data: terms } = useTermsAndConditionsQuery()
+  const { data: terms, refetch: refetchTerms } = useTermsAndConditionsQuery()
 
   const handleSignUp = async () => {
     if (!signupForm.email || !signupForm.password) {
@@ -95,19 +95,38 @@ export default function SignUp() {
       )
       return
     }
-    const signupData = {
-      firstName: signupForm.firstName,
-      lastName: signupForm.lastName,
-      email: signupForm.email,
-      phoneNumber: phone.format("E.164"),
-      password: signupForm.password,
-      acceptedLegalVersion: terms?.lastUpdated,
-    }
     try {
       setIsCreating(true)
-      await createAccount(signupData)
+
+      const acceptedLegalVersion =
+        terms?.lastUpdated ?? (await refetchTerms()).data?.lastUpdated
+      if (!acceptedLegalVersion) {
+        Alert.alert(
+          "Couldn't load our terms",
+          "Please check your connection and try again.",
+        )
+        return
+      }
+
+      await createAccount({
+        firstName: signupForm.firstName,
+        lastName: signupForm.lastName,
+        email: signupForm.email,
+        phoneNumber: phone.format("E.164"),
+        password: signupForm.password,
+        acceptedLegalVersion,
+      })
       setVerifyEmail(true)
     } catch (error) {
+      // The customer ticked the box for documents that have since changed. Untick it and
+      // load the new ones, so what they accept next is what they are agreeing to.
+      if (error instanceof LegalDocumentsUpdatedError) {
+        setAgree(false)
+        void refetchTerms()
+        Alert.alert("Our terms have been updated", error.message)
+        return
+      }
+
       const message = getErrorMessage(error, "An unknown error occurred.")
 
       if (message.includes("already registered")) {

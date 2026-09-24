@@ -342,6 +342,12 @@ describe("the claims that were wrong before", () => {
   it("preserves Consumer Guarantees Act rights alongside the liability cap", () => {
     expect(termsText).toContain("Consumer Guarantees Act 1993")
   })
+
+  /** Sign-up refuses without an acceptance, and the account keeps which one it was. */
+  it("says an account needs the documents accepted, and that we record it", () => {
+    expect(termsText).toMatch(/do not create an account without that/)
+    expect(privacyText).toMatch(/Which version of our Terms[^.]*you accepted/)
+  })
 })
 
 /**

@@ -45,6 +45,19 @@ export async function fetchCategoriesWithDesserts(): Promise<Menu> {
   )
 }
 
+/**
+ * The server serves newer Terms and Privacy Policy than the ones the customer ticked the box
+ * for - usually a deploy landed while the sign-up screen's cached copy was up to five minutes
+ * old. Nothing was created. The screen reloads the documents and asks again, so the customer
+ * accepts what they are actually agreeing to.
+ */
+export class LegalDocumentsUpdatedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "LegalDocumentsUpdatedError"
+  }
+}
+
 export async function createAccount(formData: createAccountData) {
   if (
     !formData.email ||
@@ -64,6 +77,15 @@ export async function createAccount(formData: createAccountData) {
 
   if (res.status === 400) {
     throw new Error(getErrorMessage(data))
+  }
+
+  if (res.status === 409 && data?.code === "LEGAL_DOCUMENTS_UPDATED") {
+    throw new LegalDocumentsUpdatedError(
+      getErrorMessage(
+        data,
+        "Our Terms and Conditions and Privacy Policy have been updated. Please review them and accept again.",
+      ),
+    )
   }
 
   if (!res.ok) {

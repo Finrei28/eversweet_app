@@ -164,6 +164,7 @@ export const termAndConditions: LegalDocument = {
       list: [
         "You need to confirm your email address before you can sign in. We send a six-digit code that is valid for 15 minutes.",
         "You must meet the age requirements in the section above to hold an account, including the supervision of a parent or legal guardian if you are 13 to 17.",
+        "Creating an account means accepting these terms and our Privacy Policy. We do not create an account without that, and we keep a record of which version you accepted and when.",
         "Keep your password to yourself. You are responsible for what happens under your account.",
         "The name on your account is printed on the kitchen receipt and may be shown on the public leaderboard, so please use your real name and nothing offensive.",
         "You can change your first name, last name and phone number yourself in the app. Changing the email address on an account needs us to do it, so that nobody can move an account to an inbox they do not own.",
@@ -372,6 +373,7 @@ export const privacyPolicy: LegalDocument = {
         "Your membership, if you have one: whether it is active, what its payment status is, and a reference to the subscription held by Stripe.",
         "Which offers you have unlocked or used.",
         "Whether you have chosen to be anonymous on the leaderboard.",
+        "Which version of our Terms and Conditions and Privacy Policy you accepted when you created your account, and when you accepted it.",
         "A notification token for your device, if you allowed notifications. It identifies the app on your phone, not you.",
         "Short-lived codes when you verify your email address or reset your password. These are deleted once used and expire after 15 minutes either way.",
       ],
