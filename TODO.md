@@ -36,12 +36,14 @@ describes the installed binary rather than whatever JS bundle is running on top 
 ## 2. 3D Secure: is more integration needed?
 
 **Where it stands**
+
 - **Card orders (checkout):** `confirmPayment` in `@stripe/stripe-react-native` runs any 3DS challenge itself, and `StripeProvider` sets `urlScheme="eversweet"` (checkout, membership, payment-methods). **Likely covered, but untested.** Recovery on returning to the foreground now waits while a checkout is running, so coming back from a bank app no longer pops a false alert.
 - **Adding a card:** a SetupIntent via PaymentSheet handles 3DS.
 - **Joining membership: not covered.** `createMembership` creates the subscription server-side and charges at once. If the bank demands authentication, the subscription goes `incomplete` and nothing in the app lets the customer authenticate; the join poll just times out.
 - **Membership renewals: not covered.** They are off-session. Stripe raises `invoice.payment_action_required`, which the webhook doesn't handle.
 
 **To do**
+
 - Test on a dev build in Stripe test mode with cards that need authentication (e.g. `4000 0025 0000 3155`, `4000 0027 6000 3184`). Cover checkout, adding a card, joining membership, and backgrounding the app mid-challenge.
 - **If joining fails:** return the first invoice's payment intent client secret (or create with `payment_behavior: "default_incomplete"`), and have the app confirm it with `confirmPayment`.
 - **For renewals:** decide between Stripe's own authentication emails (Dashboard setting) and handling `invoice.payment_action_required` with a push notification plus an in-app screen to authenticate.
@@ -53,18 +55,21 @@ describes the installed binary rather than whatever JS bundle is running on top 
 ## 3. Warn members before they lose their discount
 
 **Where it stands**
+
 - The member discount is a streak: `min(plan.maxDiscount, totalMonths × plan.membershipDiscount)` (5% a month, up to 25%). Any ended subscription restarts at 5%; a renewal paid late during Stripe's retries keeps the streak.
 - The cancel modal already says the discount resets if the membership expires.
 - After cancelling, `ManageMembershipCard` shows "Expires on" and a Re-subscribe button, but nothing reminds the member later.
 - A declined renewal (`paymentStatus: PENDING`) only shows "On Hold" / "Payment Failed" on the membership screen.
 
 **Ideas**
+
 - **Reminder before `endDate`:** a push N days before a membership with `cancel: true` ends, e.g. "Your 20% member discount ends on 14 Oct. Re-subscribe to keep it". A daily cron. Avoiding repeats needs either a sent-marker (a schema change, via the website repo) or a one-day `endDate` window per run.
 - **Push when a renewal is declined** (the renewal branch of `invoice.payment_failed`), naming the discount at stake and linking to Retry payment.
 - **In-app banner** on home or cart while `cancel` is true or the payment is pending.
 - **Show the current discount** and the next step on the manage card, so the member sees what they'd lose.
 
 **Decide:**
+
 - How many days' notice, and whether to send one reminder or several.
 - Push notifications, in-app only, or both.
 
@@ -73,12 +78,14 @@ describes the installed binary rather than whatever JS bundle is running on top 
 ## 4. Live order status for customers?
 
 **Where it stands**
+
 - Staff status changes (`updateOrderStatus`, `admin.controller.ts`) already send an Expo push for ACCEPTED, MAKING and READY (not PICKED_UP), with `data.type: "ORDER_STATUS_CHANGED"`, `orderId` and `newStatus`.
 - The Orders tab (`app/(tabs)/orders.tsx`) refreshes only on focus and pull-to-refresh. A push arriving while the app is open doesn't update the list.
 - `setupNotificationListeners` (`services/notifications.ts`) exists but nothing calls it.
 - Customers have no socket connection, by design. A customer with notifications turned off gets no updates at all until they reopen the tab.
 
 **Options (cheapest first)**
+
 1. **Refresh on push:** when an `ORDER_STATUS_CHANGED` push arrives with the app open, invalidate the orders react-query key, and the list updates at once. Very small change.
 2. **Poll while an order is active:** refetch the orders query every ~30s while the Orders tab is focused and an order is PENDING, ACCEPTED or MAKING. Covers customers with notifications off.
 3. **Customer sockets** (a per-user room): the most "live", but a new authenticated surface and a constant connection for every customer. Probably unnecessary given 1 and 2.
@@ -92,12 +99,12 @@ describes the installed binary rather than whatever JS bundle is running on top 
 **Done**, in `20260919000000_shop_settings_from_code`. Four things that needed a deploy to
 change now live in the database, edited from a new **`/admin/settings`** page on the website:
 
-| Was | Now |
-| --- | --- |
-| `backend/src/lib/loyaltyRates.ts` | `LoyaltySetting` — one row, whole numbers |
-| `backend/src/lib/membership.ts` | `MembershipPlan.benefits` |
-| `backend/src/lib/announcements.ts` | `Announcement` — many rows, ordered |
-| `backend/src/lib/storeInfo.ts` | `ShopProfile` — one row |
+| Was                                | Now                                       |
+| ---------------------------------- | ----------------------------------------- |
+| `backend/src/lib/loyaltyRates.ts`  | `LoyaltySetting` — one row, whole numbers |
+| `backend/src/lib/membership.ts`    | `MembershipPlan.benefits`                 |
+| `backend/src/lib/announcements.ts` | `Announcement` — many rows, ordered       |
+| `backend/src/lib/storeInfo.ts`     | `ShopProfile` — one row                   |
 
 (The `storeHours` half of that last line was already done, by the `TradingHours` migration on
 2026-09-18. `announcements` was not in this list and should have been: it was placeholder
@@ -117,6 +124,7 @@ adjusts them as service speeds up or slows down. These four are on the website i
 they cannot be changed from the tablet on the counter.
 
 **Two customer-facing inaccuracies fixed on the way past:**
+
 - Members earn 1.5x, but the benefits list and `app/offers.tsx` both advertised "2x" /
   "double". The wording is corrected and now **derived** from the rate rather than typed, and
   the admin screen flags a benefit claiming a multiplier the rates do not give.
@@ -126,7 +134,7 @@ they cannot be changed from the tablet on the counter.
 ### The legal text: in code, but now one copy
 
 Left in the database's place deliberately — a legal document wants the review, diff and
-revert a pull request gives it, none of which an admin textarea has. But the two *copies*
+revert a pull request gives it, none of which an admin textarea has. But the two _copies_
 were the problem, and that is now fixed: `backend/src/legal/legalDocuments.ts` holds both
 documents, is copied byte-for-byte into the website's `src/lib/legalDocuments.ts`, and
 `npm run verify:legal` in either repo fails if they stop matching.
@@ -176,11 +184,20 @@ line wrap on the physical printer.
   the moment it becomes visible. Worth knowing if you touch it: `closeRun` clears
   `notifiedAt` so a re-run is announced again, and the migration backfilled every existing
   offer as announced so the first deploy did not push the back catalogue at everyone.
-- **Legal acceptance is recorded but not required.** `User.acceptedLegalVersion` and
-  `acceptedLegalAt` hold which documents a customer accepted at sign-up, and the app sends
-  the version it displayed. A request without one still creates the account, because a build
-  already installed sends nothing and refusing would lock those customers out of signing up
-  entirely. Once every build sends it, the `null` branch in `signUp` becomes a 400 - a
-  one-line change. Existing accounts are deliberately not backfilled: stamping them with the
-  current version would record an acceptance that never happened.
+- ~~**Legal acceptance is recorded but not required.**~~ **Required** since 2026-09-24.
+  `signUp` refuses a request with no version (400 `LEGAL_ACCEPTANCE_REQUIRED`, "Please update
+  the Eversweet app") and one that is not the version being served (409
+  `LEGAL_DOCUMENTS_UPDATED`, on which the app reloads the documents and asks again). **Rollout:
+  ship the app build before deploying the server** - every build before it sends nothing, so
+  from the deploy onward those builds cannot create an account until updated. Existing
+  accounts are still deliberately not backfilled: stamping them with the current version would
+  record an acceptance that never happened.
 - The staff app's receipt, above.
+
+## 5. Sweet points (loyalty points) will start to expire if nothing has been bought within one month
+
+**Built** on 2026-09-25, shipped switched **off**. See **Expiry** in CLAUDE.md. Rollout, in
+order: release the app build (it shows the date and routes the `POINTS_EXPIRING` push),
+apply `20260925000000_points_expiry` and deploy the server, publish an announcement, then
+switch it on in the website's `/admin/settings`. The first balances expire a month after
+that, and the members' no-expiry benefit appears the moment it goes on.
