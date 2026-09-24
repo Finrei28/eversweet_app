@@ -178,9 +178,17 @@ export function handleNotification(
     case "ORDER_STATUS_CHANGED":
       onNavigate("/orders")
       return
+    case "NEW_OFFER":
+      // The offers screen, which is what the notification is inviting them to.
+      onNavigate("/offers")
+      return
     case "PRIZE_READY":
       // Where the prize card lives, and where the code is read from.
       onNavigate("/offers")
+      return
+    case "POINTS_EXPIRING":
+      // Where the balance and its expiry date are, and what there is to spend them on.
+      onNavigate("/rewards")
       return
     default:
       return

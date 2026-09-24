@@ -7,6 +7,8 @@ import { db } from "../lib/db"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeUser } from "../test/factories"
 import { nzMonthRange } from "../lib/tradingHours"
+import { ANONYMITY_REINVALIDATE_MS } from "./auth.controller"
+import { CACHE_KEYS } from "../lib/cache"
 
 // Reached through a getter because vi.mock is hoisted above the imports.
 vi.mock("../lib/redis", () => ({
@@ -202,5 +204,64 @@ describeIfDb("GET /api/auth/getLeaderBoard", () => {
     await expect(request(app).get(BOARD)).resolves.toMatchObject({
       status: 401,
     })
+  })
+})
+
+/**
+ * Switching anonymity has to reach the public banner, and a banner request that was already
+ * reading the old name when the switch committed must not be able to put it back.
+ *
+ * The race is played out by hand rather than hoped for: the switch is flipped, then the stale
+ * entry an in-flight request would write is written, then the delayed second clear is run.
+ * Only `setTimeout` calls with the re-invalidation delay are captured; everything else - the
+ * HTTP stack, Prisma, the cache's own bounds - runs on real timers.
+ */
+describeIfDb("PATCH /api/auth/updateAnonymousStatus", () => {
+  beforeEach(async () => {
+    await resetDatabase()
+    redis.clear()
+    redis.recover()
+  })
+
+  // `cache.ts` namespaces every key this way; built from the constant so it cannot drift.
+  const BANNER_KEY = `cache:${CACHE_KEYS.leaderboardDetails}`
+
+  it("clears the banner's cache again after any read already in flight", async () => {
+    const user = await makeUser()
+    const realSetTimeout = globalThis.setTimeout
+    const delayed: (() => void)[] = []
+    const spy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((fn: () => void, ms?: number, ...args: unknown[]) => {
+        if (ms === ANONYMITY_REINVALIDATE_MS) {
+          delayed.push(fn)
+          return { unref: () => undefined } as unknown as NodeJS.Timeout
+        }
+        return realSetTimeout(fn, ms, ...args)
+      }) as typeof setTimeout)
+
+    try {
+      await redis.redis.set(BANNER_KEY, JSON.stringify({ named: "before" }))
+
+      const res = await request(app)
+        .patch("/api/auth/updateAnonymousStatus")
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+        .send({ value: true })
+      expect(res.status).toBe(200)
+      // Cleared at once, as before.
+      expect(await redis.redis.get(BANNER_KEY)).toBeNull()
+
+      // A request that read the old name before the switch committed writes it back now.
+      await redis.redis.set(BANNER_KEY, JSON.stringify({ named: "stale" }))
+
+      expect(delayed).toHaveLength(1)
+      delayed[0]!()
+      // The clear is fire-and-forget; give it its turn.
+      await new Promise((resolve) => realSetTimeout(resolve, 50))
+
+      expect(await redis.redis.get(BANNER_KEY)).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

@@ -1,0 +1,26 @@
+# Keeps the GitHub Actions in .github/workflows up to date.
+#
+# Every action is pinned to a full commit SHA, with its version in a trailing comment, so a
+# tag moved after review cannot change what CI runs with the job's token. Pins do not move
+# on their own, though: without this, a security fix to actions/checkout or setup-node would
+# never arrive. Dependabot understands the SHA-plus-comment form and bumps both together,
+# so every update is a reviewable diff from one commit to another.
+#
+# Actions only. Package updates are deliberately not here: the customer app's lockfile has
+# to pass `npm run verify:lock` under the npm versions EAS builds with, which an automated
+# bump would not know to run.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Pacific/Auckland"
+    # One PR for all of them: checkout and setup-node usually release together, and
+    # reviewing them apart is twice the work for the same change.
+    groups:
+      github-actions:
+        patterns:
+          - "*"

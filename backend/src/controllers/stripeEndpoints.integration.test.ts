@@ -250,6 +250,50 @@ describeIfDb("Stripe endpoints", () => {
       },
     )
 
+    /**
+     * The same race, forced rather than hoped for.
+     *
+     * `Membership.userId` is a required one-to-one, so how the loser's create fails depends
+     * on where the winner got to. If the winner has not committed yet, the database's unique
+     * index refuses it: P2002. If it has, Prisma refuses it first - connecting this user to
+     * a second membership would orphan the one they have, and `Membership.user` is required
+     * - which is P2014. Only P2002 was caught, so the second outcome answered 500 and the
+     * customer got a server error instead of "you are already joining".
+     *
+     * Both mean the same thing here, and this pins the one that only appeared when CI's
+     * slower database let the winner commit first. Holding the read back is what makes it
+     * deterministic: the controller sees no membership and takes the create branch, while
+     * the row is already there.
+     */
+    it("turns the loser away when the winner has already committed", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      const plan = await db.membershipPlan.findFirstOrThrow({
+        where: { name: "Monthly_Membership" },
+      })
+      await db.membership.create({
+        data: {
+          userId: user.id,
+          planId: plan.id,
+          paymentStatus: "PENDING",
+          isActive: false,
+          startDate: new Date(),
+          endDate: new Date(),
+        },
+      })
+
+      const read = vi
+        .spyOn(db.membership, "findUnique")
+        .mockResolvedValueOnce(null)
+
+      const res = await join(user.id, {})
+
+      expect(res.status).toBe(409)
+      expect(stripeApi.subscriptions.create).not.toHaveBeenCalled()
+
+      read.mockRestore()
+    })
+
     it("lets a join Stripe turned away be tried again straight away", async () => {
       const user = await makeUser()
       await withStripeCustomer(user.id)

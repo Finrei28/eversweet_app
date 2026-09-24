@@ -9,7 +9,9 @@ import VerifyEmail from "../email/verifyEmail"
 import EmailOrderConfirmation from "../email/orderConfirmation"
 import { emitNewOrder } from "../lib/socket"
 import { Status } from "../types/types"
-import { loyaltyRates } from "../lib/loyaltyRates"
+import { getLoyaltyRates, pointsForLine } from "../lib/loyaltyRates"
+import { pointsExpiryForUser } from "../lib/pointsExpiry"
+import { CACHE_KEYS, invalidate } from "../lib/cache"
 import { formatInTimeZone } from "date-fns-tz"
 import EmailSender from "../lib/emailSender"
 import { getErrorMessage } from "../utils/getError"
@@ -24,6 +26,7 @@ import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
 import { generateOtp } from "../lib/otp"
+import { LEGAL_LAST_UPDATED } from "../legal/legalDocuments"
 import {
   captureOrderPayment,
   EXPIRED_HOLD,
@@ -101,6 +104,50 @@ export const signUp = async (req: Request, res: Response) => {
     return
   }
 
+  /**
+   * Which Terms and Privacy Policy the customer accepted, as the documents' own
+   * `lastUpdated` string. The app sends the version it actually displayed, and no account is
+   * created without one: an account is where the Terms start to bind, so there is no such
+   * thing as a customer who has not accepted them.
+   *
+   * **Checked against what this server serves, not taken on trust.** `/signup` is
+   * unauthenticated, so anything can post to it, and a claim of a version nobody was ever
+   * shown is not an acceptance of anything.
+   *
+   * Two refusals, because they need different answers:
+   * - **None at all** is a build from before the sign-up screen asked - every build shipped
+   *   until this one. Its sign-up screen has no checkbox, so the only useful thing to tell
+   *   that customer is to update. A 400 with its own code, never a 426: `APP_UPDATE_REQUIRED`
+   *   means the whole build is retired, and this build still signs in and orders.
+   * - **Not the current version** is usually an honest client whose cached copy of the
+   *   documents is a few minutes behind a deploy that changed them. The app reloads them and
+   *   asks again on this code, so the customer accepts what they are actually agreeing to.
+   *
+   * Both run before the email lookup, so a refusal says nothing about whether an address is
+   * registered.
+   */
+  const claimedVersion = req.body?.acceptedLegalVersion
+  if (typeof claimedVersion !== "string" || !claimedVersion.trim()) {
+    res.status(400).json({
+      code: "LEGAL_ACCEPTANCE_REQUIRED",
+      message: "Please update the Eversweet app to create an account.",
+    })
+    return
+  }
+  if (claimedVersion.trim() !== LEGAL_LAST_UPDATED) {
+    // The claimed value is never echoed: it is unvalidated client input.
+    console.warn(
+      `Sign-up claimed a legal version this server does not serve; refused. Current: ${LEGAL_LAST_UPDATED}.`,
+    )
+    res.status(409).json({
+      code: "LEGAL_DOCUMENTS_UPDATED",
+      message:
+        "Our Terms and Conditions and Privacy Policy have been updated. Please review them and accept again.",
+    })
+    return
+  }
+  const acceptedLegalVersion = LEGAL_LAST_UPDATED
+
   const { email, firstName, lastName, phone } = fields.values
   const normalisedEmail = email.toLowerCase()
 
@@ -127,6 +174,8 @@ export const signUp = async (req: Request, res: Response) => {
         role: "USER",
         otp,
         otpExpiresAt,
+        acceptedLegalVersion,
+        acceptedLegalAt: new Date(),
         Loyalty: {
           create: {
             points: 0,
@@ -391,6 +440,18 @@ export const getUser = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * How long after an anonymity change the banner's cache is cleared a second time.
+ *
+ * `cached()` reads the database and then writes Redis, and with the API in Singapore and
+ * Postgres in Sydney that read takes a second or two. A banner request that began just
+ * before the change committed reads the old name, and its write can land *after* the
+ * invalidation below - putting the name back for the entry's whole five minutes. The banner
+ * is fetched on every app launch, so that window is hit in practice. Clearing again once any
+ * such request must have finished bounds it to this. Exported for the test.
+ */
+export const ANONYMITY_REINVALIDATE_MS = 10_000
+
 export const updateAnonymousStatus = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
@@ -408,6 +469,23 @@ export const updateAnonymousStatus = async (req: Request, res: Response) => {
       data: { anonymousEnabled: value },
       select: { anonymousEnabled: true },
     })
+
+    // The public banner is cached, and it is the one place a name reaches people who are
+    // not signed in - `/getLeaderboardDetails` is unauthenticated and sent
+    // `Cache-Control: public`. Without this, a customer who switches anonymity on went on
+    // being named from the cached copy until its TTL ran out, and the privacy policy now
+    // tells them the switch takes effect. The 60s any intermediary was told it could hold
+    // the response for is still out of reach, which is why the policy says "a few minutes"
+    // rather than "at once".
+    await invalidate(CACHE_KEYS.leaderboardDetails)
+    // And again, for a request that was already reading the old name - see above. `unref`,
+    // so a pending clear never holds a process open; losing one to a restart costs at most
+    // the TTL, which is where this was before.
+    setTimeout(
+      () => void invalidate(CACHE_KEYS.leaderboardDetails),
+      ANONYMITY_REINVALIDATE_MS,
+    ).unref()
+
     res.status(200).json({ value: user.anonymousEnabled })
     return
   } catch (error) {
@@ -647,13 +725,23 @@ export const getUserLoyaltyPoints = async (req: Request, res: Response) => {
       return
     }
 
-    const loyaltyPoints = await db.loyalty.findUnique({
-      where: { userId },
-      select: {
-        points: true,
-      },
+    // Together, so the deadline adds no wait of its own.
+    const [loyaltyPoints, expiresAt] = await Promise.all([
+      db.loyalty.findUnique({
+        where: { userId },
+        select: { points: true },
+      }),
+      pointsExpiryForUser(userId),
+    ])
+    const points = loyaltyPoints?.points ?? 0
+
+    // `expiresAt` is additive: installed builds read `points` and ignore it. Null when
+    // nothing expires - no points to lose, expiry switched off, or an active member - so the
+    // app shows a date only when there is one to act on.
+    res.status(200).json({
+      points,
+      expiresAt: points > 0 && expiresAt ? expiresAt.toISOString() : null,
     })
-    res.status(200).json({ points: loyaltyPoints?.points ?? 0 })
     return
   } catch (error) {
     // Logged, never sent: a serialised Prisma error carries its model, fields and query.
@@ -760,9 +848,14 @@ export const createOrder = async (req: Request, res: Response) => {
       }
     }
 
-    const [daysOffKeys, hours] = await Promise.all([
+    // Resolved here rather than inside the transaction below. That transaction holds a
+    // Postgres advisory lock on the payment intent until it commits, so every await inside
+    // it is time the lock is held; the rates are settings that almost always answer from a
+    // one-minute cache, and there is no reason for them to be read under it.
+    const [daysOffKeys, hours, loyaltyRates] = await Promise.all([
       getDaysOffKeys(),
       getTradingHours(),
+      getLoyaltyRates(),
     ])
     const pickUpCheck = checkPickUpTime(parsedBody.pickUpTime, {
       eatIn: parsedBody.eatIn,
@@ -958,11 +1051,15 @@ export const createOrder = async (req: Request, res: Response) => {
           const membership = await tx.membership.findUnique({ where: { userId } })
           let earnablePoints = 0
 
+          // The inline fallbacks this used to carry (`rate ?? 5`, `modifier ?? 1`) are
+          // gone: `getLoyaltyRates` always answers, falling back to the values that were
+          // hardcoded here, so a missing rate can no longer reach this. They were also
+          // wrong — the rate they guessed was 5 where the real one was 6.
           earnablePoints = cart.cartItems.reduce(
             (acc, item) =>
               acc +
-              Math.floor(
-                ((item.itemPriceInCents -
+              pointsForLine(
+                item.itemPriceInCents -
                   item.discountedAmountInCents +
                   item.customisations.reduce(
                     (acc, c) =>
@@ -973,13 +1070,10 @@ export const createOrder = async (req: Request, res: Response) => {
                           c.quantity
                         : 0),
                     0,
-                  )) /
-                  100) * // points is calculated per dollar
-                  (loyaltyRates.rate ?? 5) * // if !rates.rate ? fallback to 5 points per dollar
-                  item.quantity *
-                  (membership?.isActive
-                    ? (loyaltyRates.modifier ?? 1) * loyaltyRates.memberRate // if !rates.modifier ? fallback to 1
-                    : (loyaltyRates.modifier ?? 1)),
+                  ),
+                item.quantity,
+                !!membership?.isActive,
+                loyaltyRates,
               ),
             0,
           )

@@ -2,6 +2,9 @@ import { describe } from "vitest"
 import jwt from "jsonwebtoken"
 import { db } from "../lib/db"
 import { invalidateTradingHours } from "../lib/tradingHours"
+import { invalidateLoyaltyRates } from "../lib/loyaltyRates"
+import { DEFAULT_SHOP_PROFILE, invalidateShopProfile } from "../lib/storeInfo"
+import { invalidateAnnouncements } from "../lib/announcements"
 import { SHOP_HOURS_ROWS } from "./shopHours"
 
 /**
@@ -58,6 +61,16 @@ export const resetDatabase = async () => {
   // whatever the previous test left.
   await db.tradingHours.createMany({ data: SHOP_HOURS_ROWS })
   invalidateTradingHours()
+
+  // The same goes for the settings the migration seeds. These three all fall back to the
+  // values that used to be hardcoded, so a suite would mostly pass without them — which is
+  // the problem: it would be proving the fallback rather than the table, and a query that
+  // stopped working would look fine. Seeding them means a test reads what production reads.
+  await db.loyaltySetting.create({ data: { id: "default" } })
+  await db.shopProfile.create({ data: { id: "default", ...DEFAULT_SHOP_PROFILE } })
+  invalidateLoyaltyRates()
+  invalidateShopProfile()
+  invalidateAnnouncements()
 }
 
 /** A token the real `authenticateToken` middleware will accept. */

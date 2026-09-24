@@ -558,6 +558,87 @@ Change the cases first, then `cmp -s` the copies.
   computed once when the server started, so the app's "Open Now" badge showed whatever the
   shop had been at the last deploy.
 
+**Legal documents: one file, copied, and every sentence has to be true of the code.**
+`src/legal/legalDocuments.ts` holds the Terms and the Privacy Policy as data, and is copied
+**byte-for-byte** into the website's `src/lib/legalDocuments.ts`. It imports nothing, so
+copying it is all there is to it. `npm run verify:legal` in either repo compares the two and
+exits non-zero when they differ.
+
+- **CI waits for the other half.** Each repo's `verify-legal` job compares against the other
+  repo, so on a paired change whichever is pushed first briefly sees the old copy. The job
+  fetches the other repo again every 30 seconds for about five minutes before failing - a
+  slow legal check is waiting for the second push, not hung. A real one-sided edit fails
+  after that, with an error saying so.
+- **Both platforms render the same words.** Sections that genuinely apply to one channel
+  carry `appliesTo: ["app"]` or `["web"]` and are labelled in the UI — points, membership,
+  offers, prizes and notifications are app-only, cookies are website-only. A second document
+  is never the answer.
+- **The wire shape is additive only.** Installed builds parse `{ heading, content | list }`;
+  `appliesTo` is optional so an older build shows the section unlabelled rather than
+  breaking. `appliesTo` is per **section**, never per list item — `list` is `string[]` on the
+  wire, and an object in it renders as `[object Object]` on a build already out there.
+- **The shop's details are tokens**, `{{name}}`, `{{email}}`, `{{phone}}`, `{{address}}`,
+  `{{website}}`, resolved from `ShopProfile` by `resolveLegalDocument` before serving. Never
+  write an address into the text; `legalDocuments.test.ts` fails if you do.
+- **`legalDocuments.test.ts` holds the content to the standard the old documents failed**,
+  and every case in it is a bug that shipped: a section whose whole body was "We have put in
+  place appropriate security measures...", three sections numbered "8.", a terms document
+  describing a delivery service that does not exist, an erasure promise no endpoint can
+  keep, and a named analytics product the code does not use. Read it before editing the
+  documents — it is the specification.
+- **TypeScript, not JSON**, because this tsconfig does not resolve JSON imports and
+  `tsc -p tsconfig.build.json` would not copy a `.json` into `dist`. And the website lists
+  its copy in `.prettierignore`: that repo's Prettier adds semicolons and this one's does
+  not, so `format:write` would otherwise break the copy silently.
+- The documents change rarely and belong in code rather than the database, for the review,
+  diff and revert a pull request gives them. Bump `LEGAL_LAST_UPDATED` when the text
+  changes, and only then.
+- **No account without an acceptance.** `signUp` requires `acceptedLegalVersion` and records
+  it with `acceptedLegalAt`. Missing is a 400 `LEGAL_ACCEPTANCE_REQUIRED` telling the customer
+  to update, because only a build from before the checkbox omits it; a version other than
+  `LEGAL_LAST_UPDATED` is a 409 `LEGAL_DOCUMENTS_UPDATED`, on which `app/signup.tsx` unticks
+  the box, reloads the documents and asks again. Neither is a 426 - the build still signs in
+  and orders. Both run before the email lookup, so a refusal cannot be used to ask whether an
+  address is registered. **So bumping `LEGAL_LAST_UPDATED` refuses every sign-up in flight on
+  the old documents**, once, until the app reloads them - which is the point.
+
+**Shop settings come from the database, and the website writes them.** The loyalty rates
+(`LoyaltySetting`), the shop's details (`ShopProfile`), the launch announcements
+(`Announcement`) and the membership benefits (`MembershipPlan.benefits`) were all compiled
+in until `20260919000000_shop_settings_from_code`. They are edited from the website's
+`/admin/settings`, which writes the rows directly — there is no `/api/internal` hop, because
+unlike prize assignment nothing here has a guard only this server can apply.
+
+- **Each reader is the `getPrepTimes` shape**: `lib/loyaltyRates`, `lib/storeInfo` and
+  `lib/announcements` each cache for 60 seconds in memory, fall back to a `DEFAULT_*`
+  constant holding exactly what used to be hardcoded, and **never cache a failure**.
+- **In memory, not Redis, deliberately.** The writer is a different process in a different
+  repo and cannot invalidate this one's Redis, so a TTL would be the only mechanism anyway.
+  A change made on the website is live here within a minute — the same arrangement, and the
+  same caveat, as the trading hours.
+- **Announcements fall back to an empty list**, not to the old constants. Those were
+  placeholder copy, and showing a customer a stale pop-up is worse than showing none. This
+  is also the app's first request on a cold start (the one that trips the version gate), so
+  it answers rather than failing.
+- **Four wire shapes are frozen** because installed builds parse them, and the app has no
+  over-the-air updates: `/api/getLoyaltyRates` is `{ rate, memberRate, modifier }` as plain
+  numbers, `/api/getStoreInfo` carries the profile's fields plus a computed `isOpen`,
+  `/api/getAnnouncements` is `[{ title, text1, text2?, updatedAt }]` with `updatedAt`
+  parseable by `new Date()`, and `getMembershipDetails` carries `membershipBenefits:
+  string[]`. `shopSettings.integration.test.ts` pins the first three and
+  `lib/pointsExpiry.integration.test.ts` the last - nothing tested it before that.
+- **Benefits carry tokens.** `{{memberRate}}` is filled in from the live rate.
+  `{{whilePointsExpire}}` marks a line that is only true while points expiry is on ("Your
+  Sweet Points never expire while you're a member" is no advantage when nobody's expire), so
+  `resolveMembershipBenefits` drops the line while it is off and strips the token while it
+  is on. Its option defaults to off: a caller that forgets gets the line hidden, never a
+  claim that may be false.
+- **An announcement's `updatedAt` on the wire is the row's `publishedAt`, not its
+  `updatedAt`.** The app compares it against the last announcement it showed, so writing it
+  on every save would pop the modal for every customer each time a typo was fixed.
+- **The legal text is not here.** `src/legal/*.ts` stays in code on purpose — see TODO.md
+  item 5.
+
 **Membership.** Stripe owns the truth; the webhook writes what it reads back from Stripe
 rather than adjusting the row, so a redelivered or out-of-order event changes nothing.
 `Membership.totalMonths` is the run of monthly invoices **paid in a row** on the current
@@ -598,7 +679,20 @@ Cron (`index.ts`) all runs in `Pacific/Auckland`:
 - admin socket re-check every minute;
 - stranded-payment sweep every 5 minutes;
 - `renewWeeklyOffers` on Monday at 00:00, the daily special, and `settleMonthlyWinners` at
-  00:00 on the 1st.
+  00:00 on the 1st;
+- `announceNewOffers` every 5 minutes;
+- `expireInactivePoints` at 00:05 and `warnPointsExpiring` at 10:00 daily (see **Expiry**
+  under the loyalty section).
+
+**Announcing a new offer is a sweep, not a hook on the write** (`lib/announceOffers`). An
+offer saved with a future `startsAt` becomes live at that instant with nothing written, and
+`offerScalars` passes `isActive` straight through so `createOffer` and `updateOffer` can
+both take one live without `setActive` being called - there is no single "goes live" event.
+The sweep takes live offers with `notifiedAt` unset, claims each with a conditional
+`updateMany` (cron runs in every instance, so two processes race it), then pushes. It claims
+*before* sending: a crash in between loses one announcement, which is quiet, where a
+duplicate is a second push to every customer and cannot be taken back. `closeRun` in the
+website clears `notifiedAt`, so a re-run is announced again.
 
 ### Loyalty points, the monthly leaderboard and prizes
 
@@ -619,9 +713,20 @@ is a free-form string, **not** an enum), `LoyaltyWinner` (one row per place per 
 **The lifecycle, in order**
 
 1. **Earn** — inside `createOrder`'s transaction, so points commit or roll back with the
-   order. Per line: `floor(net dollars × rate × quantity × memberMultiplier)`, from
-   `lib/loyaltyRates` (`rate` 6, `memberRate` 1.5 for an active membership). Written as
+   order. Per line: `pointsForLine` in `lib/loyaltyRates`,
+   `floor(net dollars × rate × quantity × modifier × memberRate)`. Written as
    `reason: "EARNED"`. **Website orders earn nothing** — only app orders reach the board.
+
+   The rates are the `LoyaltySetting` row, edited from the website's `/admin/settings`
+   (`rate` 6, `memberRate` 1.5 for an active membership, `modifier` 1 — the last being the
+   lever for a double-points weekend). Stored as whole numbers — `memberBonusPercent` 150,
+   not `1.5` — for the same reason `Offer.discountAmount` is, and divided by 100 at the
+   edge so `/api/getLoyaltyRates` still serves the shape installed builds parse.
+   **Resolve them before the transaction**, alongside the existing
+   `Promise.all([getDaysOffKeys(), getTradingHours()])`: it holds an advisory lock on the
+   payment intent until commit, and these almost always answer from a one-minute cache.
+   `getLoyaltyRates` falls back to `DEFAULT_LOYALTY_RATES` and never throws, so a settings
+   table that cannot be read costs nobody their points.
 2. **Rank** — `GET /api/auth/getLeaderBoard`: top ten plus the viewer's own position, from
    `lib/leaderboardRanking.rankMonth` over the month from `nzMonthRange`. It filters on
    `change > 0` **and** `reason: "EARNED"`: a refunded redemption is written back as a
@@ -678,6 +783,58 @@ cannot be given one — `LoyaltyWinner.userId` is `SetNull` on account deletion,
 row survives with nobody left to hand the prize to. Two writers assigning the same winner at
 once get a 409 rather than a 500.
 
+**Expiry** (`lib/pointsExpiry`)
+
+A customer's whole balance expires when a month passes without an app order. Switched on
+and off from the website's `/admin/settings`, which stamps `LoyaltySetting.pointsExpireFrom`;
+null means off, and the setting falls back to off, so an unreadable table expires nobody.
+
+- **One rule, `pointsExpireAt`,** feeds the balance endpoint's `expiresAt`, the warning push
+  and the sweep, so the date the app shows, the day the push names and the moment the points
+  go cannot disagree. The month runs from the latest of the last app order (any order,
+  points-only included), the end of a membership that has **ended**, and
+  `pointsExpireFrom` - the launch grace, so switching on gives everyone a full month.
+  Active members (`isActive && SUCCESS`) never expire.
+- **Only an ended membership anchors.** `createMembership` writes an `endDate` a month ahead
+  before the first payment is attempted, so a join that never paid carries a future date;
+  counting it would give a failed join a free month.
+- **The deadline is the last instant of an Auckland day** (`nzEndOfDayMonthsAfter`, beside
+  `nzMonthRange`), inclusive like an offer's `endsAt`, clamped for short months.
+- **"Last bought" is derived, not stored**: `order.groupBy` on the `(appUserId, createdAt)`
+  index. Nothing is added to the latency-bound order transaction.
+- **The sweep claims by value.** `expireBalance` is one conditional `updateMany` on
+  `points: observed` *and* "no app order after the anchor", then an `EXPIRED` ledger record.
+  A second instance, a concurrent earn or refund, or a points-only order committed since the
+  read all make it match nothing. Before that it reads the customer's `Membership` row
+  **`FOR SHARE`** and stands down for an active member: the webhook can activate a membership
+  after the sweep's read, and a condition in the update alone misses an activation committing
+  while that statement runs. The lock makes an in-flight activation finish first. It cannot
+  deadlock - every `Membership` write is its own statement and nothing takes `Loyalty` then
+  `Membership` - and the cart lock order is unaffected. `EXPIRED` is negative and not `EARNED`, so the leaderboard cannot see it.
+- **Points in a cart expire with the balance.** A reward is debited when it goes into the
+  cart, so the sweep cannot see those points, and an expired cart is refunded only when the
+  customer next opens it (`getCartItems`). Left alone, a customer could park rewards for
+  months, come back, be refunded and order that day. So every cart refund goes through
+  `creditRefund`, and past the deadline it gives nothing back and writes `REFUND +n` then
+  `EXPIRED -n`. The verdict is formed before the cart's transaction (`refundExpiredSince`,
+  only when there is something to refund, free while expiry is off) and **confirmed inside
+  it**: an app order since, or a membership the webhook has activated meanwhile, makes the
+  customer exempt again. That is the same pair of checks `expireBalance` makes, sharing
+  `isActiveMemberNow` and its `FOR SHARE`, taken before Loyalty as the sweep does, so the cart
+  lock order is otherwise unchanged.
+- **An order still being placed is waited for.** Both writers first take
+  `holdCustomerOrders` - `FOR UPDATE` on the customer's `User` row, which conflicts with the
+  `FOR KEY SHARE` an uncommitted order insert holds through its foreign key - so the order
+  check sees an order that was already on its way. `createOrder` is untouched and pays
+  nothing. It has to be the **first** lock in the transaction (see the comment on it for the
+  one path that can still deadlock, and why that costs nothing). The sweep still takes any balance past its deadline, as
+  a backstop for points returned any other way.
+- **The warning** goes once per deadline, within the week before, mid-morning. It is claimed
+  on `Loyalty.expiryWarnedFor` before sending; keyed on the deadline, so an order that moves
+  it makes the next warning due. The claim needs its `OR expiryWarnedFor IS NULL` - SQL's
+  `<>` is never true against NULL, and without it no first warning is ever claimed.
+- The Terms describe all of this, pause included, and `legalDocuments.test.ts` requires it.
+
 **Things that must stay in step**
 
 - **The ranking lives in one place**, `lib/leaderboardRanking.rankMonth`, and both the live
@@ -708,12 +865,25 @@ once get a 409 rather than a 500.
   boundary, and the website has checked the admin's session before calling.
 - Staff surfaces deliberately see real names: they have to hand a prize to a person.
 - **Customer-facing names are redacted on the server, never on the device.**
-  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx`.
+  `anonymousEnabled` is the customer's own opt-out, toggled in `app/account-details.tsx` and
+  on the leaderboard screen itself (both call the same endpoint).
   The banner and the live board both withhold the name before it leaves the server —
   `getLeaderBoard` sends `firstName`/`lastName` as `null` for an opted-out customer, keeping
   the `id` (the app's "you" highlight compares it) and the flag (installed builds read
   "Anonymous" off it). The live board used to send the real name and hide it in the app, so
   it reached every signed-in phone.
+- **Switching anonymity reaches the banner in seconds, not at the next launch.** Three
+  caches stood in the way, one each:
+  - *Redis:* `updateAnonymousStatus` clears the banner's entry, then clears it again
+    `ANONYMITY_REINVALIDATE_MS` later, because a banner request already reading the old name
+    when the switch committed would otherwise write it back for the entry's five minutes.
+  - *The phone's HTTP cache:* the endpoint is sent `public, max-age=60`, which iOS honours,
+    so `getLeaderboardDetails({ fresh: true })` adds a throwaway query parameter; both
+    anonymity switches call `refetchLeaderboardDetails` with it.
+  - *Everyone else's app:* `AuthProvider` loaded the banner once, at launch, and kept it for
+    as long as the app stayed in memory. It now reloads it on returning to the foreground
+    once it is five minutes old. The privacy policy's "until the app next refreshes it" is
+    this.
 
 ### frontend/ (customer app)
 

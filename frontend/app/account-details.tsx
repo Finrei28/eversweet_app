@@ -16,6 +16,8 @@ import CustomHeader from "@/_components/custom-header"
 import BouncingLoader from "@/_components/loader"
 import { updateAnonymousStatus, updateUserProfile } from "@/services/api"
 import { useAuth } from "@/store/authProvider"
+import { queryClient } from "@/services/queryClient"
+import { queryKeys } from "@/services/queries"
 import parsePhoneNumberFromString from "libphonenumber-js"
 import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
 
@@ -69,6 +71,7 @@ export default function AccountDetails() {
     setUserDetails,
     userDetails,
     refetchUserDetails,
+    refetchLeaderboardDetails,
   } = useAuth()
 
   const [isChanging, setIsChanging] = useState(false)
@@ -135,15 +138,29 @@ export default function AccountDetails() {
   }
 
   const handleAnonymousChange = async (value: boolean) => {
+    // Captured so a failed write can put the switch back where the server actually stands.
+    // Left where it was flipped, a customer who thinks they are anonymous is not - on a
+    // list whose top three is public.
+    let restore: boolean | undefined
     try {
       setIsChanging(true)
       setUserDetails((prev) => {
         if (!prev) return prev
+        restore = prev.anonymousEnabled
         return { ...prev, anonymousEnabled: value }
       })
       await updateAnonymousStatus(value)
+      // The board is cached for 30 seconds; without this their own row keeps the old name.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard })
+      // And last month's podium banner, which is loaded separately, at launch.
+      void refetchLeaderboardDetails()
     } catch (error) {
       console.error("Failed to update anonymous status: ", error)
+      setUserDetails((prev) =>
+        prev && restore !== undefined
+          ? { ...prev, anonymousEnabled: restore }
+          : prev,
+      )
     } finally {
       setIsChanging(false)
     }

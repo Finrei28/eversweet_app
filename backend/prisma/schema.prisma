@@ -58,6 +58,15 @@ model User {
   phone                     String?
   stripeCustomerId          String?
   pushToken                 String?
+  /// The Terms and Privacy Policy the customer accepted when they signed up, as the
+  /// documents' own `lastUpdated` string (`LEGAL_LAST_UPDATED`), and when they accepted.
+  ///
+  /// `signUp` creates no account without one, so NULL now means an account created before
+  /// that rule. It is deliberately **not** backfilled: stamping existing accounts with the
+  /// current version would record an acceptance that never happened, which is worse than no
+  /// record. Nullable for exactly those accounts.
+  acceptedLegalVersion      String?
+  acceptedLegalAt           DateTime?
   createdAt                 DateTime        @default(now())
   accounts                  Account[]
   Authenticator             Authenticator[]
@@ -96,6 +105,13 @@ model MembershipPlan {
   stripePriceId      String       @unique
   membershipDiscount Int          @default(5)
   maxDiscount        Int          @default(25)
+  /// What the app lists on the join and manage screens, in order. Held here rather
+  /// than in the order server's code so the shop can reword a benefit without a
+  /// deploy. Order matters, so it is a list and not a set.
+  ///
+  /// Claims about numbers belong to the rows that set them, not to this copy: the
+  /// list advertised "2x loyalty points" for months while LoyaltySetting gave 1.5x.
+  benefits           String[]
   memberships        Membership[]
 }
 
@@ -135,6 +151,18 @@ model Offer {
   /// Replaces OfferRedemption.renewsAt, dropped as dead in the migration before this:
   /// per-offer is the level this question is actually asked at.
   renewsWeekly     Boolean            @default(false)
+  /// When customers were told this offer exists. NULL means they have not been.
+  ///
+  /// The order server sweeps for live offers with this unset, pushes a notification and
+  /// stamps it, so an offer is announced once however it came to be live. It cannot be
+  /// done when an offer is written: an offer saved with a future `startsAt` becomes live
+  /// at that instant with no mutation, no write and nobody touching it, and both
+  /// createOffer and updateOffer can set `isActive` directly without setActive ever being
+  /// called. There is no single "goes live" event to hook.
+  ///
+  /// `closeRun` clears it, because that is the one path that deliberately starts an offer
+  /// over and a second run should be announced like the first.
+  notifiedAt       DateTime?
   requirements     OfferRequirement[]
   cartItems        CartItem[]
   category         Category?          @relation(fields: [categoryId], references: [id])
@@ -355,11 +383,15 @@ model Feedback {
 }
 
 model Loyalty {
-  id      String          @id @default(cuid())
-  points  Int
-  userId  String          @unique
-  User    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  records LoyaltyRecord[]
+  id              String          @id @default(cuid())
+  points          Int
+  userId          String          @unique
+  User            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records         LoyaltyRecord[]
+  /// The expiry deadline a warning has already been claimed for. Cron runs in every order
+  /// server instance, so the push needs a claim; keyed on the deadline rather than a flag, so
+  /// an order that moves the deadline makes the next warning due with nothing to reset.
+  expiryWarnedFor DateTime?
 }
 
 model LoyaltyRecord {
@@ -524,6 +556,71 @@ model DaysOff {
   date      DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now())
+}
+
+/// What an app order earns in Sweet Points. One row.
+///
+/// Whole numbers, never a fraction: Offer.discountAmount was a Decimal fraction read as
+/// `1 - x`, which priced a 20% offer at -19x list, and the fix was to store whole percent.
+/// The order server divides by 100 at the edge, so `/api/getLoyaltyRates` still serves the
+/// `{ rate, memberRate, modifier }` shape installed builds parse.
+///
+/// Kept in the database so a promotion does not need a deploy. Website orders earn nothing
+/// whatever these say - only app orders reach the leaderboard.
+///
+/// CHECK constraints the schema cannot express (see 20260919000000_shop_settings_from_code):
+/// points and modifier not negative, and a member never earning less than a non-member.
+model LoyaltySetting {
+  id                 String    @id @default(cuid())
+  /// Points per dollar of net spend. Served as `rate`.
+  pointsPerDollar    Int       @default(6)
+  /// An active member's multiplier, in whole percent: 150 is 1.5x. Served as `memberRate`.
+  memberBonusPercent Int       @default(150)
+  /// Applied to every earn, member or not. 200 is a double-points weekend. Served as `modifier`.
+  modifierPercent    Int       @default(100)
+  /// When points expiry was switched on. NULL means off: nothing expires. It is also the
+  /// launch grace - nobody's month is counted from before this - so switching it on gives
+  /// every customer a full month, whatever they last ordered.
+  pointsExpireFrom   DateTime?
+  updatedAt          DateTime  @updatedAt
+}
+
+/// The shop's fixed details, as `/api/getStoreInfo` serves them. One row.
+///
+/// The address was written out in five places that had already drifted into two different
+/// formats - the order server's constant, the customer app's tap-target fallbacks, the
+/// staff app's printed receipt, and the website's contact page, privacy policy and
+/// structured data. Whether the shop is open is not here: that is computed per request
+/// from TradingHours and DaysOff.
+model ShopProfile {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  city      String
+  state     String
+  postal    String
+  phone     String
+  email     String
+  website   String
+  updatedAt DateTime @updatedAt
+}
+
+/// The messages the customer app shows in its launch pop-up.
+///
+/// `publishedAt` is what the app compares against the last announcement it showed, so it is
+/// set deliberately rather than with @updatedAt: correcting a typo must not pop the modal
+/// for every customer again. `position` orders the pop-up's pages; `isActive` retires a
+/// message without losing it.
+model Announcement {
+  id          String   @id @default(cuid())
+  title       String
+  text1       String
+  text2       String?
+  publishedAt DateTime @default(now())
+  isActive    Boolean  @default(true)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 enum OfferStatus {

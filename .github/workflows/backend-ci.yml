@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -81,10 +81,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -101,3 +101,73 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # The Terms and the Privacy Policy are one file, copied byte-for-byte between this repo
+  # and the website. Nothing inside a single repository can prove the two copies match, so
+  # this job fetches the other one and compares. Both repos are public, so no token.
+  #
+  # No `working-directory: backend` default here: the script resolves paths from its own
+  # location, and the sibling checkout lands at the workspace root.
+  verify-legal:
+    name: Legal documents match the website
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # A paired change lands on a branch of the same name in both repos, and that branch is
+      # tried first. Comparing only against the website's main would deadlock the pair: each
+      # PR would be checked against a main that does not have the other half yet.
+      - name: Check out the website
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Finrei28/eversweet
+          ref: ${{ github.head_ref || github.ref_name }}
+          path: .eversweet_web
+        continue-on-error: true
+
+      - name: Fall back to the website's default branch
+        if: hashFiles('.eversweet_web/src/lib/legalDocuments.ts') == ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Finrei28/eversweet
+          path: .eversweet_web
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # A paired legal change is pushed to two repos, one after the other, and each repo's CI
+      # compares against the other. Whichever runs first sees the other half's old copy and
+      # fails, though nothing has drifted - it happened on both sides of the same change.
+      # So a mismatch is retried: the other repo is fetched again every 30 seconds for about
+      # five minutes, same-named branch first, which also picks up a branch pushed after this
+      # job started. A real one-sided edit still fails, just not at once.
+      - name: Compare the legal documents
+        timeout-minutes: 7
+        env:
+          EVERSWEET_WEB_REPO: ${{ github.workspace }}/.eversweet_web
+          SIBLING_DIR: .eversweet_web
+          SIBLING_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          attempts=10
+          for attempt in $(seq 1 "$attempts"); do
+            if node backend/scripts/verify-legal.mjs; then
+              exit 0
+            fi
+            if [ "$attempt" -eq "$attempts" ]; then
+              echo "::error::Still different after $attempts attempts - one repo's copy was changed without the other."
+              exit 1
+            fi
+            echo "Attempt $attempt of $attempts: the other copy may not be pushed yet. Fetching it again in 30 seconds."
+            sleep 30
+            if git -C "$SIBLING_DIR" fetch --depth=1 origin "$SIBLING_BRANCH" 2>/dev/null; then
+              git -C "$SIBLING_DIR" checkout --quiet --force FETCH_HEAD
+            elif git -C "$SIBLING_DIR" fetch --depth=1 origin HEAD 2>/dev/null; then
+              git -C "$SIBLING_DIR" checkout --quiet --force FETCH_HEAD
+            else
+              echo "Could not fetch the other repo; comparing against what is already checked out."
+            fi
+          done

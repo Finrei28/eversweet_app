@@ -16,6 +16,7 @@ import ViewCart from "@/_components/viewCart"
 import { useMenuQuery } from "@/services/queries"
 import CustomModal from "@/_components/modal"
 import { useLoyaltyStore } from "@/store/points"
+import { pointsExpiryNotice } from "@/lib/pointsExpiry"
 import { useAuth } from "@/store/authProvider"
 import { DessertCard } from "@/_components/dessertCard"
 import { SweetPointIcon } from "@/_components/sweetPointIcon"
@@ -34,6 +35,8 @@ export default function Loyalty() {
   const cartItems = useCartStore((state) => state.items)
 
   const loyaltyPoints = useLoyaltyStore((state) => state.points)
+  const pointsExpireAt = useLoyaltyStore((state) => state.expiresAt)
+  const expiryNotice = pointsExpiryNotice(pointsExpireAt, loyaltyPoints)
 
   const { data: categories, isLoading: categoriesLoading } = useMenuQuery()
 
@@ -213,6 +216,11 @@ export default function Loyalty() {
                     points
                   </Text>
                 </View>
+                {expiryNotice && (
+                  <Text className="text-center text-gray-500 -mt-4 mb-6 px-6">
+                    {expiryNotice}
+                  </Text>
+                )}
                 {selectedCategory ? (
                   /* Flattened for the same reason as the menu screen: a
                      vertical FlatList nested in a vertical FlatList cannot

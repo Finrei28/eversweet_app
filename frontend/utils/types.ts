@@ -3,6 +3,13 @@ export type createAccountData = {
   lastName: string
   email: string
   password: string
+  /** E.164, as `parsePhoneNumberFromString` formats it. Sent all along, never declared. */
+  phoneNumber: string
+  /**
+   * The `lastUpdated` of the Terms the sign-up screen displayed. Required: the server
+   * creates no account without it, and refuses one that is not the version it serves.
+   */
+  acceptedLegalVersion: string
 }
 
 export type AccountData = {
@@ -350,41 +357,37 @@ export type PaymentStatusResult = {
   orderId: string | null
 }
 
-export type PrivacyPolicy = {
+/**
+ * Which ordering channel a section of a legal document applies to. Absent means both.
+ *
+ * The Terms and the Privacy Policy are one document each, shared with the website, and the
+ * parts that are genuinely app-only - points, membership, offers, prizes, notifications -
+ * say so rather than a second document being written.
+ */
+export type LegalPlatform = "app" | "web"
+
+/**
+ * One legal document, as `/api/getPrivacyPolicy` and `/api/getTermAndConditions` serve it.
+ *
+ * `content` and `list` may both be present. This used to be a union insisting on exactly
+ * one of them, which is why the documents were written without an introductory line above
+ * their bullets; the renderer has always handled both.
+ */
+export type LegalDocument = {
   type: string
   title: string
   lastUpdated: string
-  sections: (
-    | {
-        heading: string
-        content: string
-        list?: undefined
-      }
-    | {
-        heading: string
-        list: string[]
-        content?: undefined
-      }
-  )[]
+  sections: {
+    heading: string
+    content?: string
+    list?: string[]
+    appliesTo?: LegalPlatform[]
+  }[]
 }
 
-export type TermAndConditions = {
-  type: string
-  title: string
-  lastUpdated: string
-  sections: (
-    | {
-        heading: string
-        content: string
-        list?: undefined
-      }
-    | {
-        heading: string
-        list: string[]
-        content?: undefined
-      }
-  )[]
-}
+/** Kept as names for the two documents, since screens and queries read better for it. */
+export type PrivacyPolicy = LegalDocument
+export type TermAndConditions = LegalDocument
 
 export type StoreInfo = {
   name: string

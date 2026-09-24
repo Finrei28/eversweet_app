@@ -165,7 +165,14 @@ export const buildReceipt = (order: Order): string => {
   /** Bold is an attribute of a line, not a line of its own. */
   const bold = (text: string) => BOLD_ON + text + BOLD_OFF
 
-  // Shop
+  // Shop.
+  //
+  // The last copy of the address that is still written out rather than read from the
+  // `ShopProfile` table the order server and the website now share. Deliberately so, for
+  // now: a docket prints over Bluetooth to a printer that may have no network behind it,
+  // and the line breaks here are set to this paper width. Wiring it up means giving the
+  // app a last-known copy to print from when it is offline and re-checking the wrap on
+  // the physical printer, neither of which should be done blind.
   line(bold("EVERSWEET"), INIT + ALIGN_CENTER + SIZE_TITLE)
   line("5D/119 Meadowland Drive", SIZE_SMALL)
   line("Somerville, Auckland 2014")

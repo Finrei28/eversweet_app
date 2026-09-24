@@ -13,7 +13,7 @@ import {
 } from "react-native"
 import React, { useState } from "react"
 import { useRouter } from "expo-router"
-import { createAccount } from "@/services/api"
+import { createAccount, LegalDocumentsUpdatedError } from "@/services/api"
 import OTPInput from "@/_components/emailVerification"
 import CustomHeader from "@/_components/custom-header"
 import PageHeader from "@/_components/pageheader"
@@ -23,6 +23,8 @@ import { parsePhoneNumberFromString } from "libphonenumber-js"
 import isEmail from "validator/lib/isEmail"
 import { getErrorMessage } from "@/utils/getError"
 import { PROFILE_FIELD_MAX_LENGTH } from "@/lib/profileFields"
+import { useTermsAndConditionsQuery } from "@/services/queries"
+import Checkbox from "expo-checkbox"
 
 export default function SignUp() {
   const [signupForm, setSignupForm] = useState({
@@ -36,7 +38,23 @@ export default function SignUp() {
   const [verifyEmail, setVerifyEmail] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  /**
+   * Until this existed, a customer could create an account, order and pay having never been
+   * asked to accept anything. The only acceptance in the app sat behind the *membership*
+   * purchase, which most customers never reach.
+   */
+  const [agree, setAgree] = useState(false)
   const router = useRouter()
+
+  /**
+   * Fetched so the account records *which* version was accepted, not just that a box was
+   * ticked. The server creates no account without it.
+   *
+   * Already cached for five minutes and shared with the two screens this form links to, so
+   * it usually costs nothing here. If it never arrived, submitting tries once more rather
+   * than sending a sign-up the server will refuse.
+   */
+  const { data: terms, refetch: refetchTerms } = useTermsAndConditionsQuery()
 
   const handleSignUp = async () => {
     if (!signupForm.email || !signupForm.password) {
@@ -68,18 +86,47 @@ export default function SignUp() {
       Alert.alert("Error", "Please enter your last name.")
       return
     }
-    const signupData = {
-      firstName: signupForm.firstName,
-      lastName: signupForm.lastName,
-      email: signupForm.email,
-      phoneNumber: phone.format("E.164"),
-      password: signupForm.password,
+    // Last, so the customer is not asked to agree to anything until the rest of the form
+    // is one they could actually submit.
+    if (!agree) {
+      Alert.alert(
+        "Please agree to continue",
+        "You need to accept the Terms & Conditions and Privacy Policy to create an account.",
+      )
+      return
     }
     try {
       setIsCreating(true)
-      await createAccount(signupData)
+
+      const acceptedLegalVersion =
+        terms?.lastUpdated ?? (await refetchTerms()).data?.lastUpdated
+      if (!acceptedLegalVersion) {
+        Alert.alert(
+          "Couldn't load our terms",
+          "Please check your connection and try again.",
+        )
+        return
+      }
+
+      await createAccount({
+        firstName: signupForm.firstName,
+        lastName: signupForm.lastName,
+        email: signupForm.email,
+        phoneNumber: phone.format("E.164"),
+        password: signupForm.password,
+        acceptedLegalVersion,
+      })
       setVerifyEmail(true)
     } catch (error) {
+      // The customer ticked the box for documents that have since changed. Untick it and
+      // load the new ones, so what they accept next is what they are agreeing to.
+      if (error instanceof LegalDocumentsUpdatedError) {
+        setAgree(false)
+        void refetchTerms()
+        Alert.alert("Our terms have been updated", error.message)
+        return
+      }
+
       const message = getErrorMessage(error, "An unknown error occurred.")
 
       if (message.includes("already registered")) {
@@ -201,6 +248,30 @@ export default function SignUp() {
                         }))
                       }
                     />
+                  </View>
+                  <View className="w-3/4 mb-6 flex-row items-start">
+                    <Checkbox
+                      value={agree}
+                      onValueChange={setAgree}
+                      color={agree ? "#e6aa6b" : undefined}
+                    />
+                    <Text className="flex-1 ml-4 text-gray-700">
+                      I agree to the{" "}
+                      <Text
+                        className="text-primary underline"
+                        onPress={() => router.push("/terms-and-conditions")}
+                      >
+                        Terms &amp; Conditions
+                      </Text>{" "}
+                      and{" "}
+                      <Text
+                        className="text-primary underline"
+                        onPress={() => router.push("/privacy-policy")}
+                      >
+                        Privacy Policy
+                      </Text>
+                      .
+                    </Text>
                   </View>
                   <TouchableOpacity
                     onPress={handleSignUp}

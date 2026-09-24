@@ -65,10 +65,6 @@ export const getCollectionTime = (date: Date) => {
   return Collection_Time_Formatter.format(date)
 }
 
-export const getEarnablePoints = (total: number) => {
-  return Math.round(((total / 5) * 5) / 5)
-}
-
 /**
  * How long an order counts down in seconds rather than whole minutes.
  *

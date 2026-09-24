@@ -69,6 +69,37 @@ export const nzMonthRange = (date: Date, offset = 0) => {
   }
 }
 
+/**
+ * The last instant of the New Zealand calendar day `months` calendar months after the one
+ * containing `date`: 23:59:59.999, inclusive, the way an offer's `endsAt` is stored, so a
+ * plain `now > deadline` test serves the whole of the last day.
+ *
+ * Clamped, not overflowed: a month after 31 January is the last day of February. `setMonth`
+ * would make that "31 February" and normalise it into March - the bug `nzMonthRange`'s
+ * integer month arithmetic exists to avoid, and this uses the same.
+ *
+ * The day is counted on bare calendar numbers (`Date.UTC` as a calendar, which has no
+ * daylight saving), and only the finished day goes through `fromZonedTime`. So a clock
+ * change inside the month cannot move the deadline by an hour, and the host running UTC
+ * cannot move it by a day.
+ */
+export const nzEndOfDayMonthsAfter = (date: Date, months: number): Date => {
+  const [year, month, day] = nzCalendarDay(date).split("-").map(Number)
+
+  const absolute = year * 12 + (month - 1) + months
+  const targetYear = Math.floor(absolute / 12)
+  const targetMonth = absolute - targetYear * 12 + 1
+
+  const daysInTarget = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate()
+  const targetDay = Math.min(day, daysInTarget)
+
+  // Auckland midnight starting the next day, less a millisecond.
+  const nextDay = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay + 1))
+    .toISOString()
+    .slice(0, 10)
+  return new Date(fromZonedTime(`${nextDay}T00:00:00`, NZ_TIMEZONE).getTime() - 1)
+}
+
 /** NZ midnight on the 1st, taking a 13th month to mean January of the next year. */
 const nzMonthStart = (year: number, month: number) => {
   const rolledYear = month > 12 ? year + 1 : year

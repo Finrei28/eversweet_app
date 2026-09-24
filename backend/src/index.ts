@@ -17,6 +17,8 @@ import {
 import { settleMonthlyWinners } from "./controllers/client.controller"
 import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 import { sweepStrandedPayments } from "./lib/strandedPayments"
+import { announceNewOffers } from "./lib/announceOffers"
+import { expireInactivePoints, warnPointsExpiring } from "./lib/pointsExpiry"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -77,6 +79,13 @@ try {
   cron.schedule("0 0 * * 1", renewWeeklyOffers, {
     timezone: "Pacific/Auckland",
   })
+  // Offers that have become available and not been announced. A sweep rather than a hook on
+  // the write, because an offer with a future startsAt goes live with nothing written - see
+  // lib/announceOffers. Wrapped for the same reason as the two below: node-cron would hand
+  // the task a TaskContext, which would arrive as `now` and decide liveness by it.
+  cron.schedule("*/5 * * * *", () => announceNewOffers(), {
+    timezone: "Pacific/Auckland",
+  })
   cron.schedule("0 0 * * *", updateDailySpecial, {
     timezone: "Pacific/Auckland",
   })
@@ -84,6 +93,16 @@ try {
   // TaskContext, which would arrive as settleMonthlyWinners' `offset` and settle
   // some arbitrary month instead of the one that just ended.
   cron.schedule("0 0 1 * *", () => settleMonthlyWinners(), {
+    timezone: "Pacific/Auckland",
+  })
+  // Points expiry - see lib/pointsExpiry. The sweep runs just after midnight, once the last
+  // day of a deadline has ended; the warning mid-morning, because nobody should be woken by
+  // a points reminder. Both wrapped: a TaskContext arriving as `now` would decide every
+  // deadline by it.
+  cron.schedule("5 0 * * *", () => expireInactivePoints(), {
+    timezone: "Pacific/Auckland",
+  })
+  cron.schedule("0 10 * * *", () => warnPointsExpiring(), {
     timezone: "Pacific/Auckland",
   })
 } catch (err) {

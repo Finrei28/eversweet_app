@@ -3,7 +3,11 @@ import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
-import { membershipBenefits } from "../lib/membership"
+import {
+  DEFAULT_MEMBERSHIP_BENEFITS,
+  resolveMembershipBenefits,
+} from "../lib/membership"
+import { getLoyaltyRates, getPointsExpireFrom } from "../lib/loyaltyRates"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -714,6 +718,13 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
   try {
     const membershipPlan = await db.membershipPlan.findFirst({
       where: { name: "Monthly_Membership" },
+      // Listed rather than selected wholesale, so a client generated either side of an
+      // unapplied migration cannot ask for a column the database lacks.
+      select: {
+        id: true,
+        stripePriceId: true,
+        benefits: true,
+      },
     })
     if (!membershipPlan) {
       res.status(404).json({ message: "Membership plan not found" })
@@ -727,12 +738,28 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       // tried to answer a second time.
       return
     }
-    const price = await stripe.prices.retrieve(membershipPlan.stripePriceId)
+    const [price, rates, pointsExpireFrom] = await Promise.all([
+      stripe.prices.retrieve(membershipPlan.stripePriceId),
+      getLoyaltyRates(),
+      getPointsExpireFrom(),
+    ])
     const membershipDetails = {
       id: membershipPlan.id,
       price: price.unit_amount,
       stripePriceId: membershipPlan.stripePriceId,
-      membershipBenefits,
+      // Resolved against the live rates, so a benefit saying "{{memberRate}}x loyalty
+      // points" cannot advertise a multiplier orders no longer earn. An unseeded plan falls
+      // back rather than showing the join screen an empty tick-list that reads as a
+      // membership offering nothing - and the fallback goes through the same resolution,
+      // because it used to bake the rate in at module load and drifted the same way.
+      membershipBenefits: resolveMembershipBenefits(
+        membershipPlan.benefits.length
+          ? membershipPlan.benefits
+          : DEFAULT_MEMBERSHIP_BENEFITS,
+        rates,
+        // The no-expiry benefit is only true while expiry is on - see lib/membership.
+        { pointsExpire: pointsExpireFrom !== null },
+      ),
     }
     res.status(200).json(membershipDetails)
     return
@@ -959,9 +986,20 @@ export const createMembership = async (req: Request, res: Response) => {
         })
       } catch (error) {
         // One membership per user: the other request created it first.
+        //
+        // Two codes, because `Membership.userId` is a required one-to-one and how the loser
+        // fails depends on where the winner got to. Winner not yet committed: the unique
+        // index refuses this insert, P2002. Winner already committed: Prisma refuses it
+        // before the database sees it, because connecting this user to a second membership
+        // would orphan the one they have and `Membership.user` is required - P2014.
+        //
+        // Only P2002 was caught, so the second case answered 500 and told a customer the
+        // server had broken when all that had happened was their own double tap. It showed
+        // up as a flaky test the moment CI's database was slow enough to let the winner
+        // commit first.
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
+          (error.code === "P2002" || error.code === "P2014")
         ) {
           res.status(409).json({ message: JOIN_IN_PROGRESS_MESSAGE })
           return

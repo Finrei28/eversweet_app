@@ -5,12 +5,10 @@ import { getErrorMessage } from "../utils/getError"
 const expo = new Expo()
 
 /**
- * Sends one push to one customer, from the server's own initiative.
- *
- * Every other push in this codebase answers a request the customer's own app
- * made — `sendNotification` pushes to `req.userId` and nothing else — so there
- * was no way to tell somebody something they had not asked about. Winning the
- * leaderboard is exactly that: it happens while the app is shut.
+ * Sends one push to one customer, from the server's own initiative: a prize
+ * assigned, points about to expire - news that happens while the app is shut.
+ * A broadcast to many customers (a new offer) goes through
+ * `sendOfferNotifications` instead, which chunks and counts.
  *
  * This never throws. The rule is the same one written above the order
  * confirmation email: the write that made the news true has already committed,

@@ -45,6 +45,19 @@ export async function fetchCategoriesWithDesserts(): Promise<Menu> {
   )
 }
 
+/**
+ * The server serves newer Terms and Privacy Policy than the ones the customer ticked the box
+ * for - usually a deploy landed while the sign-up screen's cached copy was up to five minutes
+ * old. Nothing was created. The screen reloads the documents and asks again, so the customer
+ * accepts what they are actually agreeing to.
+ */
+export class LegalDocumentsUpdatedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "LegalDocumentsUpdatedError"
+  }
+}
+
 export async function createAccount(formData: createAccountData) {
   if (
     !formData.email ||
@@ -64,6 +77,15 @@ export async function createAccount(formData: createAccountData) {
 
   if (res.status === 400) {
     throw new Error(getErrorMessage(data))
+  }
+
+  if (res.status === 409 && data?.code === "LEGAL_DOCUMENTS_UPDATED") {
+    throw new LegalDocumentsUpdatedError(
+      getErrorMessage(
+        data,
+        "Our Terms and Conditions and Privacy Policy have been updated. Please review them and accept again.",
+      ),
+    )
   }
 
   if (!res.ok) {
@@ -155,15 +177,26 @@ export async function checkVerificationCode({
   return data.name
 }
 
-export async function getUserLoyaltyPoints(): Promise<number> {
-  const data = await apiRequest<{ points: number }>(
+/**
+ * The balance, and when it expires. `expiresAt` is the last instant of an Auckland day, or
+ * null when nothing is due to expire. A server from before expiry sends no such field, which
+ * reads as null too.
+ */
+export async function getUserLoyaltyPoints(): Promise<{
+  points: number
+  expiresAt: string | null
+}> {
+  const data = await apiRequest<{ points: number; expiresAt?: string | null }>(
     "/api/auth/getUserLoyaltyPoints",
     {
       authMessage: UNAUTHENTICATED,
       statusMessages: { 401: UNAUTHENTICATED },
     },
   )
-  return data.points
+  return {
+    points: data.points,
+    expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null,
+  }
 }
 
 export async function getAvailableCustomisations(
@@ -358,18 +391,6 @@ export async function createOrder(
 
   return data.order
 }
-
-export const sendOrderStatusNotification = async (
-  orderId: string,
-  orderNumber: string,
-  newStatus: string,
-) =>
-  apiRequest("/api/notification/orderStatusChange", {
-    method: "POST",
-    body: { orderId, orderNumber, newStatus },
-    authMessage: UNAUTHENTICATED,
-    errorMessage: "Failed to send notification",
-  })
 
 export const checkOrderStatus = async (orderId: string) =>
   apiRequest<any>(`/api/auth/orderStatus/${orderId}`, {
@@ -615,8 +636,22 @@ export const getLoyaltyRates = async (): Promise<LoyaltyRates> =>
     errorMessage: "Error: Could not get loyalty rates",
   })
 
-export const getLeaderboardDetails = async (): Promise<LeaderBoardDetails> =>
-  apiRequest<LeaderBoardDetails>("/api/getLeaderboardDetails")
+/**
+ * Last month's podium, for the banner.
+ *
+ * The server sends this with `Cache-Control: public, max-age=60`, which the phone's own HTTP
+ * cache honours (iOS's URL cache does). So a refetch within a minute of the last one can be
+ * answered on the device without reaching the server at all - which is exactly when the
+ * customer has just switched anonymity and needs to see it. `fresh` adds a throwaway query
+ * parameter, a URL no cache has seen; the server ignores it, and its own cache was cleared
+ * by the switch.
+ */
+export const getLeaderboardDetails = async ({
+  fresh = false,
+}: { fresh?: boolean } = {}): Promise<LeaderBoardDetails> =>
+  apiRequest<LeaderBoardDetails>(
+    `/api/getLeaderboardDetails${fresh ? `?fresh=${Date.now()}` : ""}`,
+  )
 
 export const getAnnouncements = async (): Promise<Announcements> =>
   apiRequest<Announcements>("/api/getAnnouncements")
