@@ -194,7 +194,7 @@ line wrap on the physical printer.
   record an acceptance that never happened.
 - The staff app's receipt, above.
 
-## 5. Sweet points (loyalty points) will start to expire if nothing has been bought within one month
+## 6. Sweet points (loyalty points) will start to expire if nothing has been bought within one month
 
 **Built** on 2026-09-25, shipped switched **off**. See **Expiry** in CLAUDE.md. Rollout, in
 order: release the app build (it shows the date and routes the `POINTS_EXPIRING` push),
