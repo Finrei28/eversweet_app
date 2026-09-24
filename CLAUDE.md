@@ -815,11 +815,14 @@ null means off, and the setting falls back to off, so an unreadable table expire
   cart, so the sweep cannot see those points, and an expired cart is refunded only when the
   customer next opens it (`getCartItems`). Left alone, a customer could park rewards for
   months, come back, be refunded and order that day. So every cart refund goes through
-  `creditRefund`, and past the deadline (`refundLandsExpired`) it gives nothing back and
-  writes `REFUND +n` then `EXPIRED -n`. One `loyalty.update` either way, at the same point in
-  the transaction, so the cart lock order is unchanged; and the check is made only when
-  there is something to refund, and is free while expiry is off. The sweep still takes any
-  balance past its deadline, as a backstop for points returned any other way.
+  `creditRefund`, and past the deadline it gives nothing back and writes `REFUND +n` then
+  `EXPIRED -n`. The verdict is formed before the cart's transaction (`refundExpiredSince`,
+  only when there is something to refund, free while expiry is off) and **confirmed inside
+  it**: an app order since, or a membership the webhook has activated meanwhile, makes the
+  customer exempt again. That is the same pair of checks `expireBalance` makes, sharing
+  `isActiveMemberNow` and its `FOR SHARE`, taken before Loyalty as the sweep does, so the cart
+  lock order is otherwise unchanged. The sweep still takes any balance past its deadline, as
+  a backstop for points returned any other way.
 - **The warning** goes once per deadline, within the week before, mid-morning. It is claimed
   on `Loyalty.expiryWarnedFor` before sending; keyed on the deadline, so an order that moves
   it makes the next warning due. The claim needs its `OR expiryWarnedFor IS NULL` - SQL's

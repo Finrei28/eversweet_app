@@ -147,40 +147,83 @@ export const pointsExpiryForUser = async (
 }
 
 /**
- * Whether points the cart gives back now should land already expired.
+ * Whether the customer is an active, paid-up member, read under a lock that lasts until `tx`
+ * ends.
+ *
+ * Both writers that take points away ask this at the moment of writing, not at the moment of
+ * deciding: the Stripe webhook can activate a membership in between, and an active member's
+ * points never expire. `FOR SHARE` makes an activation already in flight finish first, and
+ * then be seen; one arriving later waits for `tx` to commit. No deadlock is possible: every
+ * Membership write is a statement of its own, and both callers take Membership before
+ * Loyalty.
+ */
+const isActiveMemberNow = async (
+  tx: DbTransactionClient,
+  userId: string,
+): Promise<boolean> => {
+  const [membership] = await tx.$queryRaw<
+    { isActive: boolean; paymentStatus: string }[]
+  >`SELECT "isActive", "paymentStatus" FROM "Membership" WHERE "userId" = ${userId} FOR SHARE`
+  return Boolean(membership?.isActive && membership.paymentStatus === "SUCCESS")
+}
+
+/**
+ * If this customer's points deadline has passed, the instant their month was counted from;
+ * otherwise null.
  *
  * Points leave the balance when a reward goes into the cart, so the nightly sweep cannot
  * see them, and an expired cart is only refunded when the customer next opens it. Without
  * this a customer could leave rewards in a cart for months, come back, have them refunded and
- * order that day - keeping points that expired weeks before. So a refund after the deadline
- * gives nothing back: the points expired with the rest of the balance.
+ * order that day - keeping points that expired weeks before.
  *
- * Asked before the refund's transaction, and by a caller only when there is something to
- * refund; free while expiry is off (see `pointsExpiryForUser`).
+ * Asked before the refund's transaction, and only when there is something to refund; free
+ * while expiry is off. It is a first opinion, not the decision: `creditRefund` confirms it
+ * inside the transaction, which is why this hands back the anchor rather than a yes or no.
  */
-export const refundLandsExpired = async (
+export const refundExpiredSince = async (
   userId: string,
   now: Date = new Date(),
-): Promise<boolean> => {
-  const deadline = await pointsExpiryForUser(userId, now)
-  return deadline !== null && now.getTime() > deadline.getTime()
+): Promise<Date | null> => {
+  const expiryFrom = await getPointsExpireFrom()
+  if (!expiryFrom) return null
+
+  const activity = await loadExpiryActivity([userId])
+  const anchor = expiryAnchor(activity.get(userId) ?? NO_ACTIVITY, expiryFrom, now)
+  if (!anchor) return null
+
+  const deadline = nzEndOfDayMonthsAfter(anchor, POINTS_EXPIRE_AFTER_MONTHS)
+  return now.getTime() > deadline.getTime() ? anchor : null
 }
 
 /**
  * Hands points from the cart back - or, past the deadline, writes down that they expired.
  *
- * One `loyalty.update` either way, at the same point in the caller's transaction, so the
- * cart's lock order (OfferRedemption, then Loyalty, then Cart) is exactly what it was. An
- * expired refund leaves the balance alone and records both halves, REFUND then EXPIRED, so
- * the history says what happened rather than showing points that silently never returned.
+ * `expiredSince` is `refundExpiredSince`'s answer, read before the caller's transaction, so it
+ * can be stale by the time this runs: an app order committed since, or a membership the
+ * webhook has just activated, makes the customer exempt again, and withholding their points
+ * then would take what is theirs. So it is confirmed here, at the moment of writing - the
+ * same two checks `expireBalance` makes. What is left is an order still uncommitted as this
+ * runs, which no read can see; the same window the nightly sweep has.
+ *
+ * Still one `loyalty.update` either way. The membership read goes before it, the order the
+ * sweep takes them in, so the cart's lock order (OfferRedemption, Loyalty, Cart) is otherwise
+ * untouched. An expired refund leaves the balance alone and records both halves, REFUND then
+ * EXPIRED, so the history says what happened.
  */
-export const creditRefund = (
+export const creditRefund = async (
   tx: DbTransactionClient,
   userId: string,
   points: number,
-  landsExpired: boolean,
-) =>
-  tx.loyalty.update({
+  expiredSince: Date | null,
+) => {
+  const landsExpired =
+    expiredSince !== null &&
+    !(await isActiveMemberNow(tx, userId)) &&
+    (await tx.order.count({
+      where: { appUserId: userId, createdAt: { gt: expiredSince } },
+    })) === 0
+
+  return tx.loyalty.update({
     where: { userId },
     data: landsExpired
       ? {
@@ -196,6 +239,7 @@ export const creditRefund = (
           records: { create: { change: points, reason: "REFUND" } },
         },
   })
+}
 
 type Balance = { id: string; userId: string; points: number }
 
@@ -225,12 +269,7 @@ export const expireBalance = async (
 ): Promise<boolean> =>
   db.$transaction(
     async (tx) => {
-      const [membership] = await tx.$queryRaw<
-        { isActive: boolean; paymentStatus: string }[]
-      >`SELECT "isActive", "paymentStatus" FROM "Membership" WHERE "userId" = ${balance.userId} FOR SHARE`
-      if (membership?.isActive && membership.paymentStatus === "SUCCESS") {
-        return false
-      }
+      if (await isActiveMemberNow(tx, balance.userId)) return false
 
       const { count } = await tx.loyalty.updateMany({
         where: {

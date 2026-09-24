@@ -18,7 +18,7 @@ import {
 } from "../lib/offerAudience"
 import { isOfferLive } from "../lib/offerAvailability"
 import { offerUnitPriceInCents } from "../lib/offerPricing"
-import { creditRefund, refundLandsExpired } from "../lib/pointsExpiry"
+import { creditRefund, refundExpiredSince } from "../lib/pointsExpiry"
 
 /**
  * Handing a held redemption back, as one `data` block because all four release paths -
@@ -768,10 +768,10 @@ export const getCartItems = async (req: Request, res: Response) => {
       }, 0)
 
       // Past the customer's points deadline, those points expired with the rest of the
-      // balance - see refundLandsExpired. This path is the one that let them escape:
+      // balance - see refundExpiredSince. This path is the one that let them escape:
       // an abandoned cart is only refunded here, whenever the customer comes back.
-      const landsExpired =
-        totalPointsToRefund > 0 && (await refundLandsExpired(userId))
+      const expiredSince =
+        totalPointsToRefund > 0 ? await refundExpiredSince(userId) : null
 
       // An expired cart hands every held redemption back, whoever holds it.
       // The membership lookup this used to need is gone with the re-key — as
@@ -801,7 +801,7 @@ export const getCartItems = async (req: Request, res: Response) => {
             }
 
             if (totalPointsToRefund > 0) {
-              await creditRefund(tx, userId, totalPointsToRefund, landsExpired)
+              await creditRefund(tx, userId, totalPointsToRefund, expiredSince)
             }
 
             const { count } = await tx.cart.deleteMany({
@@ -959,9 +959,9 @@ export const clearCart = async (req: Request, res: Response) => {
     const totalPointsToRefund = cart.cartItems.reduce((sum, item) => {
       return sum + (item.loyaltyPointsUsed ?? 0)
     }, 0)
-    // Past the points deadline they expired with the balance - see refundLandsExpired.
-    const landsExpired =
-      totalPointsToRefund > 0 && (await refundLandsExpired(userId))
+    // Past the points deadline they expired with the balance - see refundExpiredSince.
+    const expiredSince =
+      totalPointsToRefund > 0 ? await refundExpiredSince(userId) : null
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
@@ -985,7 +985,7 @@ export const clearCart = async (req: Request, res: Response) => {
         }
 
         if (totalPointsToRefund > 0) {
-          await creditRefund(tx, userId, totalPointsToRefund, landsExpired)
+          await creditRefund(tx, userId, totalPointsToRefund, expiredSince)
         }
 
         await tx.cart.delete({ where: { userId } })
@@ -1036,9 +1036,10 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       return
     }
 
-    // Past the points deadline they expired with the balance - see refundLandsExpired.
-    const landsExpired =
-      !!cartItem.loyaltyPointsUsed && (await refundLandsExpired(userId))
+    // Past the points deadline they expired with the balance - see refundExpiredSince.
+    const expiredSince = cartItem.loyaltyPointsUsed
+      ? await refundExpiredSince(userId)
+      : null
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
@@ -1064,7 +1065,7 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
             tx,
             userId,
             cartItem.loyaltyPointsUsed,
-            landsExpired,
+            expiredSince,
           )
         }
 

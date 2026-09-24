@@ -35,8 +35,10 @@ import { invalidateLoyaltyRates } from "./loyaltyRates"
 import { rankMonth } from "./leaderboardRanking"
 import { POINTS_NEVER_EXPIRE_BENEFIT } from "./membership"
 import {
+  creditRefund,
   expireBalance,
   expireInactivePoints,
+  refundExpiredSince,
   warnPointsExpiring,
 } from "./pointsExpiry"
 import { nzMonthRange } from "./tradingHours"
@@ -592,6 +594,97 @@ describeIfDb("points expiry", () => {
       await ways[0]![1](user.id, lineId)
 
       expect(await balanceOf(loyalty.id)).toBe(1000)
+    })
+
+    /**
+     * The verdict is reached before the cart's transaction, so it can be stale when the points
+     * are written. Each of these reaches the verdict, then changes what it was based on, then
+     * applies the refund - which must notice.
+     */
+    const refundNow = (userId: string, expiredSince: Date | null) =>
+      db.$transaction((tx) => creditRefund(tx, userId, 500, expiredSince))
+
+    const pastDeadline = async () => {
+      await switchOn(longAgo())
+      const user = await makeUser()
+      const loyalty = await db.loyalty.create({
+        data: { userId: user.id, points: 500 },
+      })
+      const expiredSince = await refundExpiredSince(user.id)
+      expect(expiredSince).not.toBeNull()
+      return { user, loyalty, expiredSince }
+    }
+
+    it("gives them back to a customer who ordered after the verdict", async () => {
+      const { user, loyalty, expiredSince } = await pastDeadline()
+      await orderAt(user.id, new Date())
+
+      await refundNow(user.id, expiredSince)
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
+      expect(await expiredRecords(loyalty.id)).toHaveLength(0)
+    })
+
+    it("gives them back to a customer who became a member after the verdict", async () => {
+      const { user, loyalty, expiredSince } = await pastDeadline()
+      await membershipFor(user.id, new Date(Date.now() + 20 * 86_400_000), {
+        isActive: true,
+        paymentStatus: "SUCCESS",
+      })
+
+      await refundNow(user.id, expiredSince)
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
+    })
+
+    /**
+     * An activation written but not yet committed is invisible to a plain read. Held open for
+     * longer than an unlocked refund takes, so without the lock the refund would finish in
+     * that time against the old state and withhold the points.
+     */
+    it("waits for an activation in progress, and honours it", async () => {
+      const { user, loyalty, expiredSince } = await pastDeadline()
+      await membershipFor(user.id, new Date(Date.now() + 20 * 86_400_000), {
+        isActive: false,
+        paymentStatus: "PENDING",
+      })
+
+      let release!: () => void
+      const held = new Promise<void>((resolve) => (release = resolve))
+      let written!: () => void
+      const activationWritten = new Promise<void>((resolve) => (written = resolve))
+      const activation = db.$transaction(
+        async (tx) => {
+          await tx.membership.update({
+            where: { userId: user.id },
+            data: { isActive: true, paymentStatus: "SUCCESS" },
+          })
+          written()
+          await held
+        },
+        { timeout: 20_000 },
+      )
+      await activationWritten
+
+      const refunding = refundNow(user.id, expiredSince)
+      await Promise.race([
+        refunding,
+        new Promise((resolve) => setTimeout(resolve, 1_500)),
+      ])
+      release()
+      await activation
+      await refunding
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
+    })
+
+    it("still withholds them when nothing has changed since the verdict", async () => {
+      const { user, loyalty, expiredSince } = await pastDeadline()
+
+      await refundNow(user.id, expiredSince)
+
+      expect(await balanceOf(loyalty.id)).toBe(500)
+      expect(await expiredRecords(loyalty.id)).toHaveLength(1)
     })
 
     it("gives them back while expiry is off", async () => {
