@@ -147,6 +147,33 @@ export const pointsExpiryForUser = async (
 }
 
 /**
+ * Waits out any app order this customer has in flight, and holds new ones off until `tx` ends.
+ *
+ * Both writers that take points away check for an app order placed since the customer's month
+ * began. A plain read cannot see one whose transaction has not committed, so a customer placing
+ * an order as the sweep or a refund ran could lose their points to an order that was already
+ * on its way. Orders cannot be locked before they exist, but every app order references its
+ * customer: inserting one takes `FOR KEY SHARE` on the `User` row, held until it commits.
+ * `FOR UPDATE` conflicts with that. So an order already inserted is waited for and then seen,
+ * and one that starts after this waits until `tx` commits - by which time the points were due.
+ * `createOrder` does not change, and pays nothing.
+ *
+ * **Take it first in the transaction.** `createOrder` holds that key share while it goes on to
+ * write Loyalty and the customer's OfferRedemption rows, so a transaction waiting here must not
+ * be holding either. Taken first, it waits holding nothing. `createOrder` itself takes no row
+ * lock before inserting the order - `settleOrderPayment` only reads and takes the payment's
+ * advisory lock - so an order and an expiry can never deadlock.
+ *
+ * One path does take these the other way round: adding the first reward to a *new* cart spends
+ * Loyalty, then inserts the Cart, which is a key share on User. If that ever lands on the same
+ * customer at the same moment as their expiry, Postgres detects the deadlock and aborts one
+ * side: `retryOnCartConflict` retries the add, and the sweep logs it and leaves that balance
+ * for the next night. Nothing is lost either way.
+ */
+export const holdCustomerOrders = (tx: DbTransactionClient, userId: string) =>
+  tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR UPDATE`
+
+/**
  * Whether the customer is an active, paid-up member, read under a lock that lasts until `tx`
  * ends.
  *
@@ -199,16 +226,19 @@ export const refundExpiredSince = async (
  * Hands points from the cart back - or, past the deadline, writes down that they expired.
  *
  * `expiredSince` is `refundExpiredSince`'s answer, read before the caller's transaction, so it
- * can be stale by the time this runs: an app order committed since, or a membership the
- * webhook has just activated, makes the customer exempt again, and withholding their points
- * then would take what is theirs. So it is confirmed here, at the moment of writing - the
- * same two checks `expireBalance` makes. What is left is an order still uncommitted as this
- * runs, which no read can see; the same window the nightly sweep has.
+ * can be stale by the time this runs: an app order placed since - including one still being
+ * placed - or a membership the webhook has just activated makes the customer exempt again, and
+ * withholding their points then would take what is theirs. So it is confirmed here, at the
+ * moment of writing, with the same checks `expireBalance` makes.
  *
- * Still one `loyalty.update` either way. The membership read goes before it, the order the
- * sweep takes them in, so the cart's lock order (OfferRedemption, Loyalty, Cart) is otherwise
- * untouched. An expired refund leaves the balance alone and records both halves, REFUND then
- * EXPIRED, so the history says what happened.
+ * **When `expiredSince` is set, the caller takes `holdCustomerOrders` as the first statement of
+ * its transaction**, before any OfferRedemption write - see there for why. This takes it
+ * again, which is a no-op for a transaction already holding it, so a caller that forgets gets
+ * a correct answer and at worst a deadlock the cart's retry absorbs, never a lost order.
+ *
+ * Still one `loyalty.update` either way, so the rest of the cart's lock order (OfferRedemption,
+ * Loyalty, Cart) is untouched. An expired refund leaves the balance alone and records both
+ * halves, REFUND then EXPIRED, so the history says what happened.
  */
 export const creditRefund = async (
   tx: DbTransactionClient,
@@ -216,6 +246,8 @@ export const creditRefund = async (
   points: number,
   expiredSince: Date | null,
 ) => {
+  if (expiredSince !== null) await holdCustomerOrders(tx, userId)
+
   const landsExpired =
     expiredSince !== null &&
     !(await isActiveMemberNow(tx, userId)) &&
@@ -253,7 +285,8 @@ type Balance = { id: string; userId: string; points: number }
  *   tomorrow rather than clobbered - zeroing a figure we never saw would take points the
  *   customer earned a second ago.
  * - **No app order after the anchor.** A points-only order changes no balance, so the check
- *   above cannot see one committed since the read. This does.
+ *   above cannot see one committed since the read. This does - and `holdCustomerOrders`, taken
+ *   first, makes it see one still being placed as well.
  * - **Still not an active member**, read under a lock. The sweep read the membership before
  *   deciding; a first payment or a renewal the Stripe webhook activates after that read made
  *   the customer exempt, and expiring them anyway takes a member's points. A condition in the
@@ -269,6 +302,8 @@ export const expireBalance = async (
 ): Promise<boolean> =>
   db.$transaction(
     async (tx) => {
+      // First, holding nothing yet - see holdCustomerOrders.
+      await holdCustomerOrders(tx, balance.userId)
       if (await isActiveMemberNow(tx, balance.userId)) return false
 
       const { count } = await tx.loyalty.updateMany({

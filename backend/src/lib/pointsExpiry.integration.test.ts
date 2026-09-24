@@ -38,6 +38,7 @@ import {
   creditRefund,
   expireBalance,
   expireInactivePoints,
+  holdCustomerOrders,
   refundExpiredSince,
   warnPointsExpiring,
 } from "./pointsExpiry"
@@ -401,6 +402,124 @@ describeIfDb("points expiry", () => {
       await expireInactivePoints(afterDeadline)
 
       expect(await rankMonth(november)).toEqual(before)
+    })
+  })
+
+  /**
+   * An order still being placed as the sweep or a refund runs. Its row is inserted but not
+   * committed, so no read can see it - and the customer who was ordering would lose their
+   * points to an order already on its way. Each of these holds such an order open, exactly as
+   * `createOrder` holds one mid-flight, for longer than an unlocked expiry takes to finish.
+   */
+  describe("an order in flight", () => {
+    const holdOrderOpen = (
+      userId: string,
+      afterInsert?: (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => Promise<unknown>,
+    ) => {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => (release = resolve))
+      let inserted!: () => void
+      const orderInserted = new Promise<void>((resolve) => (inserted = resolve))
+
+      const order = db.$transaction(
+        async (tx) => {
+          await tx.order.create({
+            data: {
+              tempOrderId: String(orderNumber++),
+              priceInCents: 1200,
+              customerFirstName: "Ada",
+              customerLastName: "Lovelace",
+              customerEmail: "ada@example.test",
+              status: "PENDING",
+              GST: 0,
+              source: "APP",
+              appUserId: userId,
+            },
+          })
+          inserted()
+          await held
+          // What createOrder goes on to do while it still holds the customer: earn points.
+          if (afterInsert) await afterInsert(tx)
+        },
+        { timeout: 20_000 },
+      )
+      return { order, orderInserted, release }
+    }
+
+    const settle = <T,>(work: Promise<T>) =>
+      Promise.race([work, new Promise((resolve) => setTimeout(resolve, 1_500))])
+
+    it("makes the sweep wait for it, and keeps the points", async () => {
+      await switchOn(new Date(Date.now() - 60 * 86_400_000))
+      const { user, loyalty } = await customerWithPoints(120)
+      const { order, orderInserted, release } = holdOrderOpen(user.id)
+      await orderInserted
+
+      const expiring = expireBalance(
+        { id: loyalty.id, userId: user.id, points: 120 },
+        new Date(Date.now() - 60 * 86_400_000),
+      )
+      await settle(expiring)
+      release()
+      await order
+
+      expect(await expiring).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    it("makes a cart refund wait for it, and gives the points back", async () => {
+      await switchOn(new Date(Date.now() - 60 * 86_400_000))
+      const { user, loyalty } = await customerWithPoints(500)
+      const expiredSince = await refundExpiredSince(user.id)
+      expect(expiredSince).not.toBeNull()
+      const { order, orderInserted, release } = holdOrderOpen(user.id)
+      await orderInserted
+
+      const refunding = db.$transaction(
+        async (tx) => {
+          await holdCustomerOrders(tx, user.id)
+          await creditRefund(tx, user.id, 500, expiredSince)
+        },
+        { timeout: 20_000 },
+      )
+      await settle(refunding)
+      release()
+      await order
+      await refunding
+
+      expect(await balanceOf(loyalty.id)).toBe(1000)
+      expect(await expiredRecords(loyalty.id)).toHaveLength(0)
+    })
+
+    /**
+     * The lock order. createOrder holds the customer while it goes on to write their Loyalty
+     * row; the sweep waiting for it must be holding nothing that write needs, or the two
+     * would deadlock. The order finishing, and the sweep then standing down, is the proof.
+     */
+    it("lets an order that goes on to earn points finish, without a deadlock", async () => {
+      await switchOn(new Date(Date.now() - 60 * 86_400_000))
+      const { user, loyalty } = await customerWithPoints(120)
+      const { order, orderInserted, release } = holdOrderOpen(user.id, (tx) =>
+        tx.loyalty.update({
+          where: { id: loyalty.id },
+          data: {
+            points: { increment: 60 },
+            records: { create: { change: 60, reason: "EARNED" } },
+          },
+        }),
+      )
+      await orderInserted
+
+      const expiring = expireBalance(
+        { id: loyalty.id, userId: user.id, points: 120 },
+        new Date(Date.now() - 60 * 86_400_000),
+      )
+      await settle(expiring)
+      release()
+
+      await expect(order).resolves.toBeUndefined()
+      expect(await expiring).toBe(false)
+      expect(await balanceOf(loyalty.id)).toBe(180)
     })
   })
 

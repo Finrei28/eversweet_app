@@ -821,7 +821,13 @@ null means off, and the setting falls back to off, so an unreadable table expire
   it**: an app order since, or a membership the webhook has activated meanwhile, makes the
   customer exempt again. That is the same pair of checks `expireBalance` makes, sharing
   `isActiveMemberNow` and its `FOR SHARE`, taken before Loyalty as the sweep does, so the cart
-  lock order is otherwise unchanged. The sweep still takes any balance past its deadline, as
+  lock order is otherwise unchanged.
+- **An order still being placed is waited for.** Both writers first take
+  `holdCustomerOrders` - `FOR UPDATE` on the customer's `User` row, which conflicts with the
+  `FOR KEY SHARE` an uncommitted order insert holds through its foreign key - so the order
+  check sees an order that was already on its way. `createOrder` is untouched and pays
+  nothing. It has to be the **first** lock in the transaction (see the comment on it for the
+  one path that can still deadlock, and why that costs nothing). The sweep still takes any balance past its deadline, as
   a backstop for points returned any other way.
 - **The warning** goes once per deadline, within the week before, mid-morning. It is claimed
   on `Loyalty.expiryWarnedFor` before sending; keyed on the deadline, so an order that moves

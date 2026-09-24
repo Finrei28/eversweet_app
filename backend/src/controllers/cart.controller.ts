@@ -18,7 +18,11 @@ import {
 } from "../lib/offerAudience"
 import { isOfferLive } from "../lib/offerAvailability"
 import { offerUnitPriceInCents } from "../lib/offerPricing"
-import { creditRefund, refundExpiredSince } from "../lib/pointsExpiry"
+import {
+  creditRefund,
+  holdCustomerOrders,
+  refundExpiredSince,
+} from "../lib/pointsExpiry"
 
 /**
  * Handing a held redemption back, as one `data` block because all four release paths -
@@ -792,6 +796,8 @@ export const getCartItems = async (req: Request, res: Response) => {
       try {
         await retryOnCartConflict(() =>
           db.$transaction(async (tx) => {
+            // Before anything else is locked - see holdCustomerOrders.
+            if (expiredSince) await holdCustomerOrders(tx, userId)
             for (const item of cart.cartItems) {
               if (!item.offerId) continue
               await tx.offerRedemption.updateMany({
@@ -965,6 +971,9 @@ export const clearCart = async (req: Request, res: Response) => {
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
+        // Before anything else is locked - see holdCustomerOrders.
+        if (expiredSince) await holdCustomerOrders(tx, userId)
+
         // Redemptions, then points, then the cart - the lock order at the top
         // of this file. The first two used to be the other way round, which
         // put clearing a cart at odds with adding to one.
@@ -1043,6 +1052,9 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
 
     await retryOnCartConflict(() =>
       db.$transaction(async (tx) => {
+        // Before anything else is locked - see holdCustomerOrders.
+        if (expiredSince) await holdCustomerOrders(tx, userId)
+
         // This used to 403 with "No membership record found" when the user had
         // no membership, which left a non-member's open-offer item stuck in
         // their cart until it expired — they could add it but never remove it.
