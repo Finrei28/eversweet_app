@@ -445,7 +445,7 @@ export const privacyPolicy: LegalDocument = {
       heading: "9. Notifications",
       appliesTo: ["app"],
       content:
-        "If you allow them, we send notifications about your own orders - when one is accepted, when the kitchen starts it, and when it is ready - when a prize has been assigned to you, and a week before your Sweet Points are due to expire. We also send one about the shop: a notification when a new offer becomes available, which for a members-only offer goes to members. That is the only message we send that is not about your own account or orders. You can turn notifications off in your phone's settings at any time, and the app keeps working without them. Signing out removes your device's notification token from our records.",
+        "If you allow them, we send notifications about your own orders - when one is accepted, when the kitchen starts it, and when it is ready - when a prize has been assigned to you, a week before your Sweet Points are due to expire, three days before a membership you have cancelled ends, and when a membership renewal payment is declined. We also send one about the shop: a notification when a new offer becomes available, which for a members-only offer goes to members. That is the only message we send that is not about your own account or orders. You can turn notifications off in your phone's settings at any time, and the app keeps working without them. Signing out removes your device's notification token from our records.",
     },
     {
       heading: "10. Cookies and analytics",

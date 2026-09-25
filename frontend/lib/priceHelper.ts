@@ -1,38 +1,38 @@
 import { Dessert, UsersMembership } from "@/utils/types"
-import { isPaidUpMember } from "@/lib/membership"
+import { memberDiscountPercent } from "@/lib/membership"
+
+/**
+ * Whether a dessert's promotion is running: switched on, and inside its window, both ends
+ * inclusive, with no date meaning no bound.
+ *
+ * A copy of `isPromoLive` in the order server's lib/memberPricing. The app used to treat
+ * `endsAt` as exclusive, so at that instant it showed the full price for a line the server
+ * still discounted. The dates arrive from JSON as strings, whatever the type says.
+ */
+export const isPromoLive = (
+  promo: Dessert["promo"],
+  now: Date = new Date(),
+): promo is NonNullable<Dessert["promo"]> =>
+  !!promo &&
+  promo.isActive &&
+  (!promo.startsAt || new Date(promo.startsAt).getTime() <= now.getTime()) &&
+  (!promo.endsAt || new Date(promo.endsAt).getTime() >= now.getTime())
 
 export function calculateBestDiscountedPrice(
   dessert: Dessert,
   usersMembership: UsersMembership | null,
   offerItemPrice?: number,
+  now: Date = new Date(),
 ) {
   const originalPrice = dessert.priceInCents
 
-  const maxMembershipDiscount = Math.min(
-    usersMembership?.plan.maxDiscount ?? 0,
-    (usersMembership?.totalMonths ?? 1) *
-      (usersMembership?.plan.membershipDiscount ?? 0),
+  // Paid up, not merely active: a membership on hold gets no member price, which
+  // memberDiscountPercent answers as 0.
+  const membershipPrice = Math.round(
+    originalPrice * (1 - memberDiscountPercent(usersMembership) / 100),
   )
 
-  // Paid up, not merely active: a membership on hold gets no member price.
-  const membershipPrice = isPaidUpMember(usersMembership)
-    ? Math.round(originalPrice * (1 - maxMembershipDiscount / 100))
-    : originalPrice
-
-  let promoPrice = originalPrice
-  const promo = dessert.promo
-  if (promo) {
-    const now = new Date()
-    const isActive = promo?.isActive ?? false
-    const hasStarted = !promo?.startsAt || now >= new Date(promo.startsAt)
-    const hasEnded = !!promo?.endsAt && now >= new Date(promo.endsAt)
-    if (isActive && !hasEnded && hasStarted) {
-      promoPrice =
-        promo.type === "PERCENTAGE"
-          ? Math.round(originalPrice * (1 - promo.value / 100))
-          : Math.max(0, originalPrice - promo.value)
-    }
-  }
+  const promoPrice = calculatePriceAfterPromo(dessert, now)
 
   const dessertPriceInCentsAfterDiscount = Math.min(
     originalPrice,
@@ -43,59 +43,26 @@ export function calculateBestDiscountedPrice(
   return offerItemPrice ?? dessertPriceInCentsAfterDiscount // if offer then show offer price
 }
 
-export function calculatePriceAfterPromo(dessert: Dessert) {
-  const now = new Date()
+export function calculatePriceAfterPromo(dessert: Dessert, now: Date = new Date()) {
   const originalPrice = dessert.priceInCents
   const promo = dessert.promo
-  if (!promo) {
-    return originalPrice
-  }
-  const isActive = promo?.isActive ?? false
-  const hasStarted = !promo?.startsAt || now >= new Date(promo.startsAt)
-  const hasEnded = !!promo?.endsAt && now >= new Date(promo.endsAt)
+  if (!isPromoLive(promo, now)) return originalPrice
 
-  if (!isActive || hasEnded || !hasStarted) {
-    return originalPrice
-  }
-
-  const promoPrice =
-    promo.type === "PERCENTAGE"
-      ? Math.round(originalPrice * (1 - promo.value / 100))
-      : Math.max(0, originalPrice - promo.value)
-
-  return promoPrice
+  return promo.type === "PERCENTAGE"
+    ? Math.round(originalPrice * (1 - promo.value / 100))
+    : Math.max(0, originalPrice - promo.value)
 }
 
 export function calculatePriceAfterMembershipDiscount(
   price: number,
   usersMembership: UsersMembership | null,
 ) {
-  const maxMembershipDiscount = Math.min(
-    usersMembership?.plan.maxDiscount ?? 0,
-    (usersMembership?.totalMonths ?? 1) *
-      (usersMembership?.plan.membershipDiscount ?? 0),
-  )
-
-  const membershipPrice = isPaidUpMember(usersMembership)
-    ? Math.round(price * (1 - maxMembershipDiscount / 100))
-    : price
-
-  return membershipPrice
+  return Math.round(price * (1 - memberDiscountPercent(usersMembership) / 100))
 }
 
 export function calculateMembershipDiscount(
   price: number,
   usersMembership: UsersMembership | null,
 ) {
-  const maxMembershipDiscount = Math.min(
-    usersMembership?.plan.maxDiscount ?? 0,
-    (usersMembership?.totalMonths ?? 1) *
-      (usersMembership?.plan.membershipDiscount ?? 0),
-  )
-
-  const membershipDiscount = isPaidUpMember(usersMembership)
-    ? Math.round(price * (maxMembershipDiscount / 100))
-    : 0
-
-  return membershipDiscount
+  return Math.round(price * (memberDiscountPercent(usersMembership) / 100))
 }

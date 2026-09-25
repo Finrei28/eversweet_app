@@ -7,6 +7,7 @@ import { formatShortDate } from "@/lib/formatters"
 import { getErrorMessage } from "@/utils/getError"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
 import { UsersMembership } from "@/utils/types"
+import { builtUpDiscountPercent, headlinePerk } from "@/lib/membership"
 
 /**
  * Cancellation / re-subscribe / payment-retry controls for an active member.
@@ -26,6 +27,14 @@ export default function ManageMembershipCard({
   const { membershipDetails, refetchUsersMembership } = useAuth()
   const [isResuming, setIsResuming] = useState(false)
   const [cancelMembership, setCancelMembership] = useState(false)
+
+  // What the member stands to lose, named the way the pushes and the banner name it: their
+  // own figure, a perk from the plan's list, and the rest.
+  const discount = builtUpDiscountPercent(usersMembership)
+  const perk = headlinePerk(membershipDetails?.membershipBenefits ?? [])
+  const atStake = perk
+    ? `your ${discount}% discount, ${perk} and your other member benefits`
+    : `your ${discount}% discount and your other member benefits`
 
   const handleResumeMembership = async () => {
     setIsResuming(true)
@@ -114,12 +123,20 @@ export default function ManageMembershipCard({
             </TouchableOpacity>
           </View>
         )}
+        {/* Cancelled: nothing is lost until the end date, and re-subscribing before it keeps
+            the run - so say what goes, while there is still time to keep it. */}
+        {usersMembership.cancel && usersMembership.paymentStatus === "SUCCESS" && (
+          <Text className="text-gray-500 mt-3">
+            Re-subscribe before then to keep {atStake}.
+          </Text>
+        )}
         {/* On hold: a renewal was declined and is being retried. The server pauses every
             member benefit until it is paid, so say so rather than leave the customer to
             find out at checkout. */}
         {usersMembership.paymentStatus === "PENDING" && (
           <Text className="text-gray-500 mt-3">
-            Your member benefits are paused until this payment goes through.
+            {atStake.charAt(0).toUpperCase() + atStake.slice(1)} are paused until this
+            payment goes through.
           </Text>
         )}
       </View>
@@ -129,6 +146,7 @@ export default function ManageMembershipCard({
           modalVisible={cancelMembership}
           setModalVisible={setCancelMembership}
           membershipDetails={membershipDetails}
+          usersMembership={usersMembership}
           onCancelled={refetchUsersMembership}
         />
       )}

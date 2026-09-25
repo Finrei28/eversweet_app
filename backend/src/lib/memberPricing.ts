@@ -60,21 +60,33 @@ export const CART_PRICES_CHANGED_MESSAGE =
   "Prices in your cart have changed. Please review your cart and try again."
 
 /**
- * The member discount, in whole percent. It grows a step for each month paid in a row, up to
- * the plan's cap, and is nothing for anyone not paid up.
+ * The discount a membership has built up, in whole percent, whether or not it is being given
+ * right now. It grows a step for each month paid in a row, up to the plan's cap.
  *
- * At least one step for a paid-up member: `totalMonths` is written by the webhook from the
- * paid invoices, so it is never below one once a membership is live, but a row from before
- * that count existed must not read as no discount at all.
+ * At least one step: `totalMonths` is written by the webhook from the paid invoices, so it is
+ * never below one once a membership is live, but a row from before that count existed must not
+ * read as no discount at all.
+ *
+ * This is what a member stands to lose, so the warnings quote it (`lib/membershipReminders`):
+ * a membership on hold is given nothing, and still has 20% riding on the retry.
  */
-export const memberDiscountPercent = (membership: MemberForPricing): number => {
-  if (!membership || !isPaidUpMember(membership)) return 0
+export const builtUpDiscountPercent = (membership: {
+  totalMonths: number
+  plan: { maxDiscount: number; membershipDiscount: number }
+}): number => {
   const { maxDiscount, membershipDiscount } = membership.plan
   return Math.min(
     maxDiscount,
     Math.max(1, membership.totalMonths) * membershipDiscount,
   )
 }
+
+/**
+ * The member discount, in whole percent: what has been built up, and nothing for anyone not
+ * paid up.
+ */
+export const memberDiscountPercent = (membership: MemberForPricing): number =>
+  membership && isPaidUpMember(membership) ? builtUpDiscountPercent(membership) : 0
 
 export type PromoForPricing =
   | {

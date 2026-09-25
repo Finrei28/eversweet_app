@@ -19,6 +19,7 @@ import { probeDatabaseLatency } from "./lib/dbLatencyProbe"
 import { sweepStrandedPayments } from "./lib/strandedPayments"
 import { announceNewOffers } from "./lib/announceOffers"
 import { expireInactivePoints, warnPointsExpiring } from "./lib/pointsExpiry"
+import { warnMembershipsEnding } from "./lib/membershipReminders"
 
 const PORT = process.env.PORT || 3000
 const server = http.createServer(app)
@@ -103,6 +104,11 @@ try {
     timezone: "Pacific/Auckland",
   })
   cron.schedule("0 10 * * *", () => warnPointsExpiring(), {
+    timezone: "Pacific/Auckland",
+  })
+  // A cancelled membership ending within three days - see lib/membershipReminders. Beside the
+  // points warning for the same reason, and wrapped for the same one.
+  cron.schedule("0 10 * * *", () => warnMembershipsEnding(), {
     timezone: "Pacific/Auckland",
   })
 } catch (err) {

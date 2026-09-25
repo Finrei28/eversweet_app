@@ -720,6 +720,27 @@ payment that beat its subscription id); only the delivery that flipped the row s
 The send never throws — the membership is written by then, and a failed webhook would be
 redelivered to no effect.
 
+**Members are warned before they lose the run** (`lib/membershipReminders`). The discount
+starts again at the first step once the subscription ends, and two pushes say so beforehand.
+Each names the member's built-up discount (`builtUpDiscountPercent`, what the run has earned
+whether or not it is being given), one perk from the plan's own served list (`headlinePerk`:
+the first line that is not the discount or cancelling) and "your other member benefits". The
+perk is never written into code, so a push cannot advertise one the shop has dropped.
+- **`MEMBERSHIP_ENDING`**, a daily 10:00 sweep (`warnMembershipsEnding`): a cancelled,
+  paid-up membership whose `endDate` falls within three Auckland days. It is claimed on
+  `Membership.endWarnedFor`, keyed on the end date the way `Loyalty.expiryWarnedFor` is keyed
+  on the deadline, with the same `OR ... IS NULL`. Cancel, resume and cancel again inside one
+  period keeps the date, so nobody is told twice.
+- **`MEMBERSHIP_PAYMENT_FAILED`**, from the renewal branch of `invoice.payment_failed`. It is
+  claimed on the SUCCESS→PENDING transition, so one hold is one push: Stripe's later retries
+  and redeliveries find the row already PENDING. A paid retry puts it back to SUCCESS, which
+  makes the next decline a new hold.
+- The app routes both to `/membership`. `MembershipWarningBanner` (home tab and cart) words
+  the same two states from `lib/membership.membershipWarning`, which mirrors both helpers. It
+  shows a cancelled membership only in its last week.
+- `loadMembershipBenefits` is the one resolution of the served list. The join screen, the
+  welcome email and these pushes all use it.
+
 `createMembership` claims the join atomically before touching Stripe: an inactive row that
 is not already PENDING (or PENDING for over 2 minutes), or a fresh create (P2002 means
 someone beat you). A second concurrent join gets 409. Without that, a double tap created
@@ -734,7 +755,8 @@ Cron (`index.ts`) all runs in `Pacific/Auckland`:
   00:00 on the 1st;
 - `announceNewOffers` every 5 minutes;
 - `expireInactivePoints` at 00:05 and `warnPointsExpiring` at 10:00 daily (see **Expiry**
-  under the loyalty section).
+  under the loyalty section);
+- `warnMembershipsEnding` at 10:00 daily (see the membership warnings above).
 
 **Announcing a new offer is a sweep, not a hook on the write** (`lib/announceOffers`). An
 offer saved with a future `startsAt` becomes live at that instant with nothing written, and

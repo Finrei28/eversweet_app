@@ -30,6 +30,20 @@ vi.mock("../lib/emailSender", () => ({
   default: vi.fn(async () => ({ data: { id: "email_test" }, error: null })),
 }))
 
+// A renewal declined pushes to the member (lib/membershipReminders). Typed with the real
+// signature, so `mock.calls[0][2]` is checked rather than inferred as an empty tuple.
+const { sendPushToUser } = vi.hoisted(() => ({
+  sendPushToUser: vi.fn(
+    async (
+      _userId: string,
+      _title: string,
+      _body: string,
+      _data?: Record<string, unknown>,
+    ) => true,
+  ),
+}))
+vi.mock("../lib/pushToUser", () => ({ sendPushToUser }))
+
 const WEBHOOK_SECRET = "whsec_integration_test"
 const SUBSCRIPTION = "sub_membership"
 /** The end of the period the latest payment bought, as Stripe reports it. */
@@ -151,6 +165,7 @@ describeIfDb("Stripe webhook", () => {
     redis.clear()
     redis.recover()
     resetStripeStub()
+    sendPushToUser.mockClear()
     process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET
     vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -549,6 +564,51 @@ describeIfDb("Stripe webhook", () => {
     })
 
     /**
+     * Stripe retries a declined renewal several times, each decline is another event, and any
+     * of them can be redelivered. The member is told when the membership goes on hold, once.
+     */
+    it("tells the member once that their renewal was declined", async () => {
+      const user = await makeUser()
+      await makeMembership(user.id, { totalMonths: 3 })
+      stripeApi.subscriptions.retrieve.mockResolvedValue(
+        subscription({ status: "past_due" }),
+      )
+      stripeApi.invoices.retrieve.mockResolvedValue(invoiceNow("open"))
+
+      await deliver(paymentFailed())
+      await deliver(paymentFailed())
+      // Stripe's own retry, declined again.
+      await deliver({ ...paymentFailed(), id: "evt_failed_retry" })
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(1)
+      const [userId, title, body, data] = sendPushToUser.mock.calls[0]
+      expect(userId).toBe(user.id)
+      expect(title).toBe("Your membership payment didn't go through")
+      expect(body).toMatch(/^Your 15% member discount, .+ and your other member benefits are paused\./)
+      expect(body).toMatch(/the discount starts again at 5%\.$/)
+      expect(data).toEqual({ type: "MEMBERSHIP_PAYMENT_FAILED" })
+    })
+
+    /** A paid retry lifts the hold, so a later renewal declined is a new one. */
+    it("tells the member again when a later renewal is declined", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id)
+      stripeApi.subscriptions.retrieve.mockResolvedValue(
+        subscription({ status: "past_due" }),
+      )
+      stripeApi.invoices.retrieve.mockResolvedValue(invoiceNow("open"))
+
+      await deliver(paymentFailed())
+      await db.membership.update({
+        where: { id: membership.id },
+        data: { paymentStatus: "SUCCESS" },
+      })
+      await deliver({ ...paymentFailed(), id: "evt_failed_next_month" })
+
+      expect(sendPushToUser).toHaveBeenCalledTimes(2)
+    })
+
+    /**
      * Stripe retries a declined renewal itself and redelivers events. A decline applied
      * after the payment went through put a paid member on hold, and perks need a SUCCESS
      * payment status, so their discount went with it.
@@ -566,6 +626,7 @@ describeIfDb("Stripe webhook", () => {
         where: { id: membership.id },
       })
       expect(after).toMatchObject({ isActive: true, paymentStatus: "SUCCESS" })
+      expect(sendPushToUser).not.toHaveBeenCalled()
     })
 
     it("records why a first payment was declined", async () => {
@@ -594,6 +655,8 @@ describeIfDb("Stripe webhook", () => {
       expect(stripeApi.invoices.retrieve).toHaveBeenCalledWith("in_renewal", {
         expand: ["payments"],
       })
+      // The app is watching this one happen; there is no membership to warn about losing.
+      expect(sendPushToUser).not.toHaveBeenCalled()
     })
 
     /**

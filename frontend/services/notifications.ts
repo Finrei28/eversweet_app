@@ -190,6 +190,12 @@ export function handleNotification(
       // Where the balance and its expiry date are, and what there is to spend them on.
       onNavigate("/rewards")
       return
+    case "MEMBERSHIP_ENDING":
+    case "MEMBERSHIP_PAYMENT_FAILED":
+      // Where Re-subscribe and Retry payment are. The screen refetches the membership on
+      // mount, so it shows the state the push was about rather than a stale copy.
+      onNavigate("/membership")
+      return
     default:
       return
   }

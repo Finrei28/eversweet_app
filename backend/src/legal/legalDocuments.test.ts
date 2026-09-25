@@ -314,6 +314,12 @@ describe("the claims that were wrong before", () => {
     expect(privacyText).not.toMatch(/do not send marketing notifications/i)
   })
 
+  /** Both membership pushes are about the member's own account, and both have to be listed. */
+  it("discloses the membership notifications", () => {
+    expect(privacyText).toMatch(/three days before a membership you have cancelled ends/i)
+    expect(privacyText).toMatch(/when a membership renewal payment is declined/i)
+  })
+
   /**
    * "Points do not expire" was true until expiry existed, and this case used to require it.
    * Now the terms have to say what actually happens, in each of its parts.

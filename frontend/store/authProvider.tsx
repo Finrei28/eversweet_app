@@ -84,6 +84,13 @@ export type StoreHoursStatus = "loading" | "ready" | "error"
  */
 const BANNER_REFRESH_AFTER_MS = 5 * 60 * 1000
 
+/**
+ * How old the membership may get before returning to the app reloads it. It used to load once
+ * per session, so the warning banner stayed up after Stripe's own retry had paid a renewal on
+ * hold, or after re-subscribing from another device, until the app was restarted.
+ */
+const MEMBERSHIP_REFRESH_AFTER_MS = 5 * 60 * 1000
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -95,6 +102,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     useState<LeaderBoardDetails | null>(null)
   /** When the banner was last loaded, for the foreground refresh. */
   const bannerLoadedAt = useRef(0)
+  /** When the membership was last loaded, for the foreground refresh. */
+  const membershipLoadedAt = useRef(0)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
   const [membershipDetails, setMembershipDetails] =
@@ -208,6 +217,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (membershipResult.status === "fulfilled") {
           setUsersMembership(membershipResult.value)
+          membershipLoadedAt.current = Date.now()
         } else {
           console.error("Failed to fetch membership:", membershipResult.reason)
         }
@@ -251,6 +261,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setDataLoading(true)
       const membership = await getUsersMembership()
       setUsersMembership(membership)
+      membershipLoadedAt.current = Date.now()
     } catch (error) {
       console.error(error)
       Toast.show({
@@ -303,6 +314,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   /**
+   * The membership reloaded without `dataLoading`, for the same reason as the podium banner:
+   * it refreshes something already on screen, so a failure keeps what is there rather than
+   * blanking every screen that watches that flag or raising a toast nobody asked for.
+   *
+   * `isCurrent` is asked once the answer is back: a refresh still in flight when the customer
+   * signs out would otherwise put their membership back, and the next account to sign in on
+   * the phone would be warned about it.
+   */
+  const refreshUsersMembershipQuietly = useCallback(
+    async (isCurrent: () => boolean) => {
+      try {
+        const membership = await getUsersMembership()
+        if (!isCurrent()) return
+        setUsersMembership(membership)
+        membershipLoadedAt.current = Date.now()
+      } catch (error) {
+        console.error("Failed to refresh the membership:", error)
+      }
+    },
+    [],
+  )
+
+  /**
    * Reloads the banner when the app comes back to the foreground with a stale copy.
    *
    * The switcher's own phone reloads at once (the anonymity switches call the refetch). This
@@ -313,16 +347,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!token) return
 
+    let current = true
     const subscription = AppState.addEventListener("change", (state) => {
-      if (
-        state === "active" &&
-        Date.now() - bannerLoadedAt.current > BANNER_REFRESH_AFTER_MS
-      ) {
+      if (state !== "active") return
+      if (Date.now() - bannerLoadedAt.current > BANNER_REFRESH_AFTER_MS) {
         void refetchLeaderboardDetails()
       }
+      // The membership warning banner reads this, and a hold paid by Stripe's own retry
+      // reaches nothing in the app otherwise.
+      if (Date.now() - membershipLoadedAt.current > MEMBERSHIP_REFRESH_AFTER_MS) {
+        void refreshUsersMembershipQuietly(() => current)
+      }
     })
-    return () => subscription.remove()
-  }, [token, refetchLeaderboardDetails])
+    return () => {
+      current = false
+      subscription.remove()
+    }
+  }, [token, refetchLeaderboardDetails, refreshUsersMembershipQuietly])
 
   const signInProvider = useCallback(async (newToken: string) => {
     try {

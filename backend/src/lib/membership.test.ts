@@ -1,12 +1,23 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   DEFAULT_MEMBERSHIP_BENEFITS,
   MEMBER_RATE_TOKEN,
   POINTS_NEVER_EXPIRE_BENEFIT,
   WHILE_POINTS_EXPIRE_TOKEN,
+  headlinePerk,
+  loadMembershipBenefits,
   resolveMembershipBenefits,
 } from "./membership"
+
+const settings = vi.hoisted(() => ({
+  rates: { rate: 6, memberRate: 1.5, modifier: 1 },
+  pointsExpireFrom: null as Date | null,
+}))
+vi.mock("./loyaltyRates", () => ({
+  getLoyaltyRates: async () => settings.rates,
+  getPointsExpireFrom: async () => settings.pointsExpireFrom,
+}))
 
 const rates = (memberRate: number) => ({ rate: 6, memberRate, modifier: 1 })
 
@@ -127,5 +138,68 @@ describe("the benefit that depends on points expiry", () => {
 
   it("is in the fallback list, so an unseeded plan follows the switch too", () => {
     expect(DEFAULT_MEMBERSHIP_BENEFITS).toContain(POINTS_NEVER_EXPIRE_BENEFIT)
+  })
+})
+
+describe("loadMembershipBenefits", () => {
+  beforeEach(() => {
+    settings.rates = { rate: 6, memberRate: 1.5, modifier: 1 }
+    settings.pointsExpireFrom = null
+  })
+
+  it("serves the plan's own list, resolved", async () => {
+    expect(
+      await loadMembershipBenefits([`Earn ${MEMBER_RATE_TOKEN}x points`, "Cancel anytime"]),
+    ).toEqual(["Earn 1.5x points", "Cancel anytime"])
+  })
+
+  it("falls back for a plan with no list of its own", async () => {
+    expect(await loadMembershipBenefits([])).toContain(
+      "Free weekly Mochi Series Bowl ($9.99)",
+    )
+  })
+
+  it("follows the expiry switch", async () => {
+    const line = "Your Sweet Points never expire while you're a member"
+    expect(await loadMembershipBenefits([])).not.toContain(line)
+    settings.pointsExpireFrom = new Date("2026-09-01T00:00:00Z")
+    expect(await loadMembershipBenefits([])).toContain(line)
+  })
+})
+
+/**
+ * The perk a warning names beside the discount. It comes from the list the shop edits, so the
+ * push can never advertise a perk that has been dropped.
+ */
+describe("headlinePerk", () => {
+  it("names the free bowl from the default list, ready to sit mid-sentence", () => {
+    expect(
+      headlinePerk(
+        resolveMembershipBenefits(DEFAULT_MEMBERSHIP_BENEFITS, rates(1.5)),
+      ),
+    ).toBe("free weekly Mochi Series Bowl ($9.99)")
+  })
+
+  it("keeps the shop's order", () => {
+    expect(
+      headlinePerk(["Exclusive membership offers", "Free weekly Mochi Series Bowl"]),
+    ).toBe("exclusive membership offers")
+  })
+
+  /** The warning names the discount already, with the member's own figure. */
+  it("skips the discount line and cancelling", () => {
+    expect(
+      headlinePerk([
+        "Stackable membership discount from 5% to 25%",
+        "Cancel anytime",
+        "Free birthday dessert",
+      ]),
+    ).toBe("free birthday dessert")
+  })
+
+  it("is null when nothing else is left to name", () => {
+    expect(headlinePerk(["Stackable membership discount", "Cancel anytime"])).toBeNull()
+    expect(headlinePerk([])).toBeNull()
+    expect(headlinePerk(["   "])).toBeNull()
   })
 })

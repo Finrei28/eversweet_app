@@ -54,24 +54,38 @@ describes the installed binary rather than whatever JS bundle is running on top 
 
 ## 3. Warn members before they lose their discount
 
-**Where it stands**
+**Built** on 2026-09-25. See **Members are warned before they lose the run** in CLAUDE.md.
 
-- The member discount is a streak: `min(plan.maxDiscount, totalMonths × plan.membershipDiscount)` (5% a month, up to 25%). Any ended subscription restarts at 5%; a renewal paid late during Stripe's retries keeps the streak.
-- The cancel modal already says the discount resets if the membership expires.
-- After cancelling, `ManageMembershipCard` shows "Expires on" and a Re-subscribe button, but nothing reminds the member later.
-- A declined renewal (`paymentStatus: PENDING`) only shows "On Hold" / "Payment Failed" on the membership screen.
+- **A push 3 days before a cancelled membership ends** (`MEMBERSHIP_ENDING`, daily at 10:00),
+  sent once per end date and claimed on the new `Membership.endWarnedFor`.
+- **A push when a renewal is declined** (`MEMBERSHIP_PAYMENT_FAILED`), sent once per hold.
+- **Both name more than the discount.** They give the member's built-up %, one perk taken
+  from the plan's own benefit list (today the free weekly Mochi Series Bowl) and "your other
+  member benefits".
+- **In the app:**
+  - A banner on the home tab and in the cart while a renewal is on hold, or in a cancelled
+    membership's last week.
+  - The discount card shows paused, ending, or the next step ("Goes up to 25% when you renew
+    on …").
+  - The manage card and the cancel popup name the member's own figure.
+  - The membership is reloaded on returning to the foreground, so the banner clears once
+    Stripe's own retry has paid.
+- **The privacy policy lists both notifications.**
 
-**Ideas**
+**Rollout, in order:**
+1. Apply `20260927000000_membership_end_warning` from the website repo.
+2. Deploy the order server. Its Prisma client reads `endWarnedFor`, so the column has to
+   exist first.
+3. Deploy the website with the legal copy. Bumping `LEGAL_LAST_UPDATED` refuses sign-ups
+   still on the old text once.
 
-- **Reminder before `endDate`:** a push N days before a membership with `cancel: true` ends, e.g. "Your 20% member discount ends on 14 Oct. Re-subscribe to keep it". A daily cron. Avoiding repeats needs either a sent-marker (a schema change, via the website repo) or a one-day `endDate` window per run.
-- **Push when a renewal is declined** (the renewal branch of `invoice.payment_failed`), naming the discount at stake and linking to Retry payment.
-- **In-app banner** on home or cart while `cancel` is true or the payment is pending.
-- **Show the current discount** and the next step on the manage card, so the member sees what they'd lose.
+The app build can ship at any point. Older builds ignore the two new push types, so a tap
+just opens the app.
 
-**Decide:**
-
-- How many days' notice, and whether to send one reminder or several.
-- Push notifications, in-app only, or both.
+**Also fixed:** `frontend/lib/priceHelper.ts` used to work out the discount inline, three
+times, as `(totalMonths ?? 1) × step`. That priced a member with a count of 0 at full price
+while the server gave the first step. Every price helper now goes through
+`memberDiscountPercent` in `lib/membership.ts`, which mirrors the server's.
 
 ---
 
