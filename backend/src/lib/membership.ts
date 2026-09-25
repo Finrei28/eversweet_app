@@ -1,4 +1,8 @@
-import { type LoyaltyRates } from "./loyaltyRates"
+import {
+  getLoyaltyRates,
+  getPointsExpireFrom,
+  type LoyaltyRates,
+} from "./loyaltyRates"
 
 /**
  * The token a benefit uses instead of writing the member multiplier out.
@@ -76,4 +80,51 @@ export const resolveMembershipBenefits = (
         .join(memberRate)
         .trim(),
     )
+}
+
+/**
+ * The benefits as customers are shown them: the plan's own list, or the fallback for a plan
+ * that has none, resolved against the live rates and the expiry switch.
+ *
+ * The join screen, the welcome email and the membership warnings all list or quote these, and
+ * the first two used to resolve them inline - the same three lines twice, which is how a
+ * third caller would have been the one to forget `pointsExpire`.
+ */
+export const loadMembershipBenefits = async (
+  planBenefits: readonly string[],
+): Promise<string[]> => {
+  const [rates, pointsExpireFrom] = await Promise.all([
+    getLoyaltyRates(),
+    getPointsExpireFrom(),
+  ])
+  return resolveMembershipBenefits(
+    planBenefits.length ? planBenefits : DEFAULT_MEMBERSHIP_BENEFITS,
+    rates,
+    { pointsExpire: pointsExpireFrom !== null },
+  )
+}
+
+/**
+ * The one benefit a warning names beside the discount, so a member about to lose their
+ * membership hears what else goes with it - "your 20% member discount, free weekly Mochi
+ * Series Bowl ($9.99) and your other member benefits".
+ *
+ * Taken from the resolved list, in the order the shop has put it in, rather than written into
+ * the push: the list is edited from the website's admin, and a warning must not name a perk
+ * the shop has dropped. The discount is skipped because the warning names it already, with the
+ * member's own figure; "Cancel anytime" because it is not something anyone loses. Lower-cased
+ * at the front so it reads mid-sentence. Null when nothing is left, and the warning names the
+ * discount alone.
+ *
+ * The customer app's `lib/membership.ts` has a deliberate copy, run over the same served list,
+ * so the banner names the same perk the push did.
+ */
+export const headlinePerk = (benefits: readonly string[]): string | null => {
+  const perk = benefits.find(
+    (benefit) =>
+      benefit.trim() !== "" && !/discount/i.test(benefit) && !/cancel/i.test(benefit),
+  )
+  if (!perk) return null
+  const trimmed = perk.trim()
+  return trimmed.charAt(0).toLowerCase() + trimmed.slice(1)
 }

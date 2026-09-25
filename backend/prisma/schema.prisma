@@ -95,6 +95,12 @@ model Membership {
   paymentFailureCode    String?
   paymentFailureMessage String?
   totalMonths           Int               @default(0)
+  /// The end date a "your membership ends soon" reminder has already been claimed for. Cron
+  /// runs in every order server instance, so the push needs a claim; keyed on the date rather
+  /// than a flag, so resuming and cancelling again in a later period makes the next reminder
+  /// due with nothing to reset, while cancel-resume-cancel within one period keeps the same
+  /// end date and is not reminded twice.
+  endWarnedFor          DateTime?
   plan                  MembershipPlan    @relation(fields: [planId], references: [id])
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -1,11 +1,7 @@
 import { db } from "./db"
 import EmailSender from "./emailSender"
 import MembershipWelcome from "../email/membershipWelcome"
-import { getLoyaltyRates, getPointsExpireFrom } from "./loyaltyRates"
-import {
-  DEFAULT_MEMBERSHIP_BENEFITS,
-  resolveMembershipBenefits,
-} from "./membership"
+import { loadMembershipBenefits } from "./membership"
 import { memberDiscountPercent } from "./memberPricing"
 import { getErrorMessage } from "../utils/getError"
 
@@ -28,8 +24,7 @@ export const sendMembershipWelcome = async ({
   cartRepriced: boolean
 }): Promise<boolean> => {
   try {
-    const [membership, rates, pointsExpireFrom] = await Promise.all([
-      db.membership.findUnique({
+    const membership = await db.membership.findUnique({
         where: { stripeSubscriptionId },
         select: {
           isActive: true,
@@ -45,10 +40,7 @@ export const sendMembershipWelcome = async ({
           },
           user: { select: { email: true, firstName: true } },
         },
-      }),
-      getLoyaltyRates(),
-      getPointsExpireFrom(),
-    ])
+      })
 
     if (!membership) {
       console.error(
@@ -68,13 +60,7 @@ export const sendMembershipWelcome = async ({
         stepPercent: membership.plan.membershipDiscount,
         maxDiscountPercent: membership.plan.maxDiscount,
         // The same list, resolved the same way, as the join screen shows.
-        benefits: resolveMembershipBenefits(
-          membership.plan.benefits.length
-            ? membership.plan.benefits
-            : DEFAULT_MEMBERSHIP_BENEFITS,
-          rates,
-          { pointsExpire: pointsExpireFrom !== null },
-        ),
+        benefits: await loadMembershipBenefits(membership.plan.benefits),
         cartRepriced,
       }),
     )

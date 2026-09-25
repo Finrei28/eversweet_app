@@ -3,11 +3,8 @@ import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
-import {
-  DEFAULT_MEMBERSHIP_BENEFITS,
-  resolveMembershipBenefits,
-} from "../lib/membership"
-import { getLoyaltyRates, getPointsExpireFrom } from "../lib/loyaltyRates"
+import { loadMembershipBenefits } from "../lib/membership"
+import { warnRenewalDeclined } from "../lib/membershipReminders"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -794,28 +791,21 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
       // tried to answer a second time.
       return
     }
-    const [price, rates, pointsExpireFrom] = await Promise.all([
+    const [price, membershipBenefits] = await Promise.all([
       stripe.prices.retrieve(membershipPlan.stripePriceId),
-      getLoyaltyRates(),
-      getPointsExpireFrom(),
+      // Resolved against the live rates, so a benefit saying "{{memberRate}}x loyalty
+      // points" cannot advertise a multiplier orders no longer earn. An unseeded plan falls
+      // back rather than showing the join screen an empty tick-list that reads as a
+      // membership offering nothing - and the fallback goes through the same resolution,
+      // because it used to bake the rate in at module load and drifted the same way. The
+      // no-expiry benefit is only served while expiry is on - see lib/membership.
+      loadMembershipBenefits(membershipPlan.benefits),
     ])
     const membershipDetails = {
       id: membershipPlan.id,
       price: price.unit_amount,
       stripePriceId: membershipPlan.stripePriceId,
-      // Resolved against the live rates, so a benefit saying "{{memberRate}}x loyalty
-      // points" cannot advertise a multiplier orders no longer earn. An unseeded plan falls
-      // back rather than showing the join screen an empty tick-list that reads as a
-      // membership offering nothing - and the fallback goes through the same resolution,
-      // because it used to bake the rate in at module load and drifted the same way.
-      membershipBenefits: resolveMembershipBenefits(
-        membershipPlan.benefits.length
-          ? membershipPlan.benefits
-          : DEFAULT_MEMBERSHIP_BENEFITS,
-        rates,
-        // The no-expiry benefit is only true while expiry is on - see lib/membership.
-        { pointsExpire: pointsExpireFrom !== null },
-      ),
+      membershipBenefits,
     }
     res.status(200).json(membershipDetails)
     return
@@ -1605,12 +1595,31 @@ async function recordMembershipPaymentFailure(
     return
   }
 
-  await updateSubscriptionMembership(subscription, "renewal failure", {
-    paymentStatus: "PENDING",
+  // Going on hold is claimed, so the member is told once. Only a paid-up row matches: Stripe
+  // retries a declined renewal several times over the following weeks, each decline is another
+  // event, and any of them can be redelivered - all of those find the row already on hold and
+  // fall through to the ordinary write below, which changes nothing a second time. A paid retry
+  // puts the row back to SUCCESS, so a later renewal declined is a new hold and a new push.
+  const putOnHold = await db.membership.updateMany({
+    where: {
+      stripeSubscriptionId: subscription.id,
+      isActive: true,
+      paymentStatus: "SUCCESS",
+    },
+    data: { paymentStatus: "PENDING" },
   })
+  if (putOnHold.count === 0) {
+    await updateSubscriptionMembership(subscription, "renewal failure", {
+      paymentStatus: "PENDING",
+    })
+  }
   // On hold pauses every member benefit until the payment goes through: member prices come
   // off the cart and member-only items leave it now, not whenever the app next loads it.
   await syncCartAfterMembershipChange(subscription.id)
+
+  // Before this the only sign was the membership screen turning red, on a screen a member has
+  // no reason to open - and a hold left unpaid ends the subscription and the discount's run.
+  if (putOnHold.count > 0) await warnRenewalDeclined(subscription.id)
 }
 
 /**

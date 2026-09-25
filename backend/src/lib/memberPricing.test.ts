@@ -6,6 +6,7 @@ import {
   isPromoLive,
   lineDiscountInCents,
   type LineForRepricing,
+  builtUpDiscountPercent,
   memberDiscountPercent,
   staleDiscounts,
 } from "./memberPricing"
@@ -66,6 +67,24 @@ describe("memberDiscountPercent", () => {
 
   it("gives a paid-up member at least the first step", () => {
     expect(memberDiscountPercent(member({ totalMonths: 0 }))).toBe(5)
+  })
+})
+
+/**
+ * What a member stands to lose, which the warnings quote. Unlike the discount given, it does
+ * not drop to nothing on hold: that is exactly when the member needs to hear the number.
+ */
+describe("builtUpDiscountPercent", () => {
+  it("is the run's discount whether or not it is being given", () => {
+    expect(builtUpDiscountPercent(member({ totalMonths: 4 }))).toBe(20)
+    expect(
+      builtUpDiscountPercent(member({ paymentStatus: "PENDING", totalMonths: 4 })),
+    ).toBe(20)
+  })
+
+  it("stops at the cap and starts at the first step", () => {
+    expect(builtUpDiscountPercent(member({ totalMonths: 9 }))).toBe(25)
+    expect(builtUpDiscountPercent(member({ totalMonths: 0 }))).toBe(5)
   })
 })
 
