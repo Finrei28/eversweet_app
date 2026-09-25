@@ -668,6 +668,40 @@ handlers:
   has attempted the first invoice, so either outcome can arrive first. Those events claim
   the row by `subscription.metadata.userId` while it is `isActive: false, PENDING`.
 
+**A member is `isActive` *and* paid up** — `isPaidUpMember` in `lib/memberPricing`, mirrored
+by the app's `lib/membership.ts`. A renewal declined and being retried leaves the row
+`isActive` with a PENDING payment ("on hold" in the Terms), and **every** benefit pauses until
+it is paid: member prices, member-only offers (including any already in the cart), the member
+points rate and protection from points expiry. The cart, the points rate and the cart's
+member-only sweep used to ask `isActive` alone, so a member whose card had stopped paying kept
+all three. `isActive` alone still means "has a subscription running": `createMembership`
+refuses a second join on it (the way out of a hold is a retry), and the app's join popup
+reads it. Never write a new benefit check against `isActive`.
+
+**The cart follows the membership.** Member and promo discounts are stored on the cart rows
+when a line is added (`calculateCartPrice` charges what is stored), so they are brought back
+into line in two places, both through `lib/memberPricing` — the one definition that add and
+edit also price with:
+- **The webhook** calls `syncCartWithMembership` (`lib/cartRepricing`) after every membership
+  write: joining, each renewal (the discount steps up), a decline (on hold), a paid retry and
+  the end. It reprices the lines and, while the customer is not paid up, takes member-only
+  offer lines out through `removeCartLines` (`lib/cartWrites`, shared with the cart load).
+  Tapping Cancel changes nothing — benefits run to the end of the paid period.
+- **`getCartItems`** checks the discounts on the rows it already loaded and corrects stale
+  ones, answering with a `warning`. That is the backstop for a webhook that failed or raced
+  an edit, and the only thing that notices a promotion ending.
+- **Checkout** refuses a member-only line held without a paid-up membership: 409 from
+  `createPaymentIntent` before the card is touched, and from `createOrder` — the only gate for
+  a free one, since a points-only order never reaches `createPaymentIntent`. With a hold,
+  `settleOrderPayment`'s `refusedBecause` lets it go.
+
+**The welcome email goes once per switch-on.** `recordMembershipPayment` claims the switch-on
+with `updateMany where { stripeSubscriptionId, isActive: false }` (or the userId claim for a
+payment that beat its subscription id); only the delivery that flipped the row sends
+`sendMembershipWelcome`. A redelivery, a renewal and a paid retry all find the row already on.
+The send never throws — the membership is written by then, and a failed webhook would be
+redelivered to no effect.
+
 `createMembership` claims the join atomically before touching Stripe: an inactive row that
 is not already PENDING (or PENDING for over 2 minutes), or a fresh create (P2002 means
 someone beat you). A second concurrent join gets 409. Without that, a double tap created
