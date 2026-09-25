@@ -14,6 +14,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 )
 
 import {
+  ApiError,
   apiFetch,
   apiRequest,
   AppUpdateRequiredError,
@@ -161,5 +162,25 @@ describe("apiRequest", () => {
 
     expect(errors).not.toHaveBeenCalled()
     errors.mockRestore()
+  })
+})
+
+describe("a failed request", () => {
+  /**
+   * Every failure was a plain Error, so a 404 for a cart line the server had already
+   * removed could not be told from a real failure, and the app put the line back.
+   */
+  it("carries its status, and is still an Error", async () => {
+    fetchMock.mockResolvedValueOnce(respond(404, { message: "cart item not found" }))
+
+    const failure = await apiRequest("/api/cart/removeItemFromCart/x", {
+      method: "DELETE",
+      statusMessages: { 404: "Not found" },
+    }).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as ApiError).status).toBe(404)
+    expect((failure as ApiError).message).toBe("Not found")
   })
 })

@@ -47,24 +47,11 @@ type LineSpec = {
   discountedAmountInCents?: number
 }
 
-/**
- * A cart with the lines given. `totalPriceInCents` is set from the lines so
- * the `cart.totalPriceInCents > 0` branch in createOrder behaves as it does in
- * production — the order's own totals are recomputed from the rows regardless.
- */
-export const makeCart = async (userId: string, lines: LineSpec[]) => {
-  const total = lines.reduce(
-    (sum, line) =>
-      sum +
-      (line.itemPriceInCents - (line.discountedAmountInCents ?? 0)) *
-        (line.quantity ?? 1),
-    0,
-  )
-
-  return db.cart.create({
+/** A cart with the lines given. What it costs is worked out from the lines. */
+export const makeCart = async (userId: string, lines: LineSpec[]) =>
+  db.cart.create({
     data: {
       userId,
-      totalPriceInCents: total,
       cartItems: {
         create: lines.map((line) => ({
           dessertId: line.dessertId,
@@ -76,7 +63,6 @@ export const makeCart = async (userId: string, lines: LineSpec[]) => {
     },
     include: { cartItems: true },
   })
-}
 
 /** A user with a single-line cart, which is what most order tests need. */
 export const makeCustomerWithCart = async ({

@@ -20,6 +20,18 @@ const SET_QUANTITY = "/api/cart/updateCartItemQuantity"
 const REMOVE_ITEM = "/api/cart/removeItemFromCart"
 const GET_CART = "/api/cart/getCartItems"
 
+/**
+ * What the customer's cart costs, worked out from its rows as checkout does. These tests
+ * used to read `Cart.totalPriceInCents`, a running total that drifted and is being dropped.
+ */
+const payableOf = async (userId: string) =>
+  calculateCartPrice(
+    await db.cartItem.findMany({
+      where: { cart: { userId } },
+      include: cartPricingInclude,
+    }),
+  ).payableInCents
+
 const loadCart = (userId: string) =>
   request(app).get(GET_CART).set("Authorization", `Bearer ${tokenFor(userId)}`)
 
@@ -65,8 +77,7 @@ describeIfDb("cart write paths", () => {
     })
 
     expect(cart?.cartItems).toHaveLength(1)
-    expect(cart?.totalPriceInCents).toBe(1200)
-    expect(cart?.totalLoyaltyPointsUsed).toBe(0)
+    expect(await payableOf(user.id)).toBe(1200)
     expect(cart?.expiresAt).toBeTruthy()
   })
 
@@ -90,7 +101,7 @@ describeIfDb("cart write paths", () => {
 
     // Two separate lines, and the total is the sum rather than the last write.
     expect(cart?.cartItems).toHaveLength(2)
-    expect(cart?.totalPriceInCents).toBe(2000)
+    expect(await payableOf(user.id)).toBe(2000)
   })
 
   it("returns the item it just created, not another line in the cart", async () => {
@@ -168,7 +179,7 @@ describeIfDb("cart write paths", () => {
 
     const cart = await db.cart.findUnique({ where: { userId: user.id } })
 
-    expect(cart?.totalPriceInCents).toBe(960)
+    expect(await payableOf(user.id)).toBe(960)
   })
 
   /**
@@ -640,7 +651,7 @@ describeIfDb("cart write paths", () => {
     })
 
     expect(cart?.cartItems[0].quantity).toBe(3)
-    expect(cart?.totalPriceInCents).toBe(3600)
+    expect(await payableOf(user.id)).toBe(3600)
   })
 
   it("survives two adds racing to create the first cart", async () => {
@@ -666,7 +677,7 @@ describeIfDb("cart write paths", () => {
     })
 
     expect(cart?.cartItems).toHaveLength(2)
-    expect(cart?.totalPriceInCents).toBe(2000)
+    expect(await payableOf(user.id)).toBe(2000)
   })
 
   it("keeps the total right when several adds land together", async () => {
@@ -686,10 +697,10 @@ describeIfDb("cart write paths", () => {
       include: { cartItems: true },
     })
 
-    // Each add is its own row and the totals move by increment, so the result
-    // is the sum rather than whichever write finished last.
+    // Each add is its own row, so the cart holds all four rather than whichever
+    // write finished last.
     expect(cart?.cartItems).toHaveLength(4)
-    expect(cart?.totalPriceInCents).toBe(2000)
+    expect(await payableOf(user.id)).toBe(2000)
   })
 
   // What a line costs, and what it costs in points, are the database's answer
@@ -709,7 +720,7 @@ describeIfDb("cart write paths", () => {
 
     const cart = await db.cart.findUnique({ where: { userId: user.id } })
 
-    expect(cart?.totalPriceInCents).toBe(1200)
+    expect(await payableOf(user.id)).toBe(1200)
   })
 
   it("refuses a reward claimed at the wrong number of points", async () => {
@@ -1134,4 +1145,86 @@ describeIfDb("cart write paths", () => {
     expect(cart?.cartItems).toHaveLength(1)
   })
 
+  describe("two removals racing", () => {
+    /** A customer with 1000 points who has put a 300-point reward in their cart. */
+    const cartHoldingReward = async () => {
+      const user = await makeUser()
+      await db.loyalty.create({ data: { userId: user.id, points: 1000 } })
+      const dessert = await db.dessert.update({
+        where: { id: (await makeDessert(900)).id },
+        data: { priceInLoyaltyPoints: 300 },
+      })
+      const added = await addItem(user.id, {
+        dessertId: dessert.id,
+        itemPriceInCents: 900,
+        loyaltyPointsUsed: 300,
+      })
+      expect(added.status).toBe(201)
+      return { user, lineId: added.body.cartItem.id as string }
+    }
+
+    const pointsOf = async (userId: string) =>
+      (await db.loyalty.findUniqueOrThrow({ where: { userId } })).points
+
+    const refunds = () => db.loyaltyRecord.count({ where: { reason: "REFUND" } })
+
+    /**
+     * Both read the cart, and the one that found it gone at the delete answered 500 - a
+     * server fault for a cart that had simply been cleared already, and the app put the
+     * items back on screen. The delete is the claim now, and the loser answers as though
+     * there were no cart, which there is not.
+     */
+    it("refunds a cleared cart once and answers neither with an error", async () => {
+      const { user } = await cartHoldingReward()
+
+      const clear = () =>
+        request(app)
+          .delete("/api/cart/clearCart")
+          .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+      const [a, b] = await Promise.all([clear(), clear()])
+
+      expect([a.status, b.status].sort()).toEqual([200, 404])
+      expect(await pointsOf(user.id)).toBe(1000)
+      expect(await refunds()).toBe(1)
+      expect(await db.cart.count({ where: { userId: user.id } })).toBe(0)
+    })
+
+    it("refunds a removed line once and answers neither with an error", async () => {
+      const { user, lineId } = await cartHoldingReward()
+
+      const remove = () =>
+        request(app)
+          .delete(`${REMOVE_ITEM}/${lineId}`)
+          .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+      const [a, b] = await Promise.all([remove(), remove()])
+
+      expect([a.status, b.status].sort()).toEqual([200, 404])
+      expect(await pointsOf(user.id)).toBe(1000)
+      expect(await refunds()).toBe(1)
+    })
+
+    it("keeps the cart when the line removed was not its last", async () => {
+      const { user, lineId } = await cartHoldingReward()
+      const other = await makeDessert(800)
+      await addItem(user.id, { dessertId: other.id, itemPriceInCents: 800 })
+
+      const res = await request(app)
+        .delete(`${REMOVE_ITEM}/${lineId}`)
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+
+      expect(res.status).toBe(200)
+      expect(await payableOf(user.id)).toBe(800)
+      expect(await db.cart.count({ where: { userId: user.id } })).toBe(1)
+    })
+
+    it("deletes the cart with its last line", async () => {
+      const { user, lineId } = await cartHoldingReward()
+
+      await request(app)
+        .delete(`${REMOVE_ITEM}/${lineId}`)
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+
+      expect(await db.cart.count({ where: { userId: user.id } })).toBe(0)
+    })
+  })
 })
