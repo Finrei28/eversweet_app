@@ -51,6 +51,15 @@ export const MEMBER_ONLY_ITEM_MESSAGE =
   "An item in your cart is only for members with an active, paid-up membership."
 
 /**
+ * What checkout says when a stored discount is no longer the right one - a membership that
+ * went on hold or ended, a renewal that stepped the discount up, or a promotion that finished
+ * - between the cart being loaded and the payment. Answered instead of charging the old
+ * price; a hold is released with it.
+ */
+export const CART_PRICES_CHANGED_MESSAGE =
+  "Prices in your cart have changed. Please review your cart and try again."
+
+/**
  * The member discount, in whole percent. It grows a step for each month paid in a row, up to
  * the plan's cap, and is nothing for anyone not paid up.
  *

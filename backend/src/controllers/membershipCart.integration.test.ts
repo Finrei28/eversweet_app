@@ -735,6 +735,118 @@ describeIfDb("membership and the cart", () => {
       expect(await db.order.count()).toBe(0)
     })
 
+    /**
+     * The membership was read before the order's transaction, so a renewal declined while
+     * the order was being placed went unseen: the member-only item was bought by someone
+     * no longer paid up. It is read under a lock inside the transaction now, so a decline
+     * already being written is waited for and then seen.
+     */
+    it("sees a renewal declined while the order is being placed", async () => {
+      const user = await makeUser()
+      await makeMembership(user.id)
+      await memberOnlyLine(user.id)
+
+      let commitDecline!: () => void
+      const declineHeld = new Promise<void>((resolve) => (commitDecline = resolve))
+      let declineWritten!: () => void
+      const declineStarted = new Promise<void>((resolve) => (declineWritten = resolve))
+
+      // The webhook's write, made and held uncommitted.
+      const decline = db.$transaction(
+        async (tx) => {
+          await tx.membership.update({
+            where: { userId: user.id },
+            data: { paymentStatus: "PENDING" },
+          })
+          declineWritten()
+          await declineHeld
+        },
+        { timeout: 20_000, maxWait: 10_000 },
+      )
+      await declineStarted
+
+      // `.then` sends it now: supertest sends nothing until it is awaited, which would have
+      // placed the order after the decline had already committed.
+      const order = placeOrder(user.id).then((res) => res)
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      commitDecline()
+      await decline
+
+      const res = await order
+      expect(res.status).toBe(409)
+      expect(res.body.message).toMatch(/only for members/)
+      expect(await db.order.count()).toBe(0)
+    })
+
+    it("refuses to hold a card for a member price the membership no longer gives", async () => {
+      const user = await makeUser()
+      await makeMembership(user.id)
+      await cartWithToppedDessert(user.id)
+      // On hold with no webhook reprice: the one that should have run failed.
+      await db.membership.update({
+        where: { userId: user.id },
+        data: { paymentStatus: "PENDING" },
+      })
+
+      const res = await request(app)
+        .post("/api/stripe/createPaymentIntent")
+        .set("Authorization", `Bearer ${tokenFor(user.id)}`)
+        .send({
+          // The stale total the app was showing: $12 + $1.50, less 60c and 8c.
+          amount: 1282,
+          authoriseOnly: true,
+          pickUpTime: nextOpenPickUpTime().toISOString(),
+          eatIn: false,
+        })
+
+      expect(res.status).toBe(409)
+      expect(res.body.message).toMatch(/Prices in your cart have changed/)
+      expect(stripeApi.paymentIntents.create).not.toHaveBeenCalled()
+      // Corrected, so the reload the app does next shows the right total.
+      const [line] = await linesOf(user.id)
+      expect(line.discountedAmountInCents).toBe(0)
+      expect(line.customisations[0].discountedAmountInCents).toBe(0)
+    })
+
+    it("lets a hold go when a promotion ended after the card was held", async () => {
+      const user = await makeUser()
+      await db.user.update({
+        where: { id: user.id },
+        data: { stripeCustomerId: `cus_${user.id}` },
+      })
+      const dessert = await makeDessert(1000)
+      const { promoId } = await db.dessert.update({
+        where: { id: dessert.id },
+        data: { promo: { create: { name: "Daily special", type: "PERCENTAGE", value: 20 } } },
+        select: { promoId: true },
+      })
+      await addItem(user.id, { dessertId: dessert.id, itemPriceInCents: 1000 })
+      const intent: Record<string, unknown> = {
+        id: "pi_promo",
+        status: "requires_capture",
+        amount_capturable: 800,
+        amount_received: 0,
+        currency: "nzd",
+        customer: `cus_${user.id}`,
+        metadata: { purpose: "app_order", userId: user.id },
+        latest_charge: { id: "ch_promo", amount_refunded: 0 },
+      }
+      stripeApi.paymentIntents.retrieve.mockResolvedValue(intent)
+      stripeApi.paymentIntents.cancel.mockResolvedValue({ ...intent, status: "canceled" })
+      await db.promo.update({
+        where: { id: promoId! },
+        data: { endsAt: new Date(Date.now() - HOUR) },
+      })
+
+      const res = await placeOrder(user.id, "pi_promo")
+
+      expect(res.status).toBe(400)
+      expect(res.body).toMatchObject({ released: true })
+      expect(res.body.message).toMatch(/Prices in your cart have changed/)
+      expect(stripeApi.paymentIntents.capture).not.toHaveBeenCalled()
+      expect(await db.order.count()).toBe(0)
+    })
+
     it("earns the ordinary points rate, not the member rate", async () => {
       const user = await makeUser()
       await db.loyalty.create({ data: { userId: user.id, points: 0 } })

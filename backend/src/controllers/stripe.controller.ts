@@ -20,10 +20,17 @@ import {
 } from "../lib/tradingHours"
 import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
 import {
+  CART_PRICES_CHANGED_MESSAGE,
+  hasCorrections,
   isPaidUpMember,
   MEMBER_ONLY_ITEM_MESSAGE,
+  staleDiscounts,
 } from "../lib/memberPricing"
-import { type CartSync, syncCartWithMembership } from "../lib/cartRepricing"
+import {
+  applyDiscountCorrections,
+  type CartSync,
+  syncCartWithMembership,
+} from "../lib/cartRepricing"
 import { sendMembershipWelcome } from "../lib/membershipEmails"
 import { getErrorMessage } from "../utils/getError"
 import { isOfferLive } from "../lib/offerAvailability"
@@ -529,6 +536,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
           cartItems: {
             include: {
               ...cartPricingInclude,
+              dessert: { select: { promo: true } },
               offer: {
                 select: {
                   audience: true,
@@ -544,7 +552,12 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       }),
       db.membership.findUnique({
         where: { userId },
-        select: { isActive: true, paymentStatus: true },
+        select: {
+          isActive: true,
+          paymentStatus: true,
+          totalMonths: true,
+          plan: { select: { maxDiscount: true, membershipDiscount: true } },
+        },
       }),
     ])
 
@@ -584,6 +597,19 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       res.status(409).json({
         message: `${MEMBER_ONLY_ITEM_MESSAGE} Please review your cart and try again.`,
       })
+      return
+    }
+
+    // The discounts stored on the lines, checked against the membership and promotions as
+    // they stand. They are what this charges, and a membership that lapsed or a promotion
+    // that ended since the cart was loaded - or a webhook that failed to reprice it - would
+    // otherwise be held at the old price. Corrected here, so the reload the app does on this
+    // answer shows the right total, and refused rather than charged differently from the
+    // total on the customer's screen.
+    const corrections = staleDiscounts(cart.cartItems, membership)
+    if (hasCorrections(corrections)) {
+      await applyDiscountCorrections(corrections)
+      res.status(409).json({ message: CART_PRICES_CHANGED_MESSAGE })
       return
     }
 

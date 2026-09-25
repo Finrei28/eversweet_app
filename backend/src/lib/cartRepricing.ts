@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client"
-import { db } from "./db"
+import { db, type DbTransactionClient } from "./db"
 import { removeCartLines } from "./cartWrites"
 import {
   type DiscountCorrections,
   hasCorrections,
   isPaidUpMember,
+  type MemberForPricing,
   staleDiscounts,
 } from "./memberPricing"
 
@@ -89,6 +90,49 @@ export const applyDiscountCorrections = async (
   ])
 
   return results.reduce((sum, result) => sum + result.count, 0)
+}
+
+/**
+ * The customer's membership as pricing needs it, read under a lock that lasts until `tx` ends.
+ *
+ * For `createOrder`, which must decide the points rate, whether a member-only item may be
+ * bought and whether the stored discounts still stand from the membership as it is when the
+ * order commits - not as it was a moment before. Read ahead of the transaction, a renewal
+ * declined in between went unseen: the hold was captured, and the member-only line bought,
+ * by someone who was no longer paid up. `FOR SHARE` makes a membership write already in flight
+ * finish first, and then be seen; one arriving later waits until the order has committed, when
+ * the customer was still a member.
+ *
+ * No deadlock: every Membership write is a statement of its own, and nothing that takes the
+ * cart's rows waits on Membership while holding them. The points-expiry writers take the same
+ * shared lock, which does not conflict with this one.
+ */
+export const readMembershipForPricingLocked = async (
+  tx: DbTransactionClient,
+  userId: string,
+): Promise<MemberForPricing> => {
+  const [row] = await tx.$queryRaw<
+    {
+      isActive: boolean
+      paymentStatus: string
+      totalMonths: number
+      maxDiscount: number
+      membershipDiscount: number
+    }[]
+  >`SELECT m."isActive", m."paymentStatus", m."totalMonths", p."maxDiscount", p."membershipDiscount"
+    FROM "Membership" m JOIN "MembershipPlan" p ON p."id" = m."planId"
+    WHERE m."userId" = ${userId}
+    FOR SHARE OF m`
+  if (!row) return null
+  return {
+    isActive: row.isActive,
+    paymentStatus: row.paymentStatus,
+    totalMonths: row.totalMonths,
+    plan: {
+      maxDiscount: row.maxDiscount,
+      membershipDiscount: row.membershipDiscount,
+    },
+  }
 }
 
 export type CartSync = {

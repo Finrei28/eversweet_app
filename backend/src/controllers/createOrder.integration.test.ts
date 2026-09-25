@@ -226,9 +226,13 @@ describeIfDb("POST /api/auth/createOrder", () => {
     })
 
     it("still takes an order paid entirely in loyalty points", async () => {
-      const { user } = await makeCustomerWithCart({
-        itemPriceInCents: 1200,
-        discountedAmountInCents: 1200,
+      // A reward line as addItemToCart writes one: priced at nothing, paid in points. It
+      // used to be a $12 line with a $12 discount stored against it, which no cart can hold
+      // - createOrder now checks stored discounts, and would rightly call that one stale.
+      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 0 })
+      await db.cartItem.updateMany({
+        where: { cartId: cart.id },
+        data: { loyaltyPointsUsed: 300 },
       })
 
       const res = await placeOrder(user.id)

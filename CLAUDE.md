@@ -690,10 +690,16 @@ edit also price with:
 - **`getCartItems`** checks the discounts on the rows it already loaded and corrects stale
   ones, answering with a `warning`. That is the backstop for a webhook that failed or raced
   an edit, and the only thing that notices a promotion ending.
-- **Checkout** refuses a member-only line held without a paid-up membership: 409 from
-  `createPaymentIntent` before the card is touched, and from `createOrder` — the only gate for
-  a free one, since a points-only order never reaches `createPaymentIntent`. With a hold,
-  `settleOrderPayment`'s `refusedBecause` lets it go.
+- **Checkout** refuses a member-only line held without a paid-up membership, and a cart
+  whose stored discounts no longer match the membership and promotions (`staleDiscounts`):
+  409 from `createPaymentIntent` before the card is touched (stale rows are corrected first,
+  so the app's reload shows the right total), and from `createOrder` — the only gate for a
+  free member-only line, since a points-only order never reaches `createPaymentIntent`. With
+  a hold, `settleOrderPayment`'s `refusedBecause` lets it go.
+- **`createOrder` reads the membership inside its transaction, `FOR SHARE`**
+  (`readMembershipForPricingLocked`), and decides the member-only refusal, the stale-price
+  refusal and the points rate from that read. Read before the transaction, a renewal declined
+  while the order was being placed went unseen and the hold was captured.
 
 **The welcome email goes once per switch-on.** `recordMembershipPayment` claims the switch-on
 with `updateMany where { stripeSubscriptionId, isActive: false }` (or the userId claim for a
