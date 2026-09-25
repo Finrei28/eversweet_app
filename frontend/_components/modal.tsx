@@ -1,4 +1,5 @@
 import { CachedImage } from "@/_components/cachedImage"
+import { isPaidUpMember } from "@/lib/membership"
 import {
   View,
   Text,
@@ -345,7 +346,7 @@ export default function CustomModal({
                       <View className="flex flex-row items-center mt-2">
                         <Text className="font-semibold text-lg">Price: </Text>
                         {type === "cents" ? (
-                          usersMembership?.isActive ||
+                          isPaidUpMember(usersMembership) ||
                           selectedDessert.promo?.isActive ? (
                             <>
                               <View className="flex flex-row items-center gap-1">

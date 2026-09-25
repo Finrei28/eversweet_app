@@ -70,6 +70,7 @@ import { useRestaurantStatusQuery } from "@/services/queries"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { getErrorMessage } from "@/utils/getError"
 import { TickAnimation } from "@/_components/tickAnimation"
+import { isPaidUpMember } from "@/lib/membership"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -1273,7 +1274,7 @@ function CheckoutContent() {
             ))}
 
             <View className="mt-4 pt-3 border-t border-gray-200">
-              {usersMembership?.isActive && totalPrice > 0 && (
+              {isPaidUpMember(usersMembership) && totalPrice > 0 && (
                 <View className="flex-row justify-between mb-1">
                   <Text className="text-gray-500">
                     Membership Discount Included
@@ -1285,7 +1286,7 @@ function CheckoutContent() {
               )}
               <View
                 className={`flex-row justify-between ${
-                  usersMembership?.isActive && totalPrice > 0
+                  isPaidUpMember(usersMembership) && totalPrice > 0
                     ? "mt-2 pt-2 border-t border-gray-200"
                     : ""
                 }`}

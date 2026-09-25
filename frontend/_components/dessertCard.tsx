@@ -1,4 +1,5 @@
 import { formatCurrency } from "@/lib/formatters"
+import { isPaidUpMember } from "@/lib/membership"
 import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
@@ -73,7 +74,7 @@ export const DessertCard = React.memo(
                 <View className="h-6 w-16 rounded bg-white/40" />
               ) : currency === "cents" ? (
                 <>
-                  {usersMembership?.isActive || dessert.promo?.isActive ? (
+                  {isPaidUpMember(usersMembership) || dessert.promo?.isActive ? (
                     <>
                       <View className="flex-row items-center gap-1">
                         <Text className="text-red-600 line-through text-sm">
@@ -86,7 +87,7 @@ export const DessertCard = React.memo(
                         </Text>
                       </View>
                       <Text className="text-xs text-yellow-300">
-                        {usersMembership?.isActive
+                        {isPaidUpMember(usersMembership)
                           ? "Member Price"
                           : "Special Offer"}
                       </Text>

@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
 } from "react-native"
 import { useRouter } from "expo-router"
+import { isPaidUpMember } from "@/lib/membership"
+import { useCartStore } from "@/store/cart"
 import { Feather, Octicons } from "@expo/vector-icons"
 import Checkbox from "expo-checkbox"
 import CustomHeader from "@/_components/custom-header"
@@ -124,8 +126,12 @@ function MembershipContent() {
       const checkStatus = async () => {
         try {
           const membershipStatus = await pollMembershipStatus() // fetch latest membership
-          if (membershipStatus?.isActive) {
-            resolve(true) // membership active, stop polling
+          // Paid up, not merely active. A membership on hold is already active, so when
+          // this asked `isActive` alone a retry "succeeded" on the first poll - before the
+          // payment had gone through - and showed the success screen to a member whose
+          // benefits were still paused. A join sets both at once, so it is unaffected.
+          if (isPaidUpMember(membershipStatus)) {
+            resolve(true) // membership paid up, stop polling
             return
           } else if (membershipStatus.paymentStatus === "FAILED") {
             reject(
@@ -176,6 +182,9 @@ function MembershipContent() {
       const success = await pollUsersMembershipStatus()
       if (success) {
         refetchUsersMembership()
+        // Joining reprices what is already in the cart on the server; reload it so the
+        // cart screen shows the member prices rather than the ones it last fetched.
+        void useCartStore.getState().fetchCart()
         router.push("/routers/membership-success")
       }
     } catch (error) {
@@ -204,6 +213,8 @@ function MembershipContent() {
       const success = await pollUsersMembershipStatus()
       if (success) {
         refetchUsersMembership()
+        // A paid retry lifts the hold, and the server puts member prices back on the cart.
+        void useCartStore.getState().fetchCart()
         router.push("/routers/membership-success")
       }
     } catch (error) {
