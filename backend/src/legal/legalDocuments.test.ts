@@ -289,8 +289,9 @@ describe("the claims that were wrong before", () => {
    * The streak belongs to the Stripe subscription, not to the calendar. It survives a
    * renewal that fails and is later paid, and it survives cancelling and resuming, because
    * both leave the same subscription in place - `countConsecutivePaidMonths` counts paid
-   * invoices on one subscription id, and `createMembership` only zeroes `totalMonths` on a
-   * membership that is already inactive, which needs the subscription to have ended.
+   * invoices on one subscription id. Only a rejoin starts the count again: it is a new
+   * subscription, whose first payment writes its own count, and `createMembership` allows
+   * one only once the old subscription has ended.
    *
    * An earlier draft of these terms said a missed month and any re-join both reset it. That
    * was wrong in the way that costs a customer their discount for no reason.

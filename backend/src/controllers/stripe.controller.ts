@@ -1078,11 +1078,14 @@ export const createMembership = async (req: Request, res: Response) => {
             { updatedAt: { lt: new Date(Date.now() - JOIN_IN_PROGRESS_MS) } },
           ],
         },
+        // `totalMonths` is left as it was. It used to be zeroed here, which served nothing -
+        // the new subscription's first payment writes its own count - and cost a returning
+        // member whose rejoin failed their real end date as the start of their points month:
+        // expiry counts only a membership that was paid for, and zero reads as never paid.
         data: {
           paymentStatus: "PENDING",
           isActive: false,
           stripePaymentMethodId: paymentMethodId,
-          totalMonths: 0,
         },
       })
 

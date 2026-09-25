@@ -232,6 +232,25 @@ describeIfDb("Stripe endpoints", () => {
     }
 
     /**
+     * The claim zeroed `totalMonths`, which nothing needed - the new subscription's first
+     * payment writes its own count - and which made a returning member whose rejoin then
+     * failed read as never having paid. Points expiry counts only a paid membership's end, so
+     * they lost the month it would have given them.
+     */
+    it("leaves a returning member's paid months alone while they rejoin", async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      await endedMembership(user.id)
+
+      expect((await join(user.id, {})).status).toBe(201)
+
+      const membership = await db.membership.findUniqueOrThrow({
+        where: { userId: user.id },
+      })
+      expect(membership).toMatchObject({ paymentStatus: "PENDING", totalMonths: 4 })
+    })
+
+    /**
      * Nothing claimed a join, so two requests — a double tap that lands before the button
      * disables, or a resend — both created a subscription, and the customer was billed
      * twice every month.

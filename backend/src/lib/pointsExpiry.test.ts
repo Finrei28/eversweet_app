@@ -99,7 +99,7 @@ describe("pointsExpireAt", () => {
       pointsExpireAt(
         {
           lastOrderAt: null,
-          membership: { endDate: new Date("2026-11-05T00:00:00.000Z"), isMember: true },
+          membership: { endDate: new Date("2026-11-05T00:00:00.000Z"), isMember: true, wasPaid: true },
         },
         switchedOn,
         now,
@@ -112,7 +112,11 @@ describe("pointsExpireAt", () => {
     const deadline = pointsExpireAt(
       {
         lastOrderAt: new Date("2026-10-02T02:00:00.000Z"),
-        membership: { endDate: new Date("2026-10-15T02:00:00.000Z"), isMember: false },
+        membership: {
+          endDate: new Date("2026-10-15T02:00:00.000Z"),
+          isMember: false,
+          wasPaid: true,
+        },
       },
       switchedOn,
       now,
@@ -128,12 +132,37 @@ describe("pointsExpireAt", () => {
     const deadline = pointsExpireAt(
       {
         lastOrderAt: null,
-        membership: { endDate: new Date("2026-11-18T02:00:00.000Z"), isMember: false },
+        membership: {
+          endDate: new Date("2026-11-18T02:00:00.000Z"),
+          isMember: false,
+          wasPaid: false,
+        },
       },
       switchedOn,
       now,
     )
     expect(deadline?.toISOString()).toBe("2026-11-01T10:59:59.999Z")
+  })
+
+  /**
+   * The same failed join a month later, once its end date has passed. Checking only that the
+   * date had passed let it in then, and it pushed the deadline out as though a membership had
+   * run and ended.
+   */
+  it("ignores a failed join's end date once it has passed", () => {
+    const deadline = pointsExpireAt(
+      {
+        lastOrderAt: new Date("2026-10-02T02:00:00.000Z"),
+        membership: {
+          endDate: new Date("2026-10-15T02:00:00.000Z"),
+          isMember: false,
+          wasPaid: false,
+        },
+      },
+      switchedOn,
+      now,
+    )
+    expect(deadline?.toISOString()).toBe("2026-11-02T10:59:59.999Z")
   })
 
   it("names the anchor it counted from", () => {
