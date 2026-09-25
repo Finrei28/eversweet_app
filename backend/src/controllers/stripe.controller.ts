@@ -19,6 +19,13 @@ import {
   getTradingHours,
 } from "../lib/tradingHours"
 import { calculateCartPrice, cartPricingInclude } from "../lib/cartPricing"
+import {
+  isPaidUpMember,
+  MEMBER_ONLY_ITEM_MESSAGE,
+} from "../lib/memberPricing"
+import { type CartSync, syncCartWithMembership } from "../lib/cartRepricing"
+import { sendMembershipWelcome } from "../lib/membershipEmails"
+import { getErrorMessage } from "../utils/getError"
 import { isOfferLive } from "../lib/offerAvailability"
 import { idOf, stripe } from "../lib/stripeClient"
 import {
@@ -513,24 +520,33 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     //
     // Ahead of the Stripe customer lookup, so a cart that is going to be refused
     // does not create a customer at Stripe on its way out.
-    const cart = await db.cart.findUnique({
-      where: { userId },
-      include: {
-        cartItems: {
-          include: {
-            ...cartPricingInclude,
-            offer: {
-              select: {
-                isActive: true,
-                startsAt: true,
-                endsAt: true,
-                archivedAt: true,
+    //
+    // The membership comes in the same wave, for the member-only check below.
+    const [cart, membership] = await Promise.all([
+      db.cart.findUnique({
+        where: { userId },
+        include: {
+          cartItems: {
+            include: {
+              ...cartPricingInclude,
+              offer: {
+                select: {
+                  audience: true,
+                  isActive: true,
+                  startsAt: true,
+                  endsAt: true,
+                  archivedAt: true,
+                },
               },
             },
           },
         },
-      },
-    })
+      }),
+      db.membership.findUnique({
+        where: { userId },
+        select: { isActive: true, paymentStatus: true },
+      }),
+    ])
 
     if (!cart || cart.cartItems.length === 0) {
       res.status(400).json({ message: "Your cart is empty" })
@@ -553,6 +569,20 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       res.status(409).json({
         message:
           "An offer in your cart is no longer available. Please review your cart and try again.",
+      })
+      return
+    }
+
+    // A member-only item held by someone who is no longer a paid-up member - a renewal
+    // declined and on hold, or a membership that has ended. The cart load takes these out,
+    // but one added just before the membership changed can still be here; nothing checked,
+    // so it was bought at the member price. Refused before the card is touched.
+    if (
+      !isPaidUpMember(membership) &&
+      cart.cartItems.some((item) => item.offer?.audience === "MEMBERS")
+    ) {
+      res.status(409).json({
+        message: `${MEMBER_ONLY_ITEM_MESSAGE} Please review your cart and try again.`,
       })
       return
     }
@@ -1348,13 +1378,63 @@ async function recordMembershipPayment(
 
   const periodEnd = subscription.items.data[0]?.current_period_end
 
-  await updateSubscriptionMembership(subscription, "payment", {
+  const data = {
     ...(periodEnd ? { endDate: new Date(periodEnd * 1000) } : {}),
-    paymentStatus: "SUCCESS",
+    paymentStatus: "SUCCESS" as const,
     isActive: true,
     totalMonths,
     cancel: subscription.cancel_at_period_end,
+  }
+
+  // Switching a membership on is claimed, so the welcome email goes exactly once. Only a
+  // row still switched off matches: a redelivery, or a renewal, finds it on and falls
+  // through to the ordinary write below, which changes nothing a second time. Two
+  // deliveries at once cannot both match - Postgres re-reads the row for the second after
+  // the first commits. A membership on hold stays switched on, so its retry being paid is a
+  // payment, not a welcome.
+  const switchedOn = await db.membership.updateMany({
+    where: { stripeSubscriptionId: subscription.id, isActive: false },
+    data,
   })
+  const activated =
+    switchedOn.count > 0 ||
+    (await updateSubscriptionMembership(subscription, "payment", data)) ===
+      "claimed"
+
+  // Joining reprices what is already in the cart, a renewal steps the discount up, and a
+  // paid retry lifts a hold - all three change what the cart should cost.
+  const sync = await syncCartAfterMembershipChange(subscription.id)
+
+  if (activated) {
+    await sendMembershipWelcome({
+      stripeSubscriptionId: subscription.id,
+      amountPaidInCents:
+        typeof invoice.amount_paid === "number" ? invoice.amount_paid : null,
+      cartRepriced: (sync?.repriced ?? 0) > 0,
+    })
+  }
+}
+
+/**
+ * Brings the member's cart in line with the membership just written: the discount on, off or
+ * a step higher, and member-only items out while they are not a paid-up member.
+ *
+ * Never throws. The membership is what the event is about, and it is already written; the
+ * cart load checks the discounts again whenever the app next asks (see `getCartItems`), so a
+ * failure here costs a moment's staleness rather than a wrong charge.
+ */
+async function syncCartAfterMembershipChange(
+  stripeSubscriptionId: string,
+): Promise<CartSync | null> {
+  try {
+    return await syncCartWithMembership({ stripeSubscriptionId })
+  } catch (error) {
+    console.error(
+      `Could not reprice the cart for subscription ${stripeSubscriptionId}:`,
+      getErrorMessage(error),
+    )
+    return null
+  }
 }
 
 /**
@@ -1366,12 +1446,12 @@ async function updateSubscriptionMembership(
   subscription: Stripe.Subscription,
   event: string,
   data: Prisma.MembershipUpdateManyMutationInput,
-) {
+): Promise<"updated" | "claimed" | "none"> {
   const updated = await db.membership.updateMany({
     where: { stripeSubscriptionId: subscription.id },
     data,
   })
-  if (updated.count > 0) return
+  if (updated.count > 0) return "updated"
 
   // createMembership stores the subscription id only once Stripe has created the
   // subscription, and Stripe attempts the first invoice while doing so — so its outcome, paid
@@ -1385,12 +1465,14 @@ async function updateSubscriptionMembership(
       where: { userId, isActive: false, paymentStatus: "PENDING" },
       data: { ...data, stripeSubscriptionId: subscription.id },
     })
-    if (claimed.count > 0) return
+    // Always a row that was switched off, so for a payment this is the switch-on.
+    if (claimed.count > 0) return "claimed"
   }
 
   console.error(
     `Membership ${event} for subscription ${subscription.id} matched no membership.`,
   )
+  return "none"
 }
 
 /** The subscription an invoice was raised for, in either shape Stripe sends. */
@@ -1480,6 +1562,7 @@ async function recordMembershipPaymentFailure(
       paymentFailureCode: decline.code,
       paymentFailureMessage: decline.message,
     })
+    await syncCartAfterMembershipChange(subscription.id)
     return
   }
 
@@ -1496,6 +1579,9 @@ async function recordMembershipPaymentFailure(
   await updateSubscriptionMembership(subscription, "renewal failure", {
     paymentStatus: "PENDING",
   })
+  // On hold pauses every member benefit until the payment goes through: member prices come
+  // off the cart and member-only items leave it now, not whenever the app next loads it.
+  await syncCartAfterMembershipChange(subscription.id)
 }
 
 /**
@@ -1533,6 +1619,7 @@ async function recordMembershipEnded(delivered: Stripe.Subscription) {
       cancel: true,
     },
   })
+  await syncCartAfterMembershipChange(delivered.id)
 }
 
 /**

@@ -279,11 +279,11 @@ export default function EmailOrderConfirmation({
                 </Column>
                 <Column align="right">
                   <Text>
-                    {formatCurrency(
-                      ((order.priceInCents - order.discountedAmountInCents) *
-                        0.15) /
-                        100,
-                    )}
+                    {/* The GST recorded on the order, which is extracted from the
+                        inclusive price (x 3/23, see gstFromInclusive). This took 15%
+                        of the inclusive total, which overstates it by 15% - $3.45 on
+                        a $23 order that contains $3.00. */}
+                    {formatCurrency(order.GST / 100)}
                   </Text>
                 </Column>
               </Row>

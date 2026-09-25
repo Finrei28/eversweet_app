@@ -4,14 +4,6 @@ import { db, DbTransactionClient } from "../lib/db"
 import { cartItemSchema, dessertSchema } from "../utils/schema"
 import { Prisma } from "@prisma/client"
 import {
-  CartItemCustomisation,
-  Dessert,
-  Membership,
-  AddCartItem,
-  RawCartItem,
-  CartItem,
-} from "../types/types"
-import {
   canRedeemAudience,
   isNewCustomer,
   offerRefusalMessage,
@@ -23,23 +15,21 @@ import {
   holdCustomerOrders,
   refundExpiredSince,
 } from "../lib/pointsExpiry"
-
-/**
- * Handing a held redemption back, as one `data` block because all four release paths -
- * removing an item, clearing the cart, the cart expiring, and a membership lapsing -
- * have to agree.
- *
- * `status` goes with `used`. Releasing used to move the counter alone, which was
- * harmless only while `status` was written REDEEMED on every use; now that it means
- * "used up", leaving it behind would lock a gated offer out for good the first time
- * somebody changed their mind. AVAILABLE is unconditionally right here: redeeming
- * refuses at `used >= limit`, so `used <= limit` always, and every release below is
- * guarded by `used > 0` - so afterwards `used <= limit - 1`, which is short of the limit.
- */
-const RELEASE_REDEMPTION = {
-  used: { decrement: 1 },
-  status: "AVAILABLE",
-} as const
+import {
+  customisationDiscountInCents,
+  isPaidUpMember,
+  lineDiscountInCents,
+  memberDiscountPercent,
+  staleDiscounts,
+} from "../lib/memberPricing"
+import {
+  AlreadySwept,
+  RELEASE_REDEMPTION,
+  removeCartLines,
+  retryOnCartConflict,
+  TRANSACTION_OPTIONS,
+} from "../lib/cartWrites"
+import { applyDiscountCorrections } from "../lib/cartRepricing"
 
 /**
  * A refusal the customer should be told about, thrown from inside the cart transaction.
@@ -70,17 +60,6 @@ export class OfferUnavailableError extends Error {
 // }
 
 /**
- * Prisma defaults an interactive transaction to 5s. A round trip to this
- * database costs the better part of a second, so a transaction making five or
- * six of them can exceed that as soon as two requests overlap — which is
- * exactly how adding two items quickly used to fail, with P2028 "transaction
- * already closed" after 5182ms. The work inside these transactions is small;
- * the time goes on waiting for the network, so the bound has to be set for a
- * remote database rather than a local one.
- */
-const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
-
-/**
  * The order every cart transaction takes its row locks in:
  *
  *   OfferRedemption  ->  Loyalty  ->  Cart
@@ -95,59 +74,10 @@ const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 }
  * order addItemToCart already followed, so it is the one that spread.
  *
  * Anything touching more than one of these tables in a transaction has to
- * follow it. Nothing enforces that but this comment and the tests.
+ * follow it. Nothing enforces that but this comment and the tests. The shared
+ * pieces - retrying a conflict, releasing a redemption, removing lines - are in
+ * lib/cartWrites, because the Stripe webhook takes lines out of a cart too.
  */
-
-/** Postgres's deadlock code, which Prisma surfaces without mapping. */
-const isDeadlock = (error: unknown) =>
-  error instanceof Error && error.message.includes("40P01")
-
-/**
- * The two codes a lost race to create the first cart can arrive as.
- *
- * P2002 is the obvious one: both adds took upsert's create branch and one lost
- * the unique index on Cart.userId.
- *
- * P2014 is the same race wearing a different hat, and missing it is what made
- * four simultaneous adds return a 500. `Cart.user` is a required one-to-one, so
- * when the loser's `create` runs after the winner has committed, Prisma reads
- * its `connect` as detaching the cart the winner just made and reports a
- * violated relation instead of a duplicate key. Nothing is wrong with the
- * request - the cart it wanted to create simply already exists - so it retries
- * on exactly the same reasoning as P2002.
- */
-const isCartCreateConflict = (error: unknown) =>
-  error instanceof Prisma.PrismaClientKnownRequestError &&
-  (error.code === "P2002" || error.code === "P2014")
-
-/**
- * Runs `work`, retrying once for the conflicts that are a normal part of
- * concurrent cart writes rather than a fault.
- *
- * P2002 / P2014: two adds racing to create the same customer's first cart. The
- * cart exists by the time the loser retries, so the retry takes the update
- * branch. See `isCartCreateConflict` for why one race produces two codes.
- *
- * 40P01: a deadlock. Consistent lock ordering makes these rare rather than
- * impossible - Postgres can still pick a victim when index or tuple locks
- * collide - and the loser is rolled back whole, so retrying is the correct
- * response rather than a way of hiding it.
- *
- * Either way the failed transaction committed nothing, so re-running it cannot
- * double up an offer redemption or a points debit.
- */
-const retryOnCartConflict = async <T>(work: () => Promise<T>): Promise<T> => {
-  try {
-    return await work()
-  } catch (error) {
-    if (isCartCreateConflict(error) || isDeadlock(error)) {
-      return work()
-    }
-
-    throw error
-  }
-}
-
 
 /**
  * What the customer asked for, priced by the database rather than by them.
@@ -218,46 +148,6 @@ const mochiAdjustmentInCents = (
     customisations.some((c) => c.name === name && c.quantity === 0)
 
   return removed("Glutinous Balls") && removed("Mochi") ? 200 : 0
-}
-
-/**
- * The membership discount on the customisations of one line, priced from the
- * database rows.
- */
-const customisationDiscount = (
-  customisation: ResolvedCustomisation,
-  membership: Membership,
-  maxMembershipDiscount: number,
-) =>
-  membership?.isActive && customisation.quantity > 0
-    ? customisation.priceInCents * (maxMembershipDiscount / 100)
-    : 0
-
-function calculateBestDiscount(
-  cartItem: CartItem | AddCartItem,
-  membership: Membership,
-  itemPriceInCentsBeforeDiscount: number,
-  dessert: Dessert,
-) {
-  let finalDiscountedAmount = 0
-
-  const maxMembershipDiscount = Math.min(
-    membership?.plan.maxDiscount ?? 0,
-    (membership?.totalMonths ?? 1) * (membership?.plan.membershipDiscount ?? 0),
-  )
-  if (!cartItem.loyaltyPointsUsed) {
-    const membershipDiscount = membership?.isActive // membership discount applies to dessert and customisatons
-      ? itemPriceInCentsBeforeDiscount * (maxMembershipDiscount / 100)
-      : 0
-    const promoDiscount =
-      dessert?.promo?.type === "PERCENTAGE"
-        ? itemPriceInCentsBeforeDiscount * (dessert.promo.value / 100) // promo discounts only apply to dessert price, not customisations
-        : dessert?.promo?.type === "FIXED_AMOUNT"
-          ? dessert?.promo.value
-          : 0
-    finalDiscountedAmount = Math.max(membershipDiscount, promoDiscount)
-  }
-  return finalDiscountedAmount
 }
 
 export const redeemOfferForUser = async (
@@ -435,10 +325,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       }
 
       const viewer = {
-        isActiveMember:
-          !!membership &&
-          membership.isActive &&
-          membership.paymentStatus === "SUCCESS",
+        isActiveMember: isPaidUpMember(membership),
         // Only worth the query when the answer can change the outcome.
         isNewCustomer:
           offer.audience === "NEW_USERS" ? await isNewCustomer(userId) : false,
@@ -475,32 +362,22 @@ export const addItemToCart = async (req: Request, res: Response) => {
         mochiAdjustmentInCents(customisations, dessert.category.name),
     )
 
-    // discount logic
+    // An offer sets its own price. Anything else takes the better of the member
+    // discount and a running promotion - see lib/memberPricing, which the webhook and
+    // the cart load also price with, so what is stored here is what they would store.
+    const memberPercent = memberDiscountPercent(membership)
 
-    let finalDiscountedAmount = 0
-
-    if (offer) {
-      finalDiscountedAmount = Math.max(
-        0,
-        itemPriceInCentsBeforeDiscount - offerUnitPriceInCents(offer, dessert),
-      ) // this calculates the discount from member offers
-    } else {
-      finalDiscountedAmount = calculateBestDiscount(
-        // this calculates the discounts on normal and promo items
-        cartItem,
-        membership,
-        itemPriceInCentsBeforeDiscount,
-        dessert,
-      )
-    }
-
-    // calculate customisaton price
-
-    const maxMembershipDiscount = Math.min(
-      membership?.plan.maxDiscount ?? 0,
-      (membership?.totalMonths ?? 1) *
-        (membership?.plan.membershipDiscount ?? 0),
-    )
+    const finalDiscountedAmount = offer
+      ? Math.max(
+          0,
+          itemPriceInCentsBeforeDiscount - offerUnitPriceInCents(offer, dessert),
+        )
+      : lineDiscountInCents({
+          priceBeforeDiscountInCents: itemPriceInCentsBeforeDiscount,
+          isReward: isRedemption,
+          promo: dessert.promo,
+          memberPercent,
+        })
 
     const cartItemData: Prisma.CartItemCreateWithoutCartInput = {
       dessert: {
@@ -520,10 +397,10 @@ export const addItemToCart = async (req: Request, res: Response) => {
                 id: cartItemCustomisation.id, // Ensure customisation exists before connecting
               },
             },
-            discountedAmountInCents: customisationDiscount(
-              cartItemCustomisation,
-              membership,
-              maxMembershipDiscount,
+            discountedAmountInCents: customisationDiscountInCents(
+              cartItemCustomisation.priceInCents,
+              cartItemCustomisation.quantity,
+              memberPercent,
             ),
 
             quantity: cartItemCustomisation.quantity,
@@ -719,13 +596,6 @@ export const addItemToCart = async (req: Request, res: Response) => {
   }
 }
 
-/**
- * Thrown inside one of getCartItems' clean-up transactions to roll it back,
- * when the rows it came to sweep turn out to have been swept by someone else.
- * Caught there and never surfaced: the cart is already in the state asked for.
- */
-class AlreadySwept extends Error {}
-
 export const getCartItems = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId
@@ -763,7 +633,16 @@ export const getCartItems = async (req: Request, res: Response) => {
           },
         },
       }),
-      db.membership.findUnique({ where: { userId } }),
+      // The fields that price a line, for the discount check at the end.
+      db.membership.findUnique({
+        where: { userId },
+        select: {
+          isActive: true,
+          paymentStatus: true,
+          totalMonths: true,
+          plan: { select: { maxDiscount: true, membershipDiscount: true } },
+        },
+      }),
     ])
 
     if (cart && cart.expiresAt && cart.expiresAt < new Date()) {
@@ -833,7 +712,12 @@ export const getCartItems = async (req: Request, res: Response) => {
       // open to everyone (or to new customers) is still perfectly valid, so it
       // must survive — this used to delete every offer item indiscriminately,
       // which would strip a non-member's legitimate item on every cart load.
-      const memberOnlyItems = !membership?.isActive
+      //
+      // "Lapsed" includes on hold. This asked `isActive` alone, which a membership
+      // keeps while a declined renewal is retried, so a member whose card had
+      // stopped paying could keep a members-only item - the free weekly bowl among
+      // them - and check it out.
+      const memberOnlyItems = !isPaidUpMember(membership)
         ? cart.cartItems.filter(
             (item) => item.offerId && item.offer?.audience === "MEMBERS",
           )
@@ -855,34 +739,9 @@ export const getCartItems = async (req: Request, res: Response) => {
       const doomed = [...new Set([...memberOnlyItems, ...retiredOfferItems])]
 
       if (doomed.length > 0) {
-        // Releases then the delete, in one transaction, for the reasons given
-        // on the expiry branch above. The count is the claim: fewer rows deleted
-        // than items doomed means another request — a second load, or the
-        // customer removing one of them — has dealt with some already and
-        // handed their redemptions back. Releasing from this request's stale
-        // list would hand those back twice, so it rolls back instead and leaves
-        // whatever is left to the next load.
-        let swept = 0
-        try {
-          swept = await retryOnCartConflict(() =>
-            db.$transaction(async (tx) => {
-              for (const item of doomed) {
-                await tx.offerRedemption.updateMany({
-                  where: { offerId: item.offerId!, userId, used: { gt: 0 } },
-                  data: RELEASE_REDEMPTION,
-                })
-              }
-
-              const { count } = await tx.cartItem.deleteMany({
-                where: { id: { in: doomed.map((item) => item.id) } },
-              })
-              if (count !== doomed.length) throw new AlreadySwept()
-              return count
-            }, TRANSACTION_OPTIONS),
-          )
-        } catch (error) {
-          if (!(error instanceof AlreadySwept)) throw error
-        }
+        // Shared with the webhook, which takes member-only lines out the moment a
+        // membership stops being paid up - see removeCartLines for the claim.
+        const swept = await removeCartLines(userId, doomed)
 
         if (swept > 0) {
           warning =
@@ -895,32 +754,52 @@ export const getCartItems = async (req: Request, res: Response) => {
       }
     }
 
-    const rawCartItems = await db.cartItem.findMany({
-      where: { cart: { userId } },
-      include: {
-        dessert: {
-          select: {
-            id: true,
-            name: true,
-            chineseName: true,
-            description: true,
-            priceInCents: true,
-            priceInLoyaltyPoints: true,
-            imagePath: true,
-            ingredients: { select: { ingredient: true } },
-            promo: true,
+    const loadCartItems = () =>
+      db.cartItem.findMany({
+        where: { cart: { userId } },
+        include: {
+          dessert: {
+            select: {
+              id: true,
+              name: true,
+              chineseName: true,
+              description: true,
+              priceInCents: true,
+              priceInLoyaltyPoints: true,
+              imagePath: true,
+              ingredients: { select: { ingredient: true } },
+              promo: true,
+            },
+          },
+          customisations: {
+            select: {
+              // The row's own id, for correcting its discount below. Not sent: the
+              // customisation's id is the ingredient's, as it always has been.
+              id: true,
+              customisation: true,
+              quantity: true,
+              discountedAmountInCents: true,
+            },
           },
         },
-        customisations: {
-          select: {
-            customisation: true,
-            quantity: true,
-            discountedAmountInCents: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    })
+        orderBy: { createdAt: "asc" },
+      })
+
+    let rawCartItems = await loadCartItems()
+
+    // The discounts stored on the lines, checked against the membership and the
+    // promotions as they stand. The Stripe webhook reprices a cart the moment a
+    // membership changes, so this normally finds nothing and costs nothing - the rows
+    // are already loaded. It is the backstop for a webhook that failed or raced an edit,
+    // and the only thing that notices a promotion ending: yesterday's daily special kept
+    // its price in any cart that held it.
+    const corrected = await applyDiscountCorrections(
+      staleDiscounts(rawCartItems, membership),
+    )
+    if (corrected > 0) {
+      rawCartItems = await loadCartItems()
+      warning ??= "Prices in your cart have been updated."
+    }
 
     const cartItems = rawCartItems.map((item) => ({
       ...item,
@@ -1246,11 +1125,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
         mochiAdjustmentInCents(customisations, dessert.category.name),
     )
 
-    const maxMembershipDiscount = Math.min(
-      membership?.plan.maxDiscount ?? 0,
-      (membership?.totalMonths ?? 1) *
-        (membership?.plan.membershipDiscount ?? 0),
-    )
+    const memberPercent = memberDiscountPercent(membership)
 
     let finalDiscountedAmount = 0
 
@@ -1280,10 +1155,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
       // reprice at offer rates for anyone the offer is not meant for.
       if (
         !canRedeemAudience(offer.audience, {
-          isActiveMember:
-            !!membership &&
-            membership.isActive &&
-            membership.paymentStatus === "SUCCESS",
+          isActiveMember: isPaidUpMember(membership),
           isNewCustomer:
             offer.audience === "NEW_USERS"
               ? await isNewCustomer(userId)
@@ -1299,13 +1171,12 @@ export const updateCartItem = async (req: Request, res: Response) => {
         itemPriceInCentsBeforeDiscount - offerUnitPriceInCents(offer, dessert),
       ) // this calculates the discount from the offer
     } else {
-      finalDiscountedAmount = calculateBestDiscount(
-        // this calculates the discounts on normal and promo items
-        cartItem,
-        membership,
-        itemPriceInCentsBeforeDiscount,
-        dessert,
-      )
+      finalDiscountedAmount = lineDiscountInCents({
+        priceBeforeDiscountInCents: itemPriceInCentsBeforeDiscount,
+        isReward: isRedemption,
+        promo: dessert.promo,
+        memberPercent,
+      })
     }
 
     const newCustomisationPrice = customisations.reduce(
@@ -1313,10 +1184,10 @@ export const updateCartItem = async (req: Request, res: Response) => {
         sum +
         (customisation.quantity > 0
           ? (customisation.priceInCents -
-              customisationDiscount(
-                customisation,
-                membership,
-                maxMembershipDiscount,
+              customisationDiscountInCents(
+                customisation.priceInCents,
+                customisation.quantity,
+                memberPercent,
               )) *
             customisation.quantity
           : 0),
@@ -1362,10 +1233,10 @@ export const updateCartItem = async (req: Request, res: Response) => {
                 deleteMany: {},
                 create: customisations.map((customisation) => ({
                   customisation: { connect: { id: customisation.id } },
-                  discountedAmountInCents: customisationDiscount(
-                    customisation,
-                    membership,
-                    maxMembershipDiscount,
+                  discountedAmountInCents: customisationDiscountInCents(
+                    customisation.priceInCents,
+                    customisation.quantity,
+                    memberPercent,
                   ),
                   quantity: customisation.quantity,
                 })),

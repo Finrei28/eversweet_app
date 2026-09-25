@@ -22,6 +22,10 @@ import {
   nzMonthRange,
 } from "../lib/tradingHours"
 import { calculateCartPrice } from "../lib/cartPricing"
+import {
+  isPaidUpMember,
+  MEMBER_ONLY_ITEM_MESSAGE,
+} from "../lib/memberPricing"
 import { redeemableAudiences } from "../lib/offerAudience"
 import { liveOfferWhere } from "../lib/offerAvailability"
 import { rankMonth } from "../lib/leaderboardRanking"
@@ -852,11 +856,20 @@ export const createOrder = async (req: Request, res: Response) => {
     // Postgres advisory lock on the payment intent until it commits, so every await inside
     // it is time the lock is held; the rates are settings that almost always answer from a
     // one-minute cache, and there is no reason for them to be read under it.
-    const [daysOffKeys, hours, loyaltyRates] = await Promise.all([
+    //
+    // The membership joins them, for the same reason and one more: it decides the points
+    // rate and whether a member-only item may be bought at all, and that has to be known
+    // before the payment is settled, so a hold can be let go rather than captured.
+    const [daysOffKeys, hours, loyaltyRates, membership] = await Promise.all([
       getDaysOffKeys(),
       getTradingHours(),
       getLoyaltyRates(),
+      db.membership.findUnique({
+        where: { userId },
+        select: { isActive: true, paymentStatus: true },
+      }),
     ])
+    const isMember = isPaidUpMember(membership)
     const pickUpCheck = checkPickUpTime(parsedBody.pickUpTime, {
       eatIn: parsedBody.eatIn,
       daysOffKeys,
@@ -883,6 +896,7 @@ export const createOrder = async (req: Request, res: Response) => {
           include: {
             dessert: true,
             customisations: { include: { customisation: true } },
+            offer: { select: { audience: true } },
           },
         },
       },
@@ -934,6 +948,23 @@ export const createOrder = async (req: Request, res: Response) => {
       return
     }
 
+    // A member-only item is bought only by a paid-up member. Adding one is refused to
+    // anyone else, but nothing looked again at checkout, so an item added while the
+    // membership was paid up could still be bought after a renewal was declined and the
+    // membership went on hold. The cart load and the webhook both take such items out;
+    // this is the last gate, and for a free one - the weekly bowl, say - the only one,
+    // since an order paid entirely in points never reaches `createPaymentIntent`.
+    const memberOnlyRefusal =
+      !isMember &&
+      cart.cartItems.some((item) => item.offer?.audience === "MEMBERS")
+        ? MEMBER_ONLY_ITEM_MESSAGE
+        : null
+
+    if (memberOnlyRefusal && !paymentIntentId) {
+      res.status(409).json({ message: memberOnlyRefusal })
+      return
+    }
+
     const pickUpNZDate = formatInTimeZone(
       new Date(parsedBody.pickUpTime),
       "Pacific/Auckland",
@@ -976,7 +1007,9 @@ export const createOrder = async (req: Request, res: Response) => {
             userId,
             stripeCustomerId: user.stripeCustomerId,
             payableInCents,
-            lateForHours,
+            // Either reason lets a hold go. A payment already taken buys the order
+            // anyway - see settleOrderPayment - and is logged below.
+            refusedBecause: lateForHours ?? memberOnlyRefusal,
           })
           if (settled.refusal) return { refusal: settled.refusal }
           capture = settled.capture
@@ -1047,8 +1080,13 @@ export const createOrder = async (req: Request, res: Response) => {
         })
 
         // add points members and non members
-        if (cart.totalPriceInCents > 0) {
-          const membership = await tx.membership.findUnique({ where: { userId } })
+        //
+        // Gated on what the customer pays, worked out from the rows. It was gated on
+        // `cart.totalPriceInCents`, a running total every cart write nudges and which
+        // drifts: removing a discounted line takes off its list price, so a cart still
+        // holding a reward could read zero or less, and that order earned no points and
+        // unlocked no offers.
+        if (payableInCents > 0) {
           let earnablePoints = 0
 
           // The inline fallbacks this used to carry (`rate ?? 5`, `modifier ?? 1`) are
@@ -1072,7 +1110,9 @@ export const createOrder = async (req: Request, res: Response) => {
                     0,
                   ),
                 item.quantity,
-                !!membership?.isActive,
+                // Paid up, not merely active: a membership on hold earns the
+                // ordinary rate until its payment goes through.
+                isMember,
                 loyaltyRates,
               ),
             0,
@@ -1101,10 +1141,7 @@ export const createOrder = async (req: Request, res: Response) => {
             })
 
             const viewer = {
-              isActiveMember:
-                !!membership &&
-                membership.isActive &&
-                membership.paymentStatus === "SUCCESS",
+              isActiveMember: isMember,
               isNewCustomer: priorOrders === 0,
             }
 
@@ -1201,6 +1238,13 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     newOrder = outcome.order
+
+    if (memberOnlyRefusal) {
+      console.error(
+        `Order ${newOrder.id} accepted with a member-only item from user ${userId}, ` +
+          `who is not a paid-up member, because payment ${paymentIntentId} was already taken.`,
+      )
+    }
 
     if (lateForHours) {
       console.error(
@@ -1351,10 +1395,7 @@ export const showOffers = async (req: Request, res: Response) => {
     ])
 
     const viewer = {
-      isActiveMember:
-        !!membership &&
-        membership.isActive &&
-        membership.paymentStatus === "SUCCESS",
+      isActiveMember: isPaidUpMember(membership),
       isNewCustomer: priorOrders === 0,
     }
 

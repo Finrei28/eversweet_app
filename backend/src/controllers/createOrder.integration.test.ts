@@ -756,6 +756,26 @@ describeIfDb("POST /api/auth/createOrder", () => {
     })
   })
 
+  /**
+   * Points were gated on `Cart.totalPriceInCents`, a running total that every cart write
+   * nudges and which drifts - removing a discounted line takes off its list price, not what
+   * it cost. A cart that had drifted to zero or below earned its customer nothing.
+   */
+  it("earns points on what the customer pays, whatever the cart's running total says", async () => {
+    const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1000 })
+    await db.cart.update({
+      where: { id: cart.id },
+      data: { totalPriceInCents: -200 },
+    })
+    await payFor(user.id, "pi_drifted", 1000)
+
+    const res = await placeOrder(user.id, { paymentIntentId: "pi_drifted" })
+
+    expect(res.status).toBe(201)
+    const earned = await db.loyaltyRecord.findFirst({ where: { reason: "EARNED" } })
+    expect(earned?.change).toBe(60)
+  })
+
   it("rolls back the order, its points and the cart when a later write fails", async () => {
     const { user, cart } = await makeCustomerWithCart()
     await payFor(user.id, "pi_rollback", 1200)

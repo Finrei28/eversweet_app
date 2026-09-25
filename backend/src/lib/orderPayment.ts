@@ -138,9 +138,10 @@ export async function captureOrderPayment(paymentIntentId: string) {
  *
  * **The normal case is a hold.** `createPaymentIntent` authorises the card without taking
  * the money, and the money is captured only once the order has been written. Until then
- * nothing has moved, so a cart that changed during payment, or a pick-up time the store has
- * closed on since, is refused by letting the hold go: no refund, no fee, nothing on the
- * customer's statement. This used to charge at confirmation, which left refunding as the
+ * nothing has moved, so a cart that changed during payment, a pick-up time the store has
+ * closed on since, or a member-only item held by someone whose membership has since gone on
+ * hold, is refused by letting the hold go: no refund, no fee, nothing on the customer's
+ * statement. This used to charge at confirmation, which left refunding as the
  * only answer to a mismatch, a store that had closed as something to accept anyway, and a
  * crash between payment and order as a charged customer with no order.
  *
@@ -163,14 +164,18 @@ export async function settleOrderPayment(
     userId,
     stripeCustomerId,
     payableInCents,
-    lateForHours,
+    refusedBecause,
   }: {
     paymentIntentId: string
     userId: string
     stripeCustomerId: string | null
     payableInCents: number
-    /** Why the pick-up time is no longer acceptable, or null if it still is. */
-    lateForHours: string | null
+    /**
+     * Why this order can no longer be placed, as a sentence for the customer, or null if it
+     * still can. A pick-up time the store has closed on, or a member-only item the customer
+     * is no longer a paid-up member for. It used to carry the pick-up time alone.
+     */
+    refusedBecause: string | null
   },
 ): Promise<PaymentSettlement> {
   await lockPayment(tx, paymentIntentId)
@@ -230,7 +235,7 @@ export async function settleOrderPayment(
       intent.amount_capturable === payableInCents &&
       intent.currency === CHARGE_CURRENCY
 
-    if (matches && !lateForHours) return { capture: intent.id }
+    if (matches && !refusedBecause) return { capture: intent.id }
 
     if (await alreadyOrdered()) {
       console.error(
@@ -262,7 +267,7 @@ export async function settleOrderPayment(
       refusal: {
         status: 400,
         body: {
-          message: `${lateForHours} You haven't been charged.`,
+          message: `${refusedBecause} You haven't been charged.`,
           released: true,
         },
       },
