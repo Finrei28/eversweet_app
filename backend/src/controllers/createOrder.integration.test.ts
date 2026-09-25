@@ -226,9 +226,13 @@ describeIfDb("POST /api/auth/createOrder", () => {
     })
 
     it("still takes an order paid entirely in loyalty points", async () => {
-      const { user } = await makeCustomerWithCart({
-        itemPriceInCents: 1200,
-        discountedAmountInCents: 1200,
+      // A reward line as addItemToCart writes one: priced at nothing, paid in points. It
+      // used to be a $12 line with a $12 discount stored against it, which no cart can hold
+      // - createOrder now checks stored discounts, and would rightly call that one stale.
+      const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 0 })
+      await db.cartItem.updateMany({
+        where: { cartId: cart.id },
+        data: { loyaltyPointsUsed: 300 },
       })
 
       const res = await placeOrder(user.id)
@@ -754,6 +758,26 @@ describeIfDb("POST /api/auth/createOrder", () => {
       expect(second.status).toBe(201)
       expect(await db.order.count()).toBe(2)
     })
+  })
+
+  /**
+   * Points were gated on `Cart.totalPriceInCents`, a running total that every cart write
+   * nudges and which drifts - removing a discounted line takes off its list price, not what
+   * it cost. A cart that had drifted to zero or below earned its customer nothing.
+   */
+  it("earns points on what the customer pays, whatever the cart's running total says", async () => {
+    const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1000 })
+    await db.cart.update({
+      where: { id: cart.id },
+      data: { totalPriceInCents: -200 },
+    })
+    await payFor(user.id, "pi_drifted", 1000)
+
+    const res = await placeOrder(user.id, { paymentIntentId: "pi_drifted" })
+
+    expect(res.status).toBe(201)
+    const earned = await db.loyaltyRecord.findFirst({ where: { reason: "EARNED" } })
+    expect(earned?.change).toBe(60)
   })
 
   it("rolls back the order, its points and the cart when a later write fails", async () => {

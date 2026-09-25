@@ -1,6 +1,14 @@
 import { Resend } from "resend"
 import { getErrorMessage } from "../utils/getError"
 
+/**
+ * Sends one email through Resend.
+ *
+ * Resend's SDK reports most failures - a bad address, a rate limit - by returning `{ error }`
+ * rather than throwing, so the catch below sees only network failures. The result is handed
+ * back for a caller that wants to know; the callers written before that ignore it, as they
+ * always have.
+ */
 export default async function EmailSender(
   to: string,
   subject: string,
@@ -8,7 +16,7 @@ export default async function EmailSender(
 ) {
   const resend = new Resend(process.env.RESEND_API_KEY!)
   try {
-    await resend.emails.send({
+    return await resend.emails.send({
       from: '"Eversweet" <eversweet@eversweet.co.nz>',
       to,
       subject,

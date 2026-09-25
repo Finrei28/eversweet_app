@@ -1,4 +1,5 @@
 import { Dessert, UsersMembership } from "@/utils/types"
+import { isPaidUpMember } from "@/lib/membership"
 
 export function calculateBestDiscountedPrice(
   dessert: Dessert,
@@ -13,7 +14,8 @@ export function calculateBestDiscountedPrice(
       (usersMembership?.plan.membershipDiscount ?? 0),
   )
 
-  const membershipPrice = usersMembership?.isActive
+  // Paid up, not merely active: a membership on hold gets no member price.
+  const membershipPrice = isPaidUpMember(usersMembership)
     ? Math.round(originalPrice * (1 - maxMembershipDiscount / 100))
     : originalPrice
 
@@ -74,7 +76,7 @@ export function calculatePriceAfterMembershipDiscount(
       (usersMembership?.plan.membershipDiscount ?? 0),
   )
 
-  const membershipPrice = usersMembership?.isActive
+  const membershipPrice = isPaidUpMember(usersMembership)
     ? Math.round(price * (1 - maxMembershipDiscount / 100))
     : price
 
@@ -91,7 +93,7 @@ export function calculateMembershipDiscount(
       (usersMembership?.plan.membershipDiscount ?? 0),
   )
 
-  const membershipDiscount = usersMembership?.isActive
+  const membershipDiscount = isPaidUpMember(usersMembership)
     ? Math.round(price * (maxMembershipDiscount / 100))
     : 0
 

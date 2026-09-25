@@ -24,6 +24,12 @@ vi.mock("stripe", async (importOriginal) =>
   (await import("../test/stripeStub.js")).fakeStripeModule(await importOriginal()),
 )
 
+// A payment that switches a membership on sends the welcome email, which must never reach
+// Resend from a test. What it says is tested in membershipCart.integration.test.ts.
+vi.mock("../lib/emailSender", () => ({
+  default: vi.fn(async () => ({ data: { id: "email_test" }, error: null })),
+}))
+
 const WEBHOOK_SECRET = "whsec_integration_test"
 const SUBSCRIPTION = "sub_membership"
 /** The end of the period the latest payment bought, as Stripe reports it. */

@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { isPaidUpMember } from "@/lib/membership"
 import {
   AddCartItem,
   CartItem,
@@ -650,7 +651,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           (netUnitPriceInCents(item) / 100) * // points is calculated per dollar
             rates.rate *
             item.quantity *
-            (usersMembership?.isActive
+            // The member rate only while paid up, as the server earns it.
+            (isPaidUpMember(usersMembership)
               ? rates.modifier * rates.memberRate
               : rates.modifier),
         ),

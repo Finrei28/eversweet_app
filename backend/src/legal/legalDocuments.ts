@@ -92,7 +92,7 @@ export const LEGAL_TOKENS = [
  * Written the long way round because it is rendered raw by the app, and "12-06-2026" reads
  * as 12 June to a New Zealander and 6 December to an American with equal confidence.
  */
-export const LEGAL_LAST_UPDATED = "24 September 2026"
+export const LEGAL_LAST_UPDATED = "25 September 2026"
 
 const fill = (text: string, contact: LegalContact): string =>
   text.replace(/\{\{(\w+)\}\}/g, (whole, token: string) =>
@@ -254,7 +254,7 @@ export const termAndConditions: LegalDocument = {
         "Points are earned on what you actually pay for an item, after any discount, and are rounded down for each line. A small enough line can earn none.",
         "Members earn at a higher rate. The rates in force are shown in the app.",
         "Points expire if a month passes without an order from you in the app. The month runs from your most recent app order, and when it runs out your whole balance expires at once, at the end of that day, New Zealand time. Orders placed on the website do not count, because they are not linked to your account.",
-        "While you have an active membership, your points do not expire. If your membership ends, your month runs from the day it ended.",
+        "While your membership is active and paid up, your points do not expire. If your membership ends, your month runs from the day it ended. While it is on hold, your month runs from the day the unpaid renewal was due.",
         "The app shows the date your points will expire. If you allow notifications, we also send one a week before.",
         "Points in your cart when your balance expires expire with it: if the item comes out of your cart, or the cart expires, after that date, those points do not come back.",
         "We may pause expiry, for example while the shop is closed for a holiday. No points expire while it is paused, and when it resumes, everyone's month starts again from that day.",
@@ -288,10 +288,11 @@ export const termAndConditions: LegalDocument = {
       list: [
         "Your member discount grows with each consecutive month you pay for, up to the maximum shown in the app. It belongs to your subscription, so as long as that subscription is running the run keeps building.",
         "A renewal that fails and is then paid keeps your discount, whether your bank was retried automatically or you retried it yourself in the app. The month still ends up paid for.",
-        "Member discounts and member-only offers apply only while a membership is active and paid up.",
+        "Member benefits - member prices, member-only offers, the higher points rate and protection from points expiry - apply only while a membership is active and paid up.",
         "Cancelling stops the next renewal. You keep your membership and its benefits until the end of the period you have already paid for.",
         "We do not refund membership payments, including the month you are in when you cancel.",
         "If a renewal payment fails, your membership is put on hold while your bank is retried, and you can also retry it yourself in the app. If every retry fails, your subscription is cancelled.",
+        "While your membership is on hold, its benefits are paused. Member prices come off the items in your cart, and member-only items are taken out of it. Once the payment goes through, member prices return and member-only offers can be added again.",
         "Cancelling does not take effect straight away, and resuming before it does changes nothing: you keep the membership you had, and the discount you had built up with it.",
         "Your discount starts again at the first step only once the subscription itself has ended - either you let a cancellation run its course, or a renewal went unpaid until it was cancelled. Joining after that is a new subscription, and it begins again at the first step however long you were a member before.",
         "You cannot remove the card your membership renews on until you have chosen another one for it.",
@@ -465,7 +466,7 @@ export const privacyPolicy: LegalDocument = {
         "We use other companies to run parts of the service. They are allowed to use your information only to do the job we have given them:",
       list: [
         "Stripe - payments, saved cards and memberships. Stripe receives your name, email address, phone number and the amount, and handles your card details directly.",
-        "Resend - sends our emails: the code that confirms your email address, the code that resets your password, and your order confirmation.",
+        "Resend - sends our emails: the code that confirms your email address, the code that resets your password, your order confirmation, and a welcome email when you join the membership.",
         "Expo - delivers notifications to your phone, receiving the notification text and your device's token.",
         "Supabase - hosts the database that everything is stored in.",
         "Render - runs the servers behind the app.",

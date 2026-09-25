@@ -114,6 +114,14 @@ export default function ManageMembershipCard({
             </TouchableOpacity>
           </View>
         )}
+        {/* On hold: a renewal was declined and is being retried. The server pauses every
+            member benefit until it is paid, so say so rather than leave the customer to
+            find out at checkout. */}
+        {usersMembership.paymentStatus === "PENDING" && (
+          <Text className="text-gray-500 mt-3">
+            Your member benefits are paused until this payment goes through.
+          </Text>
+        )}
       </View>
 
       {cancelMembership && (

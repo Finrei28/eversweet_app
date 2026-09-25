@@ -324,9 +324,28 @@ describe("the claims that were wrong before", () => {
     expect(termsText).toMatch(/Orders placed on the website do not count/)
   })
 
-  it("says an active membership keeps points from expiring", () => {
-    expect(termsText).toMatch(/active membership, your points do not expire/)
+  it("says an active, paid-up membership keeps points from expiring", () => {
+    expect(termsText).toMatch(/membership is active and paid up, your points do not expire/)
     expect(termsText).toMatch(/runs from the day it ended/)
+  })
+
+  /**
+   * A membership on hold is still `isActive`, and until 2026-09-25 the cart and the points
+   * rate asked only that - so a member whose card had stopped paying kept member prices,
+   * member-only items and 1.5x points. Every benefit now pauses, and the terms must say so.
+   */
+  it("says every member benefit pauses while a membership is on hold", () => {
+    expect(termsText).toMatch(
+      /member prices, member-only offers, the higher points rate and protection from points expiry - apply only while a membership is active and paid up/,
+    )
+    expect(termsText).toMatch(/While your membership is on hold, its benefits are paused/)
+    expect(termsText).toMatch(/member-only items are taken out of it/)
+    expect(termsText).toMatch(/While it is on hold, your month runs from the day the unpaid renewal was due/)
+  })
+
+  /** Resend is listed with exactly what it sends, so a new email has to be added here. */
+  it("names every email Resend sends", () => {
+    expect(privacyText).toMatch(/your order confirmation, and a welcome email when you join the membership/)
   })
 
   it("says a customer is told before their points go", () => {
