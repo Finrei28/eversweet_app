@@ -35,20 +35,58 @@ describes the installed binary rather than whatever JS bundle is running on top 
 
 ## 2. 3D Secure: is more integration needed?
 
+**Why it matters at all.** A card saved in Stripe is not exempt: the card's bank (and Radar)
+decide per payment whether to ask the customer to confirm it is them. NZ has no strong
+customer authentication law like the EU/UK, so challenges are rare, but the bank's own risk
+rules, a tourist's EU/UK card or a Radar rule can all ask. An authenticated payment also moves
+fraud-chargeback liability to the bank.
+
 **Where it stands**
 
-- **Card orders (checkout):** `confirmPayment` in `@stripe/stripe-react-native` runs any 3DS challenge itself, and `StripeProvider` sets `urlScheme="eversweet"` (checkout, membership, payment-methods). **Likely covered, but untested.** Recovery on returning to the foreground now waits while a checkout is running, so coming back from a bank app no longer pops a false alert.
-- **Adding a card:** a SetupIntent via PaymentSheet handles 3DS.
-- **Joining membership: not covered.** `createMembership` creates the subscription server-side and charges at once. If the bank demands authentication, the subscription goes `incomplete` and nothing in the app lets the customer authenticate; the join poll just times out.
-- **Membership renewals: not covered.** They are off-session. Stripe raises `invoice.payment_action_required`, which the webhook doesn't handle.
+- **Card orders (checkout):** `confirmPayment` in `@stripe/stripe-react-native` runs any 3DS challenge itself, and `StripeProvider` sets `urlScheme="eversweet"` (checkout, membership, payment-methods). **Covered, untested.** Recovery on returning to the foreground waits while a checkout is running, so coming back from a bank app does not pop a false alert.
+- **Adding a card:** a SetupIntent via PaymentSheet handles 3DS. **Covered, untested.**
+- **Joining membership: built on 2026-09-25, untested on a device.** `createMembership` still
+  creates the subscription and attempts the first invoice server-side. When that payment is
+  waiting on the bank (`requires_action`), the 201 also carries `requiresAction`,
+  `clientSecret` and `paymentMethodId`, and the app confirms it with `confirmPayment`. Builds
+  from before ignore the extra fields and fail the join as they always did.
+- **Retrying a held renewal: built on 2026-09-25, untested on a device.** `retryPayment` pays
+  off-session, which a bank that wants authentication declines with `authentication_required`.
+  It now answers **402 `AUTHENTICATION_REQUIRED`** with the payment's client secret, and the app
+  confirms it. A 402 rather than a 200 so older builds still read a failed retry, with the same
+  message.
+- **The poll after confirming ignores FAILED.** Stripe can report a first payment waiting on
+  the bank as `invoice.payment_failed`, so the row can read FAILED before the customer has answered;
+  once `confirmPayment` has gone through that is stale. The webhook switches a FAILED row on
+  when the payment arrives (pinned in `stripeWebhook.integration.test.ts`).
+- **Renewals themselves** are off-session and banks rarely challenge them. If one does,
+  `invoice.payment_failed` or `invoice.payment_action_required` (both handled, one push between
+  them) puts the member on hold with `paymentFailureCode: "authentication_required"`. The push
+  ("Please confirm your membership payment"), the home/cart banner and the manage card
+  ("Confirm payment") ask them to confirm with their bank rather than say the payment failed,
+  and Retry shows the bank's check. Also a backstop for a member who missed Stripe's email.
+  Builds from before this word it as a failed payment, and their Retry cannot confirm.
 
-**To do**
+**Still to do**
 
-- Test on a dev build in Stripe test mode with cards that need authentication (e.g. `4000 0025 0000 3155`, `4000 0027 6000 3184`). Cover checkout, adding a card, joining membership, and backgrounding the app mid-challenge.
-- **If joining fails:** return the first invoice's payment intent client secret (or create with `payment_behavior: "default_incomplete"`), and have the app confirm it with `confirmPayment`.
-- **For renewals:** decide between Stripe's own authentication emails (Dashboard setting) and handling `invoice.payment_action_required` with a push notification plus an in-app screen to authenticate.
+- **Switch on Stripe's hosted 3DS email** (Dashboard: Billing → Settings → Subscriptions and
+  emails → "Send a Stripe-hosted link for customers to confirm their payments when required").
+  No code; it covers a member who never opens the app. Leave "Enable 3D Secure" off: it only
+  lets Radar rules *request* 3DS on subscription payments, which adds friction for little
+  gain here.
+- **Add `invoice.payment_action_required` to the webhook endpoint's events** (Dashboard:
+  Developers → Webhooks). The handler is there, but Stripe only sends selected events.
+- **Test on a dev build in Stripe test mode** with `4000 0025 0000 3155` (authenticates once
+  when set up, then works off-session) and `4000 0027 6000 3184` (always asks):
+  - checkout, adding a card, backgrounding the app mid-challenge;
+  - joining, including cancelling the bank's check (the row should end FAILED, so a second
+    join is not held off by the two-minute join lock);
+  - a renewal on a test clock: check which events fire, then Retry from the app.
 
-**Decide:** how far to go. NZ cards rarely challenge, but it isn't zero.
+**Rollout:** the app build first, then the server. The new build behaves exactly as before
+against the old server (no `requiresAction`, no 402, no `paymentFailureCode`). The server the
+other way round is safe too, but its push tells a member to "confirm it in the app", which an
+old build's Retry cannot do. Then add the webhook event and switch on the email.
 
 ---
 

@@ -7,7 +7,11 @@ import { formatShortDate } from "@/lib/formatters"
 import { getErrorMessage } from "@/utils/getError"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
 import { UsersMembership } from "@/utils/types"
-import { builtUpDiscountPercent, headlinePerk } from "@/lib/membership"
+import {
+  builtUpDiscountPercent,
+  headlinePerk,
+  needsBankConfirmation,
+} from "@/lib/membership"
 
 /**
  * Cancellation / re-subscribe / payment-retry controls for an active member.
@@ -35,6 +39,9 @@ export default function ManageMembershipCard({
   const atStake = perk
     ? `your ${discount}% discount, ${perk} and your other member benefits`
     : `your ${discount}% discount and your other member benefits`
+  // The bank is waiting for the member to confirm the payment: nothing is wrong with the card,
+  // and Retry is what shows the bank's check, so neither is worded as a failure.
+  const confirmWithBank = needsBankConfirmation(usersMembership)
 
   const handleResumeMembership = async () => {
     setIsResuming(true)
@@ -100,7 +107,9 @@ export default function ManageMembershipCard({
             >
               {usersMembership.paymentStatus === "SUCCESS"
                 ? `${"Renews on: " + formatShortDate(usersMembership.endDate)}`
-                : "Payment Failed"}
+                : confirmWithBank
+                  ? "Your bank needs you to confirm"
+                  : "Payment Failed"}
             </Text>
             <TouchableOpacity
               onPress={() =>
@@ -117,7 +126,9 @@ export default function ManageMembershipCard({
                 <Text className="text-white">
                   {usersMembership.paymentStatus === "SUCCESS"
                     ? "Cancel"
-                    : "Retry payment"}
+                    : confirmWithBank
+                      ? "Confirm payment"
+                      : "Retry payment"}
                 </Text>
               )}
             </TouchableOpacity>

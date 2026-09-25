@@ -157,6 +157,8 @@ export type UsersMembership = {
   startDate: Date
   endDate: Date
   paymentStatus: "PENDING" | "SUCCESS" | "FAILED"
+  /** Why the last payment was held up; see `needsBankConfirmation`. Absent from older servers. */
+  paymentFailureCode?: string | null
   stripeSubscriptionId: string | null
   planId: string
   isActive: boolean

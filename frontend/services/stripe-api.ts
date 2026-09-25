@@ -13,7 +13,12 @@ import {
   SetUpIntent,
   UsersMembership,
 } from "@/utils/types"
-import { apiFetch, apiRequest, AppUpdateRequiredError } from "./apiClient"
+import {
+  ApiError,
+  apiFetch,
+  apiRequest,
+  AppUpdateRequiredError,
+} from "./apiClient"
 import { getErrorMessage } from "@/utils/getError"
 
 const UNAUTHENTICATED = "Unauthenticated"
@@ -42,17 +47,61 @@ export const createSetupIntent = async (): Promise<SetUpIntent> =>
     fallback: "Failed to create setup intent",
   })
 
-export const retryPayment = async () => {
-  const data = await apiRequest<{ success: boolean }>(
-    "/api/stripe/retryPayment",
-    {
-      method: "POST",
-      authMessage: UNAUTHENTICATED,
-      fallback: "Retry payment failed",
-    },
-  )
+/**
+ * The customer's bank wants them to confirm a membership payment is theirs (3D Secure).
+ * Nothing has been charged; confirming the payment on this device with `confirmPayment`
+ * shows the bank's check, and the webhook takes it from there.
+ */
+export class PaymentAuthenticationRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly clientSecret: string,
+    readonly paymentMethodId: string,
+  ) {
+    super(message)
+    this.name = "PaymentAuthenticationRequiredError"
+  }
+}
 
-  return data.success
+/** Answers what the join needs next: nothing, or the bank's check (see above). */
+export type MembershipPaymentStarted = {
+  success?: boolean
+  requiresAction?: boolean
+  clientSecret?: string
+  paymentMethodId?: string
+}
+
+export const retryPayment = async () => {
+  try {
+    const data = await apiRequest<{ success: boolean }>(
+      "/api/stripe/retryPayment",
+      {
+        method: "POST",
+        authMessage: UNAUTHENTICATED,
+        fallback: "Retry payment failed",
+        // Named so a bank's check is not logged as a failure in development.
+        statusMessages: { 402: "Your bank needs to confirm this payment." },
+      },
+    )
+
+    return data.success
+  } catch (error) {
+    const data = error instanceof ApiError ? error.data : null
+    if (
+      error instanceof ApiError &&
+      error.status === 402 &&
+      data?.code === "AUTHENTICATION_REQUIRED" &&
+      typeof data.clientSecret === "string" &&
+      typeof data.paymentMethodId === "string"
+    ) {
+      throw new PaymentAuthenticationRequiredError(
+        error.message,
+        data.clientSecret,
+        data.paymentMethodId,
+      )
+    }
+    throw error
+  }
 }
 
 export const setCardForMembershipPayments = async (
@@ -208,7 +257,7 @@ export const createMembership = async (
 ) => {
   const JOIN_SIGN_IN = "Please sign in to join our membership."
 
-  return apiRequest("/api/stripe/createMembership", {
+  return apiRequest<MembershipPaymentStarted>("/api/stripe/createMembership", {
     method: "POST",
     body: { paymentMethodId, stripePriceId },
     authMessage: JOIN_SIGN_IN,

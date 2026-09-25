@@ -279,6 +279,36 @@ describeIfDb("Stripe webhook", () => {
       })
     })
 
+    /**
+     * A first payment the bank wants to authenticate is reported as a failed payment before
+     * the customer has had the chance to answer, so the row reads FAILED. Confirming it in
+     * the app then pays the invoice, and that payment has to switch the membership on.
+     */
+    it("switches on a membership whose first payment was authenticated after a decline", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id, {
+        isActive: false,
+        paymentStatus: "FAILED",
+        totalMonths: 0,
+      })
+      stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+      stripeApi.invoices.list.mockResolvedValue(
+        paidInvoices(["in_first", "subscription_create"]),
+      )
+
+      const res = await deliver(paymentSucceeded("in_first", "subscription_create"))
+
+      expect(res.status).toBe(200)
+      const after = await db.membership.findUniqueOrThrow({
+        where: { id: membership.id },
+      })
+      expect(after).toMatchObject({
+        isActive: true,
+        paymentStatus: "SUCCESS",
+        totalMonths: 1,
+      })
+    })
+
     /** A throw here had Stripe redelivering the event for days. */
     it("acknowledges a subscription that matches no membership", async () => {
       const user = await makeUser()
@@ -587,6 +617,134 @@ describeIfDb("Stripe webhook", () => {
       expect(body).toMatch(/^Your 15% member discount, .+ and your other member benefits are paused\./)
       expect(body).toMatch(/the discount starts again at 5%\.$/)
       expect(data).toEqual({ type: "MEMBERSHIP_PAYMENT_FAILED" })
+    })
+
+    describe("when the bank wants the member to confirm the renewal", () => {
+      /** Off-session, a bank that wants 3D Secure declines with this and Stripe waits. */
+      const awaitingBank = {
+        id: "pi_declined",
+        status: "requires_payment_method",
+        last_payment_error: {
+          code: "card_declined",
+          decline_code: "authentication_required",
+          message: "Your card was declined. This transaction requires authentication.",
+        },
+      }
+
+      const actionRequired = () => ({
+        ...paymentFailed(),
+        id: "evt_action_in_renewal",
+        type: "invoice.payment_action_required",
+      })
+
+      beforeEach(() => {
+        stripeApi.paymentIntents.retrieve.mockResolvedValue(awaitingBank)
+        stripeApi.subscriptions.retrieve.mockResolvedValue(
+          subscription({ status: "past_due" }),
+        )
+        stripeApi.invoices.retrieve.mockResolvedValue(invoiceNow("open"))
+      })
+
+      /**
+       * Worded as a decline, the push and the banner sent a member whose card was fine off
+       * to replace it, when all the bank wanted was for them to confirm the payment.
+       */
+      it("records it and asks the member to confirm, not to replace the card", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id, { totalMonths: 3 })
+
+        await deliver(paymentFailed())
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({
+          isActive: true,
+          paymentStatus: "PENDING",
+          paymentFailureCode: "authentication_required",
+        })
+        expect(sendPushToUser).toHaveBeenCalledTimes(1)
+        const [, title, body, data] = sendPushToUser.mock.calls[0]
+        expect(title).toBe("Please confirm your membership payment")
+        expect(body).toMatch(/^Your bank needs you to confirm this month's membership payment\./)
+        expect(data).toEqual({ type: "MEMBERSHIP_PAYMENT_FAILED" })
+      })
+
+      /** Waiting in `requires_action` carries no error at all, and is the same case. */
+      it("recognises a payment waiting on the bank with no error on it", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id)
+        stripeApi.paymentIntents.retrieve.mockResolvedValue({
+          id: "pi_declined",
+          status: "requires_action",
+          last_payment_error: null,
+        })
+
+        await deliver(actionRequired())
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after.paymentFailureCode).toBe("authentication_required")
+      })
+
+      /**
+       * Stripe can send both events for the one attempt. Each would put the membership on
+       * hold, and the claim is what keeps it to one push.
+       */
+      it("tells the member once when both events arrive", async () => {
+        const user = await makeUser()
+        await makeMembership(user.id)
+
+        await deliver(actionRequired())
+        await deliver(paymentFailed())
+
+        expect(sendPushToUser).toHaveBeenCalledTimes(1)
+      })
+
+      it("forgets the reason once the renewal is paid", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id)
+        await deliver(paymentFailed())
+
+        stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+        stripeApi.invoices.list.mockResolvedValue(
+          paidInvoices(["in_first", "subscription_create"], ["in_second", "subscription_cycle"]),
+        )
+        await deliver(paymentSucceeded())
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({
+          paymentStatus: "SUCCESS",
+          paymentFailureCode: null,
+          paymentFailureMessage: null,
+        })
+      })
+    })
+
+    it("records why a renewal was declined, and words the push as a decline", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id)
+      stripeApi.subscriptions.retrieve.mockResolvedValue(
+        subscription({ status: "past_due" }),
+      )
+      stripeApi.invoices.retrieve.mockResolvedValue(invoiceNow("open"))
+
+      await deliver(paymentFailed())
+
+      const after = await db.membership.findUniqueOrThrow({
+        where: { id: membership.id },
+      })
+      expect(after).toMatchObject({
+        paymentStatus: "PENDING",
+        paymentFailureCode: "card_declined",
+        paymentFailureMessage: "Your card was declined.",
+      })
+      expect(sendPushToUser.mock.calls[0][1]).toBe(
+        "Your membership payment didn't go through",
+      )
     })
 
     /** A paid retry lifts the hold, so a later renewal declined is a new one. */
