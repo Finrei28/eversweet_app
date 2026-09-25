@@ -20,6 +20,7 @@ import {
   stripeApi,
 } from "../test/stripeStub"
 import { sweepStrandedPayments } from "../lib/strandedPayments"
+import EmailSender from "../lib/emailSender"
 
 // Reached through a getter because vi.mock is hoisted above the imports.
 vi.mock("../lib/redis", () => ({
@@ -761,23 +762,20 @@ describeIfDb("POST /api/auth/createOrder", () => {
   })
 
   /**
-   * Points were gated on `Cart.totalPriceInCents`, a running total that every cart write
-   * nudges and which drifts - removing a discounted line takes off its list price, not what
-   * it cost. A cart that had drifted to zero or below earned its customer nothing.
+   * The confirmation was awaited before answering, so a failed email turned a committed,
+   * paid order into a 500 "follow-up action failed", and every checkout waited on Resend.
    */
-  it("earns points on what the customer pays, whatever the cart's running total says", async () => {
-    const { user, cart } = await makeCustomerWithCart({ itemPriceInCents: 1000 })
-    await db.cart.update({
-      where: { id: cart.id },
-      data: { totalPriceInCents: -200 },
-    })
-    await payFor(user.id, "pi_drifted", 1000)
+  it("answers with the order even when the confirmation email fails", async () => {
+    const { user } = await makeCustomerWithCart({ itemPriceInCents: 1200 })
+    await payFor(user.id, "pi_no_email", 1200)
+    vi.mocked(EmailSender).mockRejectedValueOnce(new Error("Resend is down"))
+    vi.spyOn(console, "error").mockImplementation(() => {})
 
-    const res = await placeOrder(user.id, { paymentIntentId: "pi_drifted" })
+    const res = await placeOrder(user.id, { paymentIntentId: "pi_no_email" })
 
     expect(res.status).toBe(201)
-    const earned = await db.loyaltyRecord.findFirst({ where: { reason: "EARNED" } })
-    expect(earned?.change).toBe(60)
+    expect(res.body.order.id).toBeTruthy()
+    await vi.waitFor(() => expect(EmailSender).toHaveBeenCalled())
   })
 
   it("rolls back the order, its points and the cart when a later write fails", async () => {
@@ -893,7 +891,6 @@ describeIfDb("POST /api/auth/createOrder", () => {
       await db.cart.create({
         data: {
           userId: user.id,
-          totalPriceInCents: dessert2.priceInCents,
           cartItems: {
             create: {
               dessertId: dessert2.id,

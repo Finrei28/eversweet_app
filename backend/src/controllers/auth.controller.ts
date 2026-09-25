@@ -1045,9 +1045,9 @@ export const createOrder = async (req: Request, res: Response) => {
             source: "APP",
             priceInCents: totalPriceInCentsBeforeDiscount,
             discountedAmountInCents: discountedAmountInCents,
-            // From the priced items, not Cart.totalPriceInCents: that column is
-            // kept up to date by scattered increment/decrement writes and can
-            // drift from the rows it summarises. Extracted from the inclusive
+            // From the priced items. Cart.totalPriceInCents was a running total,
+            // nudged by every cart write, that drifted from the rows it summarised;
+            // nothing reads it now and it is being dropped. Extracted from the inclusive
             // total rather than added on top of it, and rounded, since this is an
             // Int column that a raw percentage would not always land on.
             GST: gstInCents,
@@ -1097,10 +1097,9 @@ export const createOrder = async (req: Request, res: Response) => {
         // add points members and non members
         //
         // Gated on what the customer pays, worked out from the rows. It was gated on
-        // `cart.totalPriceInCents`, a running total every cart write nudges and which
-        // drifts: removing a discounted line takes off its list price, so a cart still
-        // holding a reward could read zero or less, and that order earned no points and
-        // unlocked no offers.
+        // `cart.totalPriceInCents`, a running total that drifted: removing a discounted
+        // line took off its list price, so a cart still holding a reward could read zero
+        // or less, and that order earned no points and unlocked no offers.
         if (payableInCents > 0) {
           let earnablePoints = 0
 
@@ -1272,18 +1271,31 @@ export const createOrder = async (req: Request, res: Response) => {
     // Past this point the order is committed and paid for. Anything that
     // fails below is reported as a follow-up failure carrying the order id,
     // never as a failed order.
-    const subject = "Order Confirmation"
-    await EmailSender(
-      user.email,
-      subject,
-      EmailOrderConfirmation({ order: newOrder }),
-    )
-
     if (parsedBody.pickupNow && newOrder.notified === false) {
       emitNewOrder(newOrder)
     }
 
     res.status(201).json({ order: newOrder })
+
+    // After answering, and not awaited. It was awaited first, so every checkout waited on a
+    // round trip to Resend before the customer saw their order - and an email that failed
+    // turned a paid, committed order into a 500 "follow-up action failed". The receipt is
+    // worth a log line when it fails, not the customer's order screen.
+    // Inside the async function so that building the email can fail here too, rather than
+    // throwing into the handler's catch after the response has gone.
+    const confirmedOrder = newOrder
+    const email = user.email
+    void (async () =>
+      EmailSender(
+        email,
+        "Order Confirmation",
+        EmailOrderConfirmation({ order: confirmedOrder }),
+      ))().catch((error) =>
+      console.error(
+        `Order ${confirmedOrder.id} confirmation email failed:`,
+        getErrorMessage(error),
+      ),
+    )
     return
   } catch (error) {
     // A refusal that had to roll back writes already made — the hold was gone
