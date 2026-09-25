@@ -50,15 +50,6 @@ export class OfferUnavailableError extends Error {
   }
 }
 
-// function getNextMonday(fromDate = new Date()): Date {
-//   const date = new Date(fromDate)
-//   const day = date.getDay() // 0 = Sunday, 1 = Monday, ... 6 = Saturday
-//   const daysUntilMonday = (8 - day) % 7 || 7 // ensures we always move forward
-//   date.setDate(date.getDate() + daysUntilMonday)
-//   date.setHours(0, 0, 0, 0) // optional: normalize to start of day
-//   return date
-// }
-
 /**
  * The order every cart transaction takes its row locks in:
  *
@@ -413,25 +404,7 @@ export const addItemToCart = async (req: Request, res: Response) => {
       cartItemData.offer = { connect: { id: cartItem.offerId } }
     }
 
-    // create new cart item
-    // let promotionEligible = false
-    // await db.$transaction(async (tx) => {
-    //   if (cart) {
-    //     promotionEligible = await CheckMochiPromotion(
-    //       cart.id,
-    //       cartItem.dessertId,
-    //       dessert.priceInCents,
-    //       cartItem.itemPriceInCents,
-    //       cartItem.customisations,
-    //       tx,
-    //     )
-    //   }
-    // })
-
     const cartExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000)
-    const netPriceInCents = Math.round(
-      itemPriceInCentsBeforeDiscount - finalDiscountedAmount,
-    )
     const pointsSpent = isRedemption ? dessert.priceInLoyaltyPoints : 0
 
     // Supplied rather than left to the database, so the row just written can be
@@ -440,25 +413,25 @@ export const addItemToCart = async (req: Request, res: Response) => {
     // at once.
     const newCartItemId = randomUUID()
 
-    // Creating the cart and adding to an existing one differ only in whether
-    // the totals are set or incremented, which is exactly what upsert says.
-    // This replaces a findUnique, a branch, an update and a create — four
-    // round trips plus the transaction's own BEGIN and COMMIT — with one
-    // statement that Prisma still applies atomically.
+    // Creating the cart and adding to an existing one are one upsert: a
+    // findUnique, a branch, an update and a create - four round trips plus the
+    // transaction's own BEGIN and COMMIT - in one statement that Prisma still
+    // applies atomically.
+    //
+    // No running totals. The cart kept `totalPriceInCents` and
+    // `totalLoyaltyPointsUsed`, nudged by every write, and they drifted from the
+    // lines they described while nothing read them: what a cart costs is
+    // `calculateCartPrice` over its rows. Both columns are being dropped.
     const writeCartItem = async (client: DbTransactionClient) => {
       const cart = await client.cart.upsert({
         where: { userId },
         create: {
           user: { connect: { id: userId } },
           expiresAt: cartExpiresAt,
-          totalLoyaltyPointsUsed: pointsSpent,
-          totalPriceInCents: netPriceInCents,
           cartItems: { create: { id: newCartItemId, ...cartItemData } },
         },
         update: {
           expiresAt: cartExpiresAt, // extend expiry
-          totalLoyaltyPointsUsed: { increment: pointsSpent },
-          totalPriceInCents: { increment: netPriceInCents },
           cartItems: { create: { id: newCartItemId, ...cartItemData } },
         },
         select: {
@@ -876,13 +849,24 @@ export const clearCart = async (req: Request, res: Response) => {
           await creditRefund(tx, userId, totalPointsToRefund, expiredSince)
         }
 
-        await tx.cart.delete({ where: { userId } })
+        // The delete is the claim, as on the cart load's expiry branch. Two clears
+        // at once - a double tap, or a clear racing that expiry - both read the
+        // cart; the one that finds it already gone rolls its refund and releases
+        // back with it. That used to arrive as a P2025 from `delete`, which did
+        // roll back, and then told the customer the server had broken.
+        const { count } = await tx.cart.deleteMany({ where: { id: cart.id } })
+        if (count === 0) throw new AlreadySwept()
       }, TRANSACTION_OPTIONS),
     )
 
     res.status(200).json({ success: true, message: "Cart cleared" })
     return
   } catch (error) {
+    // Already cleared by the other request: the same answer as no cart at all.
+    if (error instanceof AlreadySwept) {
+      res.status(404).json({ message: "No cart found" })
+      return
+    }
     console.error(error)
     res.status(500).json({ success: false, message: "Internal server error" })
     return
@@ -909,7 +893,6 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
       select: {
         id: true,
         loyaltyPointsUsed: true,
-        itemPriceInCents: true,
         offerId: true,
         cart: { select: { userId: true } },
       },
@@ -960,38 +943,38 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
           )
         }
 
-        const updatedCart = await tx.cart.update({
-          where: { userId },
-          data: {
-            expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-            totalLoyaltyPointsUsed: {
-              decrement: cartItem.loyaltyPointsUsed ?? 0,
-            },
-            totalPriceInCents: {
-              decrement: cartItem.itemPriceInCents,
-            },
-            cartItems: {
-              delete: {
-                id: cartItem.id,
-              },
-            },
-          },
-          select: {
-            id: true,
-            cartItems: {
-              select: {
-                id: true,
-              },
-            },
-          },
-        })
-
-        // delete cart if empty
-
-        if (updatedCart.cartItems.length === 0) {
-          await tx.cart.delete({
-            where: { id: updatedCart.id },
+        // The cart, then the line: the order an add takes them in. The cart may
+        // have gone since the lookup above - cleared, or expired by a cart load -
+        // which is the same as the line having gone.
+        const lockedCart = await tx.cart
+          .update({
+            where: { userId },
+            data: { expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000) },
+            select: { id: true, cartItems: { select: { id: true } } },
           })
+          .catch((error: unknown) => {
+            if (
+              error instanceof Prisma.PrismaClientKnownRequestError &&
+              error.code === "P2025"
+            ) {
+              throw new AlreadySwept()
+            }
+            throw error
+          })
+
+        // The delete is the claim. Two removes of one line both passed the lookup
+        // above; the second found the line gone inside the nested delete this used
+        // to be, and answered 500 after refunding - rolled back, but reported as a
+        // server fault, and the app put the line back on screen.
+        const { count } = await tx.cartItem.deleteMany({
+          where: { id: cartItem.id, cartId: lockedCart.id },
+        })
+        if (count === 0) throw new AlreadySwept()
+
+        // Delete the cart if that was its last line. The lines were read under the
+        // cart's lock, so no add can have slipped one in since.
+        if (lockedCart.cartItems.every((line) => line.id === cartItem.id)) {
+          await tx.cart.delete({ where: { id: lockedCart.id } })
         }
 
         return cartItem.id
@@ -1001,6 +984,12 @@ export const removeItemFromCart = async (req: Request, res: Response) => {
     res.status(200).json({ success: true, id: cartItem.id })
     return
   } catch (error) {
+    // Removed by another request meanwhile: the same answer as a line that is not
+    // there, which is what it now is.
+    if (error instanceof AlreadySwept) {
+      res.status(404).json({ message: "cart item not found" })
+      return
+    }
     console.error(error)
     res.status(500).json({
       success: false,
@@ -1041,20 +1030,13 @@ export const updateCartItem = async (req: Request, res: Response) => {
             // Both checked against the request below, before anything is priced.
             dessertId: true,
             cart: { select: { userId: true } },
-            itemPriceInCents: true,
             loyaltyPointsUsed: true,
-            quantity: true,
             // The offer this line actually holds. Pricing used to read the
             // offer id out of the request, which never gets written to the
             // row - so quoting a generous offer's id while editing a plain
             // item applied that offer's discount without ever holding a
             // redemption against it.
             offerId: true,
-            customisations: {
-              include: {
-                customisation: true,
-              },
-            },
           },
         }),
         db.membership.findUnique({
@@ -1179,45 +1161,10 @@ export const updateCartItem = async (req: Request, res: Response) => {
       })
     }
 
-    const newCustomisationPrice = customisations.reduce(
-      (sum, customisation) =>
-        sum +
-        (customisation.quantity > 0
-          ? (customisation.priceInCents -
-              customisationDiscountInCents(
-                customisation.priceInCents,
-                customisation.quantity,
-                memberPercent,
-              )) *
-            customisation.quantity
-          : 0),
-      0,
-    )
-
-    const oldCustomisationPrice = existingCartItem.customisations.reduce(
-      (sum, customisation) =>
-        sum +
-        (customisation.quantity > 0
-          ? (customisation.customisation.priceInCents -
-              customisation.discountedAmountInCents) *
-            customisation.quantity
-          : 0),
-      0,
-    )
-    // included customisations that want to be removed have their quantity as 0 therefore only count customisation where their quantity is > 0
-    const newtotalCartItemPrice =
-      itemPriceInCentsBeforeDiscount + newCustomisationPrice
-
-    const oldtotalCartItemPrice =
-      existingCartItem.itemPriceInCents + oldCustomisationPrice
-
-    const priceDifference = newtotalCartItemPrice - oldtotalCartItemPrice
-
     await db.cart.update({
       where: { userId },
       data: {
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-        totalPriceInCents: { increment: priceDifference },
         cartItems: {
           update: {
             where: { id: cartItem.id },
@@ -1321,27 +1268,9 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       where: { id },
       select: {
         id: true,
-        cartId: true,
         cart: { select: { userId: true } },
-        itemPriceInCents: true,
         loyaltyPointsUsed: true,
-        quantity: true,
-
         offerId: true,
-        customisations: {
-          select: {
-            customisation: {
-              select: {
-                id: true,
-                name: true,
-                chineseName: true,
-                priceInCents: true,
-              },
-            },
-            quantity: true,
-            discountedAmountInCents: true,
-          },
-        },
       },
     })
 
@@ -1375,23 +1304,6 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       return
     }
 
-    const customisationPrice = cartItem.customisations.reduce(
-      (sum, customisation) =>
-        sum +
-        (customisation.quantity > 0
-          ? (customisation.customisation.priceInCents -
-              customisation.discountedAmountInCents) *
-            customisation.quantity
-          : 0),
-      0,
-    )
-    // included customisations that want to be removed have their quantity as 0 therefore only count customisation where their quantity is > 0
-    const newtotalCartItemPrice =
-      (cartItem.itemPriceInCents + customisationPrice) * quantity
-    const oldTtotalItemPrice =
-      (cartItem.itemPriceInCents + customisationPrice) * cartItem.quantity
-    const priceDifference = newtotalCartItemPrice - oldTtotalItemPrice
-
     // One statement. This used to open a transaction, update the cart — whose
     // nested cartItems update already applied the new quantity — and then
     // update that same row a second time purely to read it back with its
@@ -1401,10 +1313,6 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
       where: { userId },
       data: {
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-        // No points term. This used to re-add the line's points on every
-        // quantity change, including a decrement, which drifted the column.
-        // The guard above means a line reaching here never has any.
-        totalPriceInCents: { increment: priceDifference ?? 0 },
         cartItems: {
           update: {
             where: { id },
@@ -1465,193 +1373,3 @@ export const updateCartItemQuantity = async (req: Request, res: Response) => {
     return
   }
 }
-
-// export const incrementCartItem = async (req: Request, res: Response) => {
-//   try {
-//     const userId = (req as any).userId
-//     if (!userId) {
-//       res.status(401).json({ message: "Unauthorised" })
-//       return
-//     }
-//     const { id } = req.body
-//     if (!id) {
-//       res.status(400).json({ message: "cartItemId is required" })
-//       return
-//     }
-//     const cartItem = await db.cartItem.findUnique({
-//       where: { id },
-//       select: {
-//         cartId: true,
-//         itemPriceInCents: true,
-//         loyaltyPointsUsed: true,
-//         quantity: true,
-//         dessertId: true,
-//         offerId: true,
-//       },
-//     })
-//     if (!cartItem) {
-//       res.status(404).json({ message: "Cart item not found" })
-//       return
-//     }
-
-//     if (cartItem.offerId) {
-//       res.status(404).json({ message: "Cannot increment offers" })
-//       return
-//     }
-
-//     const { upserted } = await CheckMochiPromotion(
-//       cartItem.cartId,
-//       cartItem.dessertId
-//     )
-
-//     if (!upserted) {
-//       await db.cart.update({
-//         where: { userId },
-//         data: {
-//           expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-//           totalLoyaltyPointsUsed: {
-//             increment: cartItem?.loyaltyPointsUsed ?? 0,
-//           },
-//           totalPriceInCents: { increment: cartItem?.itemPriceInCents ?? 0 },
-//           cartItems: {
-//             update: {
-//               where: { id },
-//               data: {
-//                 quantity: { increment: 1 },
-//               },
-//             },
-//           },
-//         },
-//       })
-//     }
-
-//     const newCartItems = await db.cartItem.findMany({
-//       where: { cartId: cartItem.cartId },
-//       include: {
-//         dessert: {
-//           select: {
-//             id: true,
-//             name: true,
-//             chineseName: true,
-//             description: true,
-//             priceInCents: true,
-//             priceInLoyaltyPoints: true,
-//             imagePath: true,
-//             ingredients: { include: { ingredient: true } },
-//           },
-//         },
-//         customisations: { include: { customisation: true } },
-//       },
-//       orderBy: { createdAt: "asc" },
-//     })
-//     const cartItems = newCartItems.map((item) => ({
-//       ...item,
-//       dessert: {
-//         ...item.dessert,
-//         ingredients: item.dessert.ingredients.map((i) => i.ingredient),
-//       },
-//       customisations: item.customisations.map((c) => ({
-//         ...c.customisation,
-//         quantity: c.quantity,
-//       })),
-//     }))
-//     console.log(cartItems)
-//     res.status(200).json({ success: true, cartItems })
-//     return
-//   } catch (error) {
-//     console.error(error)
-//     res.status(500).json({ success: false, message: "Internal server error" })
-//     return
-//   }
-// }
-
-// export const decrementCartItem = async (req: Request, res: Response) => {
-//   try {
-//     const userId = (req as any).userId
-//     if (!userId) {
-//       res.status(401).json({ message: "Unauthorised" })
-//       return
-//     }
-//     const { id } = req.body
-//     if (!id) {
-//       res.status(400).json({ message: "cartItemId is required" })
-//       return
-//     }
-//     const cartItem = await db.cartItem.findUnique({
-//       where: { id },
-//       select: {
-//         cartId: true,
-//         dessertId: true,
-//         quantity: true,
-//         itemPriceInCents: true,
-//         loyaltyPointsUsed: true,
-//       },
-//     })
-//     if (!cartItem) {
-//       res.status(404).json({ message: "Cart item not found" })
-//       return
-//     }
-//     if (cartItem.quantity <= 1) {
-//       res.status(400).json({ message: "Quantity cannot be less than 1" })
-//       return
-//     }
-//     const updatedCart = await db.cart.update({
-//       where: { userId },
-//       data: {
-//         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // extend expiry
-//         totalLoyaltyPointsUsed: {
-//           decrement: cartItem?.loyaltyPointsUsed ?? 0,
-//         },
-//         totalPriceInCents: { decrement: cartItem?.itemPriceInCents ?? 0 },
-//         cartItems: {
-//           update: {
-//             where: { id },
-//             data: {
-//               quantity: { decrement: 1 },
-//             },
-//           },
-//         },
-//       },
-//     })
-
-//     await CheckMochiPromotion(cartItem.cartId, cartItem.dessertId)
-
-//     const newCartItems = await db.cartItem.findMany({
-//       where: { cartId: cartItem.cartId },
-//       include: {
-//         dessert: {
-//           select: {
-//             id: true,
-//             name: true,
-//             chineseName: true,
-//             description: true,
-//             priceInCents: true,
-//             priceInLoyaltyPoints: true,
-//             imagePath: true,
-//             ingredients: { include: { ingredient: true } },
-//           },
-//         },
-//         customisations: { include: { customisation: true } },
-//       },
-//       orderBy: { createdAt: "asc" },
-//     })
-
-//     const cartItems = newCartItems.map((item) => ({
-//       ...item,
-//       dessert: {
-//         ...item.dessert,
-//         ingredients: item.dessert.ingredients.map((i) => i.ingredient),
-//       },
-//       customisations: item.customisations.map((c) => ({
-//         ...c.customisation,
-//         quantity: c.quantity,
-//       })),
-//     }))
-//     res.status(200).json({ success: true, cartItems })
-//     return
-//   } catch (error) {
-//     console.error(error)
-//     res.status(500).json({ success: false, message: "Internal server error" })
-//     return
-//   }
-// }

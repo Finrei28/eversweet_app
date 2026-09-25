@@ -21,6 +21,25 @@ export class AppUpdateRequiredError extends Error {
   }
 }
 
+/**
+ * A request the server answered with a failure status, carrying that status.
+ *
+ * Every failure used to arrive as a plain Error holding only its message, so a caller could
+ * not tell "that is already gone" from "the server broke". Removing a cart line the server had
+ * already taken out - a members-only item the membership webhook removed, say - came back 404
+ * and read as a failed removal: the line was put back on screen and an error shown. An Error
+ * still, so everything that catches one is unchanged.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "ApiError"
+  }
+}
+
 const UPDATE_RECOMMENDED_HEADER = "X-App-Update-Recommended"
 
 /**
@@ -201,7 +220,7 @@ export async function apiRequest<T>(
     if (__DEV__ && statusMessages?.[res.status] === undefined) {
       console.error(`${options.method ?? "GET"} ${path} failed:`, message)
     }
-    throw new Error(message)
+    throw new ApiError(message, res.status)
   }
 
   return data as T

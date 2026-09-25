@@ -275,7 +275,7 @@ const memberOnlyLine = async (userId: string, { limit = 1, used = 1 } = {}) => {
   })
   const cart = await db.cart.upsert({
     where: { userId },
-    create: { userId, totalPriceInCents: 0 },
+    create: { userId },
     update: {},
   })
   await db.cartItem.create({
@@ -855,7 +855,6 @@ describeIfDb("membership and the cart", () => {
       await db.cart.create({
         data: {
           userId: user.id,
-          totalPriceInCents: 1000,
           cartItems: {
             create: { dessertId: dessert.id, itemPriceInCents: 1000, quantity: 1 },
           },

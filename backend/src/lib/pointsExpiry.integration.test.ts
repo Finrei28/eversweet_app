@@ -95,10 +95,18 @@ describeIfDb("points expiry", () => {
       },
     })
 
+  /**
+   * A membership in the state given. One month paid unless `totalMonths` says otherwise:
+   * a membership that ever ran has at least one, and 0 is a join that never paid.
+   */
   const membershipFor = async (
     userId: string,
     endDate: Date,
-    state: { isActive: boolean; paymentStatus: "SUCCESS" | "PENDING" | "FAILED" },
+    state: {
+      isActive: boolean
+      paymentStatus: "SUCCESS" | "PENDING" | "FAILED"
+      totalMonths?: number
+    },
   ) => {
     const plan = await db.membershipPlan.create({
       data: {
@@ -109,7 +117,7 @@ describeIfDb("points expiry", () => {
       },
     })
     await db.membership.create({
-      data: { userId, planId: plan.id, endDate, ...state },
+      data: { userId, planId: plan.id, endDate, totalMonths: 1, ...state },
     })
     return plan
   }
@@ -230,6 +238,26 @@ describeIfDb("points expiry", () => {
       await membershipFor(user.id, new Date("2026-11-20T02:00:00.000Z"), {
         isActive: false,
         paymentStatus: "PENDING",
+        totalMonths: 0,
+      })
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await balanceOf(loyalty.id)).toBe(0)
+    })
+
+    /**
+     * The same failed join once its end date has passed. Only the date was checked, so a
+     * month later it counted as a membership that had run and ended, and kept the balance
+     * alive for up to another month.
+     */
+    it("gives nothing for a failed join once its end date has passed", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-10-25T02:00:00.000Z"), {
+        isActive: false,
+        paymentStatus: "FAILED",
+        totalMonths: 0,
       })
 
       await expireInactivePoints(afterDeadline)

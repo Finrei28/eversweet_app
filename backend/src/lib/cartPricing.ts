@@ -1,9 +1,10 @@
 /**
  * The one definition of what a cart costs.
  *
- * Derived from the cart rows every time rather than read from
- * `Cart.totalPriceInCents`, which is maintained by scattered `increment` /
- * `decrement` updates and drifts from the items it is meant to describe.
+ * Derived from the cart rows every time. The cart also kept a running total,
+ * `Cart.totalPriceInCents`, nudged by scattered increments and decrements; it
+ * drifted from the items it described, nothing came to read it, and it is being
+ * dropped. There is no stored figure to consult.
  *
  * These are the same fields, in the same order, that the app's
  * `netUnitPriceInCents` uses (frontend/store/cart.ts), so the total worked out

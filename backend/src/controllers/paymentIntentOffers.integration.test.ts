@@ -48,7 +48,6 @@ describeIfDb("createPaymentIntent and offers that stopped running", () => {
     await db.cart.create({
       data: {
         userId: user.id,
-        totalPriceInCents: 500,
         cartItems: {
           create: {
             dessertId: dessert.id,

@@ -25,6 +25,7 @@ import {
   calculatePriceAfterPromo,
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
+import { ApiError } from "@/services/apiClient"
 import { fetchLoyaltyRates } from "@/services/queries"
 
 interface CartState {
@@ -446,6 +447,16 @@ export const useCartStore = create<CartState>((set, get) => ({
           })
         }
       } catch (error) {
+        // Already gone on the server: removed by the webhook when a membership lapsed, by
+        // a cart load's sweep, or by a second tap. That is the state asked for, so the line
+        // stays off the screen. It used to be put back - a line the server no longer held,
+        // which could then be neither removed nor bought. Reloaded, in case anything else
+        // changed with it, and points too, since a sweep may have refunded some.
+        if (error instanceof ApiError && error.status === 404) {
+          void get().fetchCart()
+          void useLoyaltyStore.getState().fetchPoints()
+          return
+        }
         console.error("Failed to remove item from cart", error)
         set({
           items: previousItems,
@@ -524,6 +535,12 @@ export const useCartStore = create<CartState>((set, get) => ({
           })
         }
       } catch (error) {
+        // No cart on the server - cleared by another tap, or expired - is what was asked
+        // for. Putting the items back would show a cart that does not exist.
+        if (error instanceof ApiError && error.status === 404) {
+          void useLoyaltyStore.getState().fetchPoints()
+          return
+        }
         console.error("Failed to clear cart", error)
         // The list was emptied optimistically; the server still holds these
         // items, so put them back instead of showing an empty cart.

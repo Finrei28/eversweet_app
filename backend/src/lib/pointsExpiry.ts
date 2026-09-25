@@ -1,6 +1,7 @@
 import { formatInTimeZone } from "date-fns-tz"
 
 import { db, type DbTransactionClient } from "./db"
+import { forEachWithConcurrency } from "./concurrency"
 import { getPointsExpireFrom } from "./loyaltyRates"
 import { sendPushToUser } from "./pushToUser"
 import { NZ_TIMEZONE, nzCalendarDay, nzEndOfDayMonthsAfter } from "./tradingHours"
@@ -20,6 +21,15 @@ export const POINTS_EXPIRE_AFTER_MONTHS = 1
 /** How far ahead of the deadline the warning push goes. */
 export const EXPIRY_WARNING_DAYS = 7
 
+/**
+ * How many customers the sweep and the warning handle at once. Each is a few round trips to
+ * Sydney, and the launch grace puts everyone's first deadline on the same day, so one at a
+ * time ran for as long as the list was long. Kept small: these share the connection pool with
+ * the app's own requests, and three interactive transactions fit even a pool of one inside
+ * their 10s wait.
+ */
+const CUSTOMERS_AT_ONCE = 3
+
 /** The Loyalty rows' ledger reason for an expiry. The leaderboard counts only EARNED. */
 export const EXPIRED_REASON = "EXPIRED"
 
@@ -31,6 +41,8 @@ export type ExpiryActivity = {
     endDate: Date
     /** The codebase's one definition of a member: `isActive` and paid up. */
     isMember: boolean
+    /** Whether it was ever paid for - `totalMonths` is written only from paid invoices. */
+    wasPaid: boolean
   } | null
 }
 
@@ -46,10 +58,12 @@ export const NO_ACTIVITY: ExpiryActivity = { lastOrderAt: null, membership: null
  * - **Otherwise** a month after the latest of:
  *   - their last app order - any order, one paid entirely in points included;
  *   - the end of a membership that has actually ended, so a lapsed member gets a full month
- *     from losing it rather than from an order they placed months ago. Only an *ended* one:
- *     `createMembership` writes an end date a month ahead before the first payment is even
- *     attempted, so a join that never paid carries a future date, and counting it would give
- *     a failed join attempt an extra month;
+ *     from losing it rather than from an order they placed months ago. Only one that ended
+ *     *and was paid for*: `createMembership` writes an end date a month ahead before the
+ *     first payment is even attempted, so a join whose first payment failed carries a date
+ *     that passes a month later with nothing having run. Checking only that the date had
+ *     passed kept the failed join out for that month and then let it in, handing the
+ *     customer up to a month's extra points life for a membership they never had;
  *   - `expiryFrom`, the moment the switch went on. Nobody's month is counted from before it,
  *     which is the launch grace: every balance gets a full month's notice.
  */
@@ -72,7 +86,9 @@ export const expiryAnchor = (
   if (membership?.isMember) return null
 
   const endedMembership =
-    membership && membership.endDate <= now ? membership.endDate : null
+    membership && membership.wasPaid && membership.endDate <= now
+      ? membership.endDate
+      : null
 
   return [lastOrderAt, endedMembership, expiryFrom].reduce<Date>(
     (latest, candidate) =>
@@ -102,6 +118,7 @@ export const loadExpiryActivity = async (
         endDate: true,
         isActive: true,
         paymentStatus: true,
+        totalMonths: true,
       },
     }),
   ])
@@ -123,6 +140,7 @@ export const loadExpiryActivity = async (
     entry(membership.userId).membership = {
       endDate: membership.endDate,
       isMember: membership.isActive && membership.paymentStatus === "SUCCESS",
+      wasPaid: membership.totalMonths > 0,
     }
   }
   return activity
@@ -357,13 +375,13 @@ export const expireInactivePoints = async (
     const activity = await loadExpiryActivity(balances.map((b) => b.userId))
 
     let expired = 0
-    for (const balance of balances) {
+    await forEachWithConcurrency(balances, CUSTOMERS_AT_ONCE, async (balance) => {
       const customer = activity.get(balance.userId) ?? NO_ACTIVITY
       const anchor = expiryAnchor(customer, expiryFrom, now)
-      if (!anchor) continue
+      if (!anchor) return
 
       const deadline = nzEndOfDayMonthsAfter(anchor, POINTS_EXPIRE_AFTER_MONTHS)
-      if (now.getTime() <= deadline.getTime()) continue
+      if (now.getTime() <= deadline.getTime()) return
 
       try {
         if (await expireBalance(balance, anchor)) expired += 1
@@ -374,7 +392,7 @@ export const expireInactivePoints = async (
           getErrorMessage(error),
         )
       }
-    }
+    })
 
     if (expired > 0) console.log(`Expired ${expired} inactive points balance(s)`)
     return { expired }
@@ -435,27 +453,36 @@ export const warnPointsExpiring = async (
     )
 
     let warned = 0
-    for (const balance of balances) {
+    await forEachWithConcurrency(balances, CUSTOMERS_AT_ONCE, async (balance) => {
       const deadline = pointsExpireAt(
         activity.get(balance.userId) ?? NO_ACTIVITY,
         expiryFrom,
         now,
       )
-      if (!deadline || deadline.getTime() < now.getTime()) continue
+      if (!deadline || deadline.getTime() < now.getTime()) return
       // Calendar days compared as strings: "yyyy-MM-dd" sorts as it reads.
-      if (nzCalendarDay(deadline) > lastDayToWarn) continue
+      if (nzCalendarDay(deadline) > lastDayToWarn) return
 
-      if (!(await claimExpiryWarning(balance.id, deadline))) continue
+      // Per customer, as the sweep does: one that fails - a database blip on the claim -
+      // used to end the whole run and leave everyone after it unwarned for the day.
+      try {
+        if (!(await claimExpiryWarning(balance.id, deadline))) return
 
-      const day = formatInTimeZone(deadline, NZ_TIMEZONE, "EEEE d MMMM")
-      const sent = await sendPushToUser(
-        balance.userId,
-        "Your Sweet Points expire soon",
-        `Your ${balance.points} points expire at the end of ${day}. Place an order to keep them.`,
-        { type: "POINTS_EXPIRING" },
-      )
-      if (sent) warned += 1
-    }
+        const day = formatInTimeZone(deadline, NZ_TIMEZONE, "EEEE d MMMM")
+        const sent = await sendPushToUser(
+          balance.userId,
+          "Your Sweet Points expire soon",
+          `Your ${balance.points} points expire at the end of ${day}. Place an order to keep them.`,
+          { type: "POINTS_EXPIRING" },
+        )
+        if (sent) warned += 1
+      } catch (error) {
+        console.error(
+          `Could not warn loyalty ${balance.id} about expiring points:`,
+          getErrorMessage(error),
+        )
+      }
+    })
 
     if (warned > 0) console.log(`Warned ${warned} customer(s) about expiring points`)
     return { warned }

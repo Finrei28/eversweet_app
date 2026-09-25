@@ -462,14 +462,12 @@ model WinnerReward {
 }
 
 model Cart {
-  id                     String     @id @default(cuid())
-  userId                 String     @unique
-  createdAt              DateTime   @default(now())
-  expiresAt              DateTime?
-  totalLoyaltyPointsUsed Int        @default(0)
-  totalPriceInCents      Int        @default(0)
-  user                   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cartItems              CartItem[]
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  expiresAt DateTime?
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cartItems CartItem[]
 }
 
 model CartItem {
