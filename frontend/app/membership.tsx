@@ -18,6 +18,7 @@ import CustomHeader from "@/_components/custom-header"
 import {
   createMembership,
   getSavedCards,
+  PaymentAuthenticationRequiredError,
   pollMembershipStatus,
   retryPayment,
 } from "@/services/stripe-api"
@@ -30,6 +31,12 @@ import ManageMembershipCard from "@/_components/manageMembershipCard"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 import { getErrorMessage } from "@/utils/getError"
+
+/**
+ * The payment went through on this device but the membership has not switched on yet - the
+ * webhook that does it is still on its way. Not a failure, and not worded as one.
+ */
+class MembershipStillActivatingError extends Error {}
 
 export default function MembershipPage() {
   return (
@@ -52,7 +59,7 @@ function MembershipContent() {
     membershipDetails,
     refetchUsersMembership,
   } = useAuth()
-  const { initPaymentSheet, presentPaymentSheet } = useStripe()
+  const { initPaymentSheet, presentPaymentSheet, confirmPayment } = useStripe()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
   const [showAddCard, setShowAddCard] = useState(false)
@@ -116,7 +123,38 @@ function MembershipContent() {
     return brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase()
   }
 
+  /**
+   * The customer's bank asked them to confirm the payment is theirs (3D Secure). The server
+   * started the payment and cannot answer for them, so it is confirmed here, where the SDK
+   * shows the bank's check. Until this, a join or retry on such a card failed every time.
+   * Nothing has been charged if this throws.
+   */
+  const confirmWithBank = async (
+    clientSecret: string,
+    paymentMethodId: string,
+  ) => {
+    const { error } = await confirmPayment(clientSecret, {
+      paymentMethodType: "Card",
+      paymentMethodData: { paymentMethodId },
+    })
+
+    if (error) {
+      throw new Error(
+        error.code === "Canceled"
+          ? "The payment wasn't confirmed with your bank, so you haven't been charged."
+          : (error.message ?? "Your bank couldn't confirm this payment."),
+      )
+    }
+  }
+
+  /**
+   * `paidOnDevice` is set once `confirmWithBank` has gone through. Stripe reports a payment
+   * waiting on the bank as a failed one, so the row can read FAILED from before the customer
+   * confirmed; after a confirmed payment that is stale, and only a paid-up membership or the
+   * timeout ends the wait.
+   */
   const pollUsersMembershipStatus = async (
+    { paidOnDevice = false }: { paidOnDevice?: boolean } = {},
     interval = 2000, // 2 seconds
     timeout = 30000, // 30 seconds max
   ) => {
@@ -133,7 +171,10 @@ function MembershipContent() {
           if (isPaidUpMember(membershipStatus)) {
             resolve(true) // membership paid up, stop polling
             return
-          } else if (membershipStatus.paymentStatus === "FAILED") {
+          } else if (
+            membershipStatus.paymentStatus === "FAILED" &&
+            !paidOnDevice
+          ) {
             reject(
               new Error(
                 `${membershipStatus.paymentFailureMessage ?? "please check your bank and try again."}`,
@@ -142,7 +183,13 @@ function MembershipContent() {
             return // without this the poll keeps hitting the API forever
           } else if (Date.now() - startTime > timeout) {
             reject(
-              new Error("Membership activation timed out. Please try again."),
+              paidOnDevice
+                ? new MembershipStillActivatingError(
+                    "Your payment has gone through. Your membership will switch on in a moment.",
+                  )
+                : new Error(
+                    "Membership activation timed out. Please try again.",
+                  ),
             )
             return
           }
@@ -178,8 +225,18 @@ function MembershipContent() {
     }
     try {
       setIsProcessingPayment(true)
-      await createMembership(selectedCardId, membershipDetails.stripePriceId)
-      const success = await pollUsersMembershipStatus()
+      const started = await createMembership(
+        selectedCardId,
+        membershipDetails.stripePriceId,
+      )
+      const paidOnDevice = !!(started?.requiresAction && started.clientSecret)
+      if (paidOnDevice) {
+        await confirmWithBank(
+          started.clientSecret!,
+          started.paymentMethodId ?? selectedCardId,
+        )
+      }
+      const success = await pollUsersMembershipStatus({ paidOnDevice })
       if (success) {
         refetchUsersMembership()
         // Joining reprices what is already in the cart on the server; reload it so the
@@ -188,6 +245,11 @@ function MembershipContent() {
         router.push("/routers/membership-success")
       }
     } catch (error) {
+      if (error instanceof MembershipStillActivatingError) {
+        refetchUsersMembership()
+        Alert.alert("Almost there", error.message)
+        return
+      }
       Alert.alert(
         "Payment Failed",
         getErrorMessage(
@@ -209,8 +271,15 @@ function MembershipContent() {
   const handleRetryPayment = async () => {
     setIsProcessingPayment(true)
     try {
-      await retryPayment()
-      const success = await pollUsersMembershipStatus()
+      let paidOnDevice = false
+      try {
+        await retryPayment()
+      } catch (error) {
+        if (!(error instanceof PaymentAuthenticationRequiredError)) throw error
+        await confirmWithBank(error.clientSecret, error.paymentMethodId)
+        paidOnDevice = true
+      }
+      const success = await pollUsersMembershipStatus({ paidOnDevice })
       if (success) {
         refetchUsersMembership()
         // A paid retry lifts the hold, and the server puts member prices back on the cart.
@@ -218,6 +287,11 @@ function MembershipContent() {
         router.push("/routers/membership-success")
       }
     } catch (error) {
+      if (error instanceof MembershipStillActivatingError) {
+        refetchUsersMembership()
+        Alert.alert("Almost there", error.message)
+        return
+      }
       Alert.alert(
         "Your payment retry has failed",
         getErrorMessage(error, "Please update your payment method and retry"),

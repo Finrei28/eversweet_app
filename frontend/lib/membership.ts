@@ -73,6 +73,18 @@ const benefitsAtStake = (discountPercent: number, perk: string | null) =>
     : `Your ${discountPercent}% member discount and your other member benefits`
 
 /**
+ * A renewal on hold because the member's bank wants them to confirm it is them (3D Secure),
+ * not because the card was refused. Retry is what confirms it, so the app asks for that
+ * rather than for a new card. `AUTHENTICATION_REQUIRED` in the order server's
+ * lib/membershipReminders.
+ */
+export const needsBankConfirmation = (
+  membership: Pick<UsersMembership, "paymentStatus" | "paymentFailureCode"> | null | undefined,
+): boolean =>
+  membership?.paymentStatus === "PENDING" &&
+  membership.paymentFailureCode === "authentication_required"
+
+/**
  * How close a cancelled membership's end has to be for the banner to show. Wider than the
  * push's three days: the banner costs nothing to someone who is not looking, and a month of it
  * from the day they cancelled would be nagging.
@@ -83,7 +95,9 @@ export const MEMBERSHIP_ENDING_BANNER_DAYS = 7
  * The banner's line for a member about to lose their benefits, or null.
  *
  * - **On hold** (a renewal declined and being retried): the benefits are paused now, and an
- *   unpaid hold ends the subscription.
+ *   unpaid hold ends the subscription. When the bank is only waiting for the member to confirm
+ *   the payment, it says so, since a customer told their payment failed goes to change a card
+ *   that is fine.
  * - **Cancelled and ending within the week**: they end on the day, unless re-subscribed.
  *
  * The end is formatted in New Zealand time, as every date in the app is.
@@ -99,6 +113,10 @@ export const membershipWarning = (
     builtUpDiscountPercent(membership),
     headlinePerk(benefits),
   )
+
+  if (needsBankConfirmation(membership)) {
+    return `Your bank needs you to confirm this month's payment. ${atStake} are paused until you do. Tap to confirm it.`
+  }
 
   if (membership.paymentStatus === "PENDING") {
     return `${atStake} are paused until your renewal is paid. Tap to retry the payment.`

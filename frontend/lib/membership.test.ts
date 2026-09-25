@@ -4,6 +4,7 @@ import {
   isPaidUpMember,
   memberDiscountPercent,
   membershipWarning,
+  needsBankConfirmation,
 } from "./membership"
 import {
   calculateBestDiscountedPrice,
@@ -154,6 +155,45 @@ describe("membershipWarning", () => {
     ).toBe(
       "Your 20% member discount, free weekly Mochi Series Bowl ($9.99) and your other member benefits are paused until your renewal is paid. Tap to retry the payment.",
     )
+  })
+
+  /**
+   * A bank waiting for 3D Secure was worded as an unpaid renewal, which sent a member whose
+   * card was fine off to replace it.
+   */
+  it("asks the member to confirm a renewal their bank is holding", () => {
+    expect(
+      membershipWarning(
+        membership({
+          paymentStatus: "PENDING",
+          paymentFailureCode: "authentication_required",
+          totalMonths: 4,
+        }),
+        BENEFITS,
+        now,
+      ),
+    ).toBe(
+      "Your bank needs you to confirm this month's payment. Your 20% member discount, free weekly Mochi Series Bowl ($9.99) and your other member benefits are paused until you do. Tap to confirm it.",
+    )
+  })
+
+  it("words any other hold as an unpaid renewal", () => {
+    expect(
+      membershipWarning(
+        membership({ paymentStatus: "PENDING", paymentFailureCode: "card_declined" }),
+        BENEFITS,
+        now,
+      ),
+    ).toMatch(/paused until your renewal is paid\. Tap to retry the payment\.$/)
+  })
+
+  /** The code outlives the hold only if a server forgot to clear it; paid up is paid up. */
+  it("says nothing to a paid-up member whose last hold was the bank's", () => {
+    expect(
+      needsBankConfirmation(
+        membership({ paymentStatus: "SUCCESS", paymentFailureCode: "authentication_required" }),
+      ),
+    ).toBe(false)
   })
 
   it("dates a cancelled membership's end in New Zealand time", () => {

@@ -29,11 +29,15 @@ export class AppUpdateRequiredError extends Error {
  * already taken out - a members-only item the membership webhook removed, say - came back 404
  * and read as a failed removal: the line was put back on screen and an error shown. An Error
  * still, so everything that catches one is unchanged.
+ *
+ * `data` is the parsed body, for a refusal that carries more than a message - a `code`, or
+ * what the customer has to do next (see `PaymentAuthenticationRequiredError`).
  */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly data?: any,
   ) {
     super(message)
     this.name = "ApiError"
@@ -220,7 +224,7 @@ export async function apiRequest<T>(
     if (__DEV__ && statusMessages?.[res.status] === undefined) {
       console.error(`${options.method ?? "GET"} ${path} failed:`, message)
     }
-    throw new ApiError(message, res.status)
+    throw new ApiError(message, res.status, data)
   }
 
   return data as T
