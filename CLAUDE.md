@@ -337,8 +337,11 @@ is what deadlocked add-vs-remove (Postgres `40P01`). Nothing enforces it but the
 `cart.controller.ts` and the tests.
 
 **Pricing is server-derived.** `lib/cartPricing.calculateCartPrice` is the single
-definition of what a cart costs, recomputed from the rows every time rather than read from
-`Cart.totalPriceInCents` (which drifts). Requests may carry `priceInCents` /
+definition of what a cart costs, recomputed from the rows every time. The cart used to keep
+running totals too (`totalPriceInCents`, `totalLoyaltyPointsUsed`), nudged by every write;
+they drifted and nothing read them. The server no longer writes them, and a migration drops
+both once that server is live - **never run it before**, or add-to-cart fails on every build
+still writing them. Never add a stored total back. Requests may carry `priceInCents` /
 `discountedAmountInCents` / points fields — the zod schemas accept them for compatibility
 with builds already on people's phones, but the server recomputes every figure from the
 dessert, promo, membership and offer rows and ignores what was sent. GST is *extracted*
@@ -390,7 +393,13 @@ sending them invites the app to form a second, drifting opinion. `showOffers` as
 exact response shape, because a hand-written select can drop a field the app needs in one
 line and the screen would just render blanks.
 
-**Order creation.** `POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
+**Order creation.** The confirmation email is sent after the response, not awaited, and a
+failure is only logged: awaiting it made every checkout wait on Resend, and turned a paid
+order into a 500 whenever the email failed. `EmailSender` logs Resend's returned `{ error }`,
+which Resend uses instead of throwing for most failures, but never throws on it -
+`resendVerificationCode` must answer the same for every address.
+
+`POST /api/auth/createOrder` is wrapped in `idempotency("createOrder")`,
 keyed on the `Idempotency-Key` header and falling back to the payment intent for older
 builds. A retry that lost a race returns the customer's own existing order rather than
 "cart is empty".
@@ -835,9 +844,16 @@ null means off, and the setting falls back to off, so an unreadable table expire
   points-only included), the end of a membership that has **ended**, and
   `pointsExpireFrom` - the launch grace, so switching on gives everyone a full month.
   Active members (`isActive && SUCCESS`) never expire.
-- **Only an ended membership anchors.** `createMembership` writes an `endDate` a month ahead
-  before the first payment is attempted, so a join that never paid carries a future date;
-  counting it would give a failed join a free month.
+- **Only an ended membership that was paid for anchors** (`totalMonths > 0`, which only paid
+  invoices write). `createMembership` writes an `endDate` a month ahead before the first
+  payment is attempted. Checking the date alone kept a failed join out until that date
+  passed, then let it in: up to a month's extra points life for a membership that never
+  ran. For the same reason the rejoin claim leaves `totalMonths` alone, so a returning
+  member whose rejoin fails keeps the anchor of their real end.
+- **The sweep and the warning run three customers at a time** (`forEachWithConcurrency`,
+  `lib/concurrency`). Each customer is several round trips, and the launch grace puts
+  everyone's first deadline on the same day. Three is small enough to leave the pool to the
+  app's own requests.
 - **The deadline is the last instant of an Auckland day** (`nzEndOfDayMonthsAfter`, beside
   `nzMonthRange`), inclusive like an offer's `endsAt`, clamped for short months.
 - **"Last bought" is derived, not stored**: `order.groupBy` on the `(appUserId, createdAt)`
