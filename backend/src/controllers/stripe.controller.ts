@@ -65,8 +65,8 @@ export function getInvoicePaymentIntent(
 }
 
 /**
- * The client secret of an invoice's payment while it waits on the customer's bank to
- * confirm it is them (3D Secure), else null. The invoice must carry `payments` expanded.
+ * An invoice's payment while it waits on the customer's bank to confirm it is them (3D
+ * Secure), else null. The invoice must carry `payments` expanded.
  *
  * Only the customer can answer that, on their phone, so a membership payment the server
  * started could never finish: a first invoice that needed it left the join `incomplete`
@@ -79,19 +79,31 @@ export function getInvoicePaymentIntent(
  * is what the retry calls - cannot wait for anybody, so it is declined with
  * `authentication_required` and goes back to `requires_payment_method`; confirming it on
  * the device with the same card is how Stripe says to recover it.
+ *
+ * The card is the one the attempt was made with, read off the payment itself: still
+ * attached while it waits in `requires_action`, and kept on `last_payment_error` once a
+ * decline has detached it. The retry used to name the customer's invoice default instead,
+ * but a renewal is charged on the invoice's own card, then the subscription's, and only
+ * then that default - so a subscription with a card of its own sent the app to confirm
+ * the renewal with a different card from the one the bank had challenged.
  */
 async function paymentAwaitingAuthentication(
   invoice: Stripe.Invoice,
-): Promise<string | null> {
+): Promise<{ clientSecret: string; paymentMethodId: string | null } | null> {
   const paymentIntentId = getInvoicePaymentIntent(invoice)
   if (!paymentIntentId) return null
 
   const intent = await orNullIfMissing(
     stripe.paymentIntents.retrieve(paymentIntentId),
   )
-  if (!intent?.client_secret) return null
+  if (!intent?.client_secret || !isAwaitingAuthentication(intent)) return null
 
-  return isAwaitingAuthentication(intent) ? intent.client_secret : null
+  return {
+    clientSecret: intent.client_secret,
+    paymentMethodId:
+      idOf(intent.payment_method) ??
+      idOf(intent.last_payment_error?.payment_method),
+  }
 }
 
 /** See `paymentAwaitingAuthentication` for the two shapes. */
@@ -984,8 +996,7 @@ export const retryPayment = async (req: Request, res: Response) => {
       // it does after a retry that went through. A 402 with its own code rather than a
       // 200, so a build from before this still reads it as a failed retry and shows the
       // same message it always has.
-      const paymentMethodId = idOf(customer.invoice_settings.default_payment_method)
-      const clientSecret = await stripe.invoices
+      const awaiting = await stripe.invoices
         .retrieve(invoice.id, { expand: ["payments"] })
         .then(paymentAwaitingAuthentication)
         .catch((lookupError) => {
@@ -993,7 +1004,9 @@ export const retryPayment = async (req: Request, res: Response) => {
           return null
         })
 
-      if (!clientSecret || !paymentMethodId) throw error
+      // Without the card the bank challenged there is nothing safe to confirm with: any
+      // other card could take the money from somewhere the member did not expect.
+      if (!awaiting?.paymentMethodId) throw error
 
       res.status(402).json({
         code: "AUTHENTICATION_REQUIRED",
@@ -1001,8 +1014,8 @@ export const retryPayment = async (req: Request, res: Response) => {
           error,
           "Your bank needs to confirm this payment.",
         ),
-        clientSecret,
-        paymentMethodId,
+        clientSecret: awaiting.clientSecret,
+        paymentMethodId: awaiting.paymentMethodId,
       })
       return
     }
@@ -1030,14 +1043,14 @@ const JOIN_IN_PROGRESS_MESSAGE =
   "Your membership is already being set up. Please wait a moment and check again."
 
 /**
- * The first payment's client secret when a new subscription is waiting on the customer's
- * bank, else null. Never throws: the subscription exists by the time this is asked, so a
- * failure to read it has to leave the join to the webhook as before, not answer 500 to a
- * join that may yet go through.
+ * The first payment when a new subscription is waiting on the customer's bank, else null.
+ * Never throws: the subscription exists by the time this is asked, so a failure to read it
+ * has to leave the join to the webhook as before, not answer 500 to a join that may yet go
+ * through.
  */
 async function firstPaymentAwaitingAuthentication(
   subscription: Stripe.Subscription,
-): Promise<string | null> {
+): ReturnType<typeof paymentAwaitingAuthentication> {
   if (subscription.status !== "incomplete") return null
   const invoice = subscription.latest_invoice
   if (!invoice || typeof invoice === "string") return null
@@ -1221,12 +1234,19 @@ export const createMembership = async (req: Request, res: Response) => {
 
     // Additive: a build from before this ignores the extra fields, polls, and sees the
     // join fail as it always has. Nothing is charged until the customer confirms.
-    const clientSecret = await firstPaymentAwaitingAuthentication(subscription)
+    // The card the payment was attempted with, which is the one just sent unless Stripe
+    // says otherwise.
+    const awaiting = await firstPaymentAwaitingAuthentication(subscription)
     res
       .status(201)
       .json(
-        clientSecret
-          ? { success: true, requiresAction: true, clientSecret, paymentMethodId }
+        awaiting
+          ? {
+              success: true,
+              requiresAction: true,
+              clientSecret: awaiting.clientSecret,
+              paymentMethodId: awaiting.paymentMethodId ?? paymentMethodId,
+            }
           : { success: true },
       )
     return

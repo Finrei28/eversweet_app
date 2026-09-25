@@ -541,9 +541,11 @@ describeIfDb("Stripe endpoints", () => {
         id: "pi_renewal",
         status: "requires_payment_method",
         client_secret: "pi_renewal_secret_abc",
+        payment_method: null,
         last_payment_error: {
           code: "card_declined",
           decline_code: "authentication_required",
+          payment_method: { id: "pm_member_card" },
         },
       })
 
@@ -565,6 +567,72 @@ describeIfDb("Stripe endpoints", () => {
         where: { userId: user.id },
       })
       expect(membership.paymentStatus).toBe("PENDING")
+    })
+
+    /**
+     * A renewal is charged on the subscription's own card before the customer's default,
+     * and the retry named the default. With the two different, the app confirmed the
+     * renewal with a card the bank had never challenged.
+     */
+    it("names the card the renewal was attempted with, not the customer's default", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockRejectedValue(
+        await cardError("authentication_required", "This transaction requires authentication."),
+      )
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_renewal",
+        status: "requires_payment_method",
+        client_secret: "pi_renewal_secret_abc",
+        payment_method: null,
+        last_payment_error: {
+          code: "authentication_required",
+          payment_method: { id: "pm_subscription_card" },
+        },
+      })
+
+      const res = await retry(user.id)
+
+      expect(res.status).toBe(402)
+      expect(res.body.paymentMethodId).toBe("pm_subscription_card")
+    })
+
+    it("reads the card off a payment still waiting on the bank", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockRejectedValue(
+        await cardError("invoice_payment_intent_requires_action", "This payment requires authentication."),
+      )
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_renewal",
+        status: "requires_action",
+        client_secret: "pi_renewal_secret_abc",
+        payment_method: "pm_subscription_card",
+        last_payment_error: null,
+      })
+
+      const res = await retry(user.id)
+
+      expect(res.status).toBe(402)
+      expect(res.body.paymentMethodId).toBe("pm_subscription_card")
+    })
+
+    /** Any other card could take the money from somewhere the member did not expect. */
+    it("does not guess a card when the payment names none", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockRejectedValue(
+        await cardError("authentication_required", "This transaction requires authentication."),
+      )
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_renewal",
+        status: "requires_payment_method",
+        client_secret: "pi_renewal_secret_abc",
+        payment_method: null,
+        last_payment_error: { code: "authentication_required" },
+      })
+
+      const res = await retry(user.id)
+
+      expect(res.status).toBe(500)
+      expect(res.body).toEqual({ message: "This transaction requires authentication." })
     })
 
     it("reports an ordinary decline with the card's own message", async () => {
