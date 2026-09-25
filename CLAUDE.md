@@ -339,9 +339,12 @@ is what deadlocked add-vs-remove (Postgres `40P01`). Nothing enforces it but the
 **Pricing is server-derived.** `lib/cartPricing.calculateCartPrice` is the single
 definition of what a cart costs, recomputed from the rows every time. The cart used to keep
 running totals too (`totalPriceInCents`, `totalLoyaltyPointsUsed`), nudged by every write;
-they drifted and nothing read them. The server no longer writes them, and a migration drops
-both once that server is live - **never run it before**, or add-to-cart fails on every build
-still writing them. Never add a stored total back. Requests may carry `priceInCents` /
+they drifted and nothing read them. The server no longer writes them and its schema no longer
+has them; migration `20260926000000_drop_cart_running_totals` in the website repo drops the
+columns. **Apply it only after an order server built from that schema is live.** A server
+whose Prisma client still knows the columns reads them back on every cart query, written or
+not, and fails with "column does not exist". The new server works with the columns present,
+so it can go first. Never add a stored total back. Requests may carry `priceInCents` /
 `discountedAmountInCents` / points fields — the zod schemas accept them for compatibility
 with builds already on people's phones, but the server recomputes every figure from the
 dessert, promo, membership and offer rows and ignores what was sent. GST is *extracted*
