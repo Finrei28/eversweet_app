@@ -4,6 +4,7 @@ import {
   benefitsAtStake,
   membershipEndingText,
   renewalDeclinedText,
+  renewalNeedsAuthenticationText,
 } from "./membershipReminders"
 
 const PERK = "free weekly Mochi Series Bowl ($9.99)"
@@ -50,6 +51,18 @@ describe("membership warning wording", () => {
       renewalDeclinedText({ discountPercent: 25, stepPercent: 5, perk: PERK }),
     ).toBe(
       `Your 25% member discount, ${PERK} and your other member benefits are paused. Retry the payment in the app to keep them. If it stays unpaid, your membership ends and the discount starts again at 5%.`,
+    )
+  })
+
+  /**
+   * A bank waiting for 3D Secure was worded as a decline, which sent a member whose card was
+   * fine off to replace it.
+   */
+  it("asks the member to confirm a renewal their bank is holding", () => {
+    expect(
+      renewalNeedsAuthenticationText({ discountPercent: 25, stepPercent: 5, perk: PERK }),
+    ).toBe(
+      `Your bank needs you to confirm this month's membership payment. Your 25% member discount, ${PERK} and your other member benefits are paused until you do - tap to confirm it in the app. If it stays unpaid, your membership ends and the discount starts again at 5%.`,
     )
   })
 })

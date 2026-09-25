@@ -4,7 +4,10 @@ import { Prisma } from "@prisma/client"
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
 import { loadMembershipBenefits } from "../lib/membership"
-import { warnRenewalDeclined } from "../lib/membershipReminders"
+import {
+  AUTHENTICATION_REQUIRED,
+  warnRenewalDeclined,
+} from "../lib/membershipReminders"
 import {
   isResourceMissing,
   orNullIfMissing,
@@ -59,6 +62,49 @@ export function getInvoicePaymentIntent(
   }
 
   return null
+}
+
+/**
+ * The client secret of an invoice's payment while it waits on the customer's bank to
+ * confirm it is them (3D Secure), else null. The invoice must carry `payments` expanded.
+ *
+ * Only the customer can answer that, on their phone, so a membership payment the server
+ * started could never finish: a first invoice that needed it left the join `incomplete`
+ * and the app read it as a decline, and a retry of a held renewal failed the same way
+ * every time until Stripe gave up and cancelled the subscription. Handing the secret back
+ * lets the app confirm it with `confirmPayment`, which shows the bank's check.
+ *
+ * Two shapes, because Stripe asks in two ways. A payment attempted with the customer
+ * present waits in `requires_action`. One attempted off-session - `invoices.pay`, which
+ * is what the retry calls - cannot wait for anybody, so it is declined with
+ * `authentication_required` and goes back to `requires_payment_method`; confirming it on
+ * the device with the same card is how Stripe says to recover it.
+ */
+async function paymentAwaitingAuthentication(
+  invoice: Stripe.Invoice,
+): Promise<string | null> {
+  const paymentIntentId = getInvoicePaymentIntent(invoice)
+  if (!paymentIntentId) return null
+
+  const intent = await orNullIfMissing(
+    stripe.paymentIntents.retrieve(paymentIntentId),
+  )
+  if (!intent?.client_secret) return null
+
+  return isAwaitingAuthentication(intent) ? intent.client_secret : null
+}
+
+/** See `paymentAwaitingAuthentication` for the two shapes. */
+const isAwaitingAuthentication = (intent: Stripe.PaymentIntent): boolean => {
+  const lastError = intent.last_payment_error
+  const declinedForAuthentication =
+    lastError?.code === AUTHENTICATION_REQUIRED ||
+    lastError?.decline_code === AUTHENTICATION_REQUIRED
+
+  return (
+    intent.status === "requires_action" ||
+    (intent.status === "requires_payment_method" && declinedForAuthentication)
+  )
 }
 
 /**
@@ -837,6 +883,9 @@ export const getUsersMembership = async (req: Request, res: Response) => {
         endDate: true,
         stripeSubscriptionId: true,
         paymentStatus: true,
+        // Only `authentication_required` is read, to word a hold as "confirm with your bank"
+        // rather than "your card was declined". Additive: older builds ignore it.
+        paymentFailureCode: true,
         planId: true,
         isActive: true,
         cancel: true,
@@ -927,7 +976,36 @@ export const retryPayment = async (req: Request, res: Response) => {
       return
     }
 
-    await stripe.invoices.pay(invoice.id)
+    try {
+      await stripe.invoices.pay(invoice.id)
+    } catch (error) {
+      // The bank wants the member to confirm it is them. Nothing has been charged and the
+      // membership stays on hold; the app confirms the payment on the phone and polls, as
+      // it does after a retry that went through. A 402 with its own code rather than a
+      // 200, so a build from before this still reads it as a failed retry and shows the
+      // same message it always has.
+      const paymentMethodId = idOf(customer.invoice_settings.default_payment_method)
+      const clientSecret = await stripe.invoices
+        .retrieve(invoice.id, { expand: ["payments"] })
+        .then(paymentAwaitingAuthentication)
+        .catch((lookupError) => {
+          console.error("Could not read a declined retry's payment:", lookupError)
+          return null
+        })
+
+      if (!clientSecret || !paymentMethodId) throw error
+
+      res.status(402).json({
+        code: "AUTHENTICATION_REQUIRED",
+        message: stripeErrorMessage(
+          error,
+          "Your bank needs to confirm this payment.",
+        ),
+        clientSecret,
+        paymentMethodId,
+      })
+      return
+    }
     res.status(200).json({ success: true })
   } catch (error) {
     console.error("Error retrying payment:", error)
@@ -950,6 +1028,30 @@ const JOIN_IN_PROGRESS_MS = 2 * 60 * 1000
 
 const JOIN_IN_PROGRESS_MESSAGE =
   "Your membership is already being set up. Please wait a moment and check again."
+
+/**
+ * The first payment's client secret when a new subscription is waiting on the customer's
+ * bank, else null. Never throws: the subscription exists by the time this is asked, so a
+ * failure to read it has to leave the join to the webhook as before, not answer 500 to a
+ * join that may yet go through.
+ */
+async function firstPaymentAwaitingAuthentication(
+  subscription: Stripe.Subscription,
+): Promise<string | null> {
+  if (subscription.status !== "incomplete") return null
+  const invoice = subscription.latest_invoice
+  if (!invoice || typeof invoice === "string") return null
+
+  try {
+    return await paymentAwaitingAuthentication(invoice)
+  } catch (error) {
+    console.error(
+      `Could not read the first payment of subscription ${subscription.id}:`,
+      error,
+    )
+    return null
+  }
+}
 
 export const createMembership = async (req: Request, res: Response) => {
   const userId = (req as any).userId
@@ -1105,6 +1207,8 @@ export const createMembership = async (req: Request, res: Response) => {
       items: [{ price: plan.stripePriceId }],
       metadata: { userId },
       collection_method: "charge_automatically",
+      // Where the first payment's intent is, for when the bank wants to authenticate it.
+      expand: ["latest_invoice.payments"],
     })
     // From here the subscription exists and the webhook decides the membership's state.
     releaseClaim = null
@@ -1115,7 +1219,16 @@ export const createMembership = async (req: Request, res: Response) => {
       data: { stripeSubscriptionId: subscription.id },
     })
 
-    res.status(201).json({ success: true })
+    // Additive: a build from before this ignores the extra fields, polls, and sees the
+    // join fail as it always has. Nothing is charged until the customer confirms.
+    const clientSecret = await firstPaymentAwaitingAuthentication(subscription)
+    res
+      .status(201)
+      .json(
+        clientSecret
+          ? { success: true, requiresAction: true, clientSecret, paymentMethodId }
+          : { success: true },
+      )
     return
   } catch (error) {
     console.error("Error creating membership:", error)
@@ -1403,6 +1516,10 @@ async function recordMembershipPayment(
     isActive: true,
     totalMonths,
     cancel: subscription.cancel_at_period_end,
+    // Paid, so whatever held it up is over. Left behind, a hold's reason would be read as
+    // the next hold's when a later one could not be read.
+    paymentFailureCode: null,
+    paymentFailureMessage: null,
   }
 
   // Switching a membership on is claimed, so the welcome email goes exactly once. Only a
@@ -1530,6 +1647,15 @@ async function declineOf(
   const intent = await orNullIfMissing(
     stripe.paymentIntents.retrieve(paymentIntentId),
   )
+  // Waiting on the bank is recorded as one code however Stripe put it - `requires_action`
+  // often has no error at all - so the app and the push can tell the member to confirm the
+  // payment rather than send them to replace a card that is fine.
+  if (intent && isAwaitingAuthentication(intent)) {
+    return {
+      code: AUTHENTICATION_REQUIRED,
+      message: intent.last_payment_error?.message ?? null,
+    }
+  }
   return {
     code: intent?.last_payment_error?.code ?? null,
     message: intent?.last_payment_error?.message ?? null,
@@ -1595,23 +1721,39 @@ async function recordMembershipPaymentFailure(
     return
   }
 
+  // Why, so the app and the push can tell a card that was refused from a bank waiting for the
+  // member to confirm the payment. Both used to read "didn't go through", which sent a member
+  // whose card was fine off to replace it. The hold matters more than its reason, so a failure
+  // to read the payment leaves the reason blank rather than failing the event.
+  const decline = await declineOf(current, delivered).catch((error) => {
+    console.error(
+      `Could not read why the renewal of subscription ${subscriptionId} was declined:`,
+      getErrorMessage(error),
+    )
+    return { code: null, message: null }
+  })
+  const onHold = {
+    paymentStatus: "PENDING" as const,
+    paymentFailureCode: decline.code,
+    paymentFailureMessage: decline.message,
+  }
+
   // Going on hold is claimed, so the member is told once. Only a paid-up row matches: Stripe
   // retries a declined renewal several times over the following weeks, each decline is another
   // event, and any of them can be redelivered - all of those find the row already on hold and
-  // fall through to the ordinary write below, which changes nothing a second time. A paid retry
-  // puts the row back to SUCCESS, so a later renewal declined is a new hold and a new push.
+  // fall through to the ordinary write below, which changes nothing but the latest reason. A
+  // paid retry puts the row back to SUCCESS, so a later renewal declined is a new hold and a
+  // new push.
   const putOnHold = await db.membership.updateMany({
     where: {
       stripeSubscriptionId: subscription.id,
       isActive: true,
       paymentStatus: "SUCCESS",
     },
-    data: { paymentStatus: "PENDING" },
+    data: onHold,
   })
   if (putOnHold.count === 0) {
-    await updateSubscriptionMembership(subscription, "renewal failure", {
-      paymentStatus: "PENDING",
-    })
+    await updateSubscriptionMembership(subscription, "renewal failure", onHold)
   }
   // On hold pauses every member benefit until the payment goes through: member prices come
   // off the cart and member-only items leave it now, not whenever the app next loads it.
@@ -1619,7 +1761,11 @@ async function recordMembershipPaymentFailure(
 
   // Before this the only sign was the membership screen turning red, on a screen a member has
   // no reason to open - and a hold left unpaid ends the subscription and the discount's run.
-  if (putOnHold.count > 0) await warnRenewalDeclined(subscription.id)
+  if (putOnHold.count > 0) {
+    await warnRenewalDeclined(subscription.id, {
+      needsAuthentication: decline.code === AUTHENTICATION_REQUIRED,
+    })
+  }
 }
 
 /**
@@ -1727,6 +1873,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
       break
     }
 
+    // A payment waiting on the member's bank to confirm it is them. Stripe usually sends
+    // payment_failed for the same attempt as well; whichever comes first puts the
+    // membership on hold and pushes, and the other finds it already on hold. Handling both
+    // means a hold is never missed if only this one arrives.
+    case "invoice.payment_action_required":
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice
       // A one-off invoice has no subscription and nothing to do with a membership.

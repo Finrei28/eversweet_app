@@ -731,10 +731,14 @@ perk is never written into code, so a push cannot advertise one the shop has dro
   `Membership.endWarnedFor`, keyed on the end date the way `Loyalty.expiryWarnedFor` is keyed
   on the deadline, with the same `OR ... IS NULL`. Cancel, resume and cancel again inside one
   period keeps the date, so nobody is told twice.
-- **`MEMBERSHIP_PAYMENT_FAILED`**, from the renewal branch of `invoice.payment_failed`. It is
-  claimed on the SUCCESS→PENDING transition, so one hold is one push: Stripe's later retries
-  and redeliveries find the row already PENDING. A paid retry puts it back to SUCCESS, which
-  makes the next decline a new hold.
+- **`MEMBERSHIP_PAYMENT_FAILED`**, from the renewal branch of `invoice.payment_failed` (and of
+  `invoice.payment_action_required`, which goes through the same handler). It is claimed on
+  the SUCCESS→PENDING transition, so one hold is one push: Stripe's later retries, its
+  redeliveries and the second of those two events all find the row already PENDING. A paid
+  retry puts it back to SUCCESS, which makes the next decline a new hold. The hold records
+  `paymentFailureCode`, and when that is `authentication_required` (the bank waiting on 3D
+  Secure) the push, the banner and the manage card ask the member to confirm the payment
+  rather than tell them it failed.
 - The app routes both to `/membership`. `MembershipWarningBanner` (home tab and cart) words
   the same two states from `lib/membership.membershipWarning`, which mirrors both helpers. It
   shows a cancelled membership only in its last week.
@@ -745,6 +749,21 @@ perk is never written into code, so a push cannot advertise one the shop has dro
 is not already PENDING (or PENDING for over 2 minutes), or a fresh create (P2002 means
 someone beat you). A second concurrent join gets 409. Without that, a double tap created
 two subscriptions. If Stripe refuses before the subscription exists, the claim is released.
+
+**3D Secure on membership payments.** The server starts both the first payment
+(`subscriptions.create`) and a held renewal's retry (`invoices.pay`, off-session), and only the
+customer can answer a bank that asks them to authenticate. So `paymentAwaitingAuthentication`
+hands the payment's client secret back and the app confirms it with `confirmPayment`: in
+`createMembership`'s 201 as `requiresAction` / `clientSecret` / `paymentMethodId`, and from
+`retryPayment` as **402 `AUTHENTICATION_REQUIRED`**. It is not a 200, so builds from before
+still read a failed retry. After confirming, the app's poll ignores a FAILED row, which the
+webhook may have written for the payment before the customer answered.
+
+`declineOf` records a payment waiting on the bank as `authentication_required` however Stripe
+put it: `requires_action` usually has no `last_payment_error`, and an off-session decline says
+`card_declined` with `decline_code: authentication_required`. A paid invoice clears the code,
+and the app reads it only while the membership is PENDING. `invoice.payment_action_required`
+has to be selected on the Stripe webhook endpoint for that event to arrive.
 
 Cron (`index.ts`) all runs in `Pacific/Auckland`:
 - kitchen sweep every 2 minutes;

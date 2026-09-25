@@ -63,13 +63,27 @@ export const membershipEndingText = (atStake: AtStake, endDate: Date): string =>
     "EEEE d MMMM",
   )}. Re-subscribe before then to keep them.${restartClause(atStake)}`
 
-/** The push when a renewal is declined and the membership goes on hold. */
-export const renewalDeclinedText = (atStake: AtStake): string =>
-  `${benefitsAtStake(atStake)} are paused. Retry the payment in the app to keep them. If it stays unpaid, your membership ends${
-    atStake.discountPercent > atStake.stepPercent
-      ? ` and the discount starts again at ${atStake.stepPercent}%`
+/**
+ * `Membership.paymentFailureCode` for a payment waiting on the member's bank to confirm it is
+ * them (3D Secure). Nothing is wrong with the card, so the member is asked to confirm the
+ * payment rather than to retry or replace it. The app's `lib/membership` reads the same value.
+ */
+export const AUTHENTICATION_REQUIRED = "authentication_required"
+
+const unpaidClause = ({ discountPercent, stepPercent }: AtStake): string =>
+  `If it stays unpaid, your membership ends${
+    discountPercent > stepPercent
+      ? ` and the discount starts again at ${stepPercent}%`
       : ""
   }.`
+
+/** The push when a renewal is declined and the membership goes on hold. */
+export const renewalDeclinedText = (atStake: AtStake): string =>
+  `${benefitsAtStake(atStake)} are paused. Retry the payment in the app to keep them. ${unpaidClause(atStake)}`
+
+/** The push when a renewal is on hold waiting for the member to confirm it with their bank. */
+export const renewalNeedsAuthenticationText = (atStake: AtStake): string =>
+  `Your bank needs you to confirm this month's membership payment. ${benefitsAtStake(atStake)} are paused until you do - tap to confirm it in the app. ${unpaidClause(atStake)}`
 
 type PlanForWarning = {
   membershipDiscount: number
@@ -210,7 +224,8 @@ export const warnMembershipsEnding = async (
 }
 
 /**
- * Tells a member their renewal was declined and their benefits are paused.
+ * Tells a member their renewal was declined and their benefits are paused - or, when their
+ * bank is waiting for them to confirm the payment, to confirm it.
  *
  * The caller claims the moment - the switch from paid-up to on hold, in
  * `recordMembershipPaymentFailure` - so this goes once per hold, not once per retry Stripe
@@ -219,6 +234,7 @@ export const warnMembershipsEnding = async (
  */
 export const warnRenewalDeclined = async (
   stripeSubscriptionId: string,
+  { needsAuthentication = false }: { needsAuthentication?: boolean } = {},
 ): Promise<boolean> => {
   try {
     const membership = await db.membership.findUnique({
@@ -227,12 +243,19 @@ export const warnRenewalDeclined = async (
     })
     if (!membership) return false
 
+    const atStake = await atStakeFor(membership, (plan) =>
+      loadMembershipBenefits(plan.benefits),
+    )
+    // The same type either way: installed builds route it to /membership, where Retry is
+    // what confirms the payment with the bank.
     return await sendPushToUser(
       membership.userId,
-      "Your membership payment didn't go through",
-      renewalDeclinedText(
-        await atStakeFor(membership, (plan) => loadMembershipBenefits(plan.benefits)),
-      ),
+      needsAuthentication
+        ? "Please confirm your membership payment"
+        : "Your membership payment didn't go through",
+      needsAuthentication
+        ? renewalNeedsAuthenticationText(atStake)
+        : renewalDeclinedText(atStake),
       { type: "MEMBERSHIP_PAYMENT_FAILED" },
     )
   } catch (error) {

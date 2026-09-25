@@ -358,6 +358,232 @@ describeIfDb("Stripe endpoints", () => {
 
       expect(res.status).toBe(201)
     })
+
+    describe("when the bank wants to authenticate the first payment", () => {
+      /** A subscription whose first invoice's payment is `pi_first`. */
+      const incompleteSubscription = () => ({
+        id: "sub_new",
+        status: "incomplete",
+        latest_invoice: {
+          id: "in_first",
+          payments: {
+            data: [
+              { payment: { type: "payment_intent", payment_intent: "pi_first" } },
+            ],
+          },
+        },
+      })
+
+      beforeEach(() => {
+        stripeApi.subscriptions.create.mockResolvedValue(incompleteSubscription())
+      })
+
+      /**
+       * The server charged the first month itself, so a card whose bank asked for 3D Secure
+       * left the subscription incomplete with nobody able to answer, and the app reported a
+       * failed payment. Every attempt to join on that card failed the same way.
+       */
+      it("hands the payment back for the app to confirm", async () => {
+        const user = await makeUser()
+        await withStripeCustomer(user.id)
+        stripeApi.paymentIntents.retrieve.mockResolvedValue({
+          id: "pi_first",
+          status: "requires_action",
+          client_secret: "pi_first_secret_abc",
+        })
+
+        const res = await join(user.id, {})
+
+        expect(res.status).toBe(201)
+        expect(res.body).toEqual({
+          success: true,
+          requiresAction: true,
+          clientSecret: "pi_first_secret_abc",
+          paymentMethodId: "pm_card",
+        })
+        expect(stripeApi.subscriptions.create).toHaveBeenCalledWith(
+          expect.objectContaining({ expand: ["latest_invoice.payments"] }),
+        )
+        expect(stripeApi.paymentIntents.retrieve).toHaveBeenCalledWith("pi_first")
+        const membership = await db.membership.findUniqueOrThrow({
+          where: { userId: user.id },
+        })
+        expect(membership).toMatchObject({
+          isActive: false,
+          paymentStatus: "PENDING",
+          stripeSubscriptionId: "sub_new",
+        })
+      })
+
+      it("answers a plain decline as before, for the webhook to record", async () => {
+        const user = await makeUser()
+        await withStripeCustomer(user.id)
+        stripeApi.paymentIntents.retrieve.mockResolvedValue({
+          id: "pi_first",
+          status: "requires_payment_method",
+          client_secret: "pi_first_secret_abc",
+          last_payment_error: { code: "card_declined" },
+        })
+
+        const res = await join(user.id, {})
+
+        expect(res.status).toBe(201)
+        expect(res.body).toEqual({ success: true })
+      })
+
+      it("still answers the join when the payment cannot be read", async () => {
+        const user = await makeUser()
+        await withStripeCustomer(user.id)
+        stripeApi.paymentIntents.retrieve.mockRejectedValue(new Error("Stripe is down"))
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await join(user.id, {})
+
+        expect(res.status).toBe(201)
+        expect(res.body).toEqual({ success: true })
+        errorSpy.mockRestore()
+      })
+    })
+  })
+
+  /**
+   * A renewal on hold is retried with `invoices.pay`, off-session. A bank that wanted the
+   * member to confirm it was them declined it every time, and the member could only watch
+   * the retries fail until Stripe cancelled the subscription and their run of months.
+   */
+  describe("retryPayment", () => {
+    const retry = (userId: string) =>
+      request(app)
+        .post("/api/stripe/retryPayment")
+        .set("Authorization", as(userId))
+        .send({})
+
+    const heldMember = async () => {
+      const user = await makeUser()
+      await withStripeCustomer(user.id)
+      stripeApi.customers.retrieve.mockResolvedValue({
+        id: OWN_CUSTOMER,
+        invoice_settings: { default_payment_method: "pm_member_card" },
+      })
+      const plan = await db.membershipPlan.create({
+        data: { name: "Monthly_Membership", stripePriceId: "price_plan" },
+      })
+      await db.membership.create({
+        data: {
+          userId: user.id,
+          planId: plan.id,
+          endDate: new Date(),
+          isActive: true,
+          paymentStatus: "PENDING",
+          stripeSubscriptionId: "sub_member",
+          totalMonths: 3,
+        },
+      })
+      return user
+    }
+
+    const cardError = async (code: string, message: string) => {
+      const actual = await vi.importActual<typeof import("stripe")>("stripe")
+      return new actual.Stripe.errors.StripeCardError({
+        type: "card_error",
+        code,
+        decline_code: code,
+        message,
+      })
+    }
+
+    let errorSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      stripeApi.invoices.list.mockResolvedValue({
+        data: [
+          {
+            id: "in_renewal",
+            status: "open",
+            lines: { data: [{ subscription: "sub_member" }] },
+          },
+        ],
+      })
+      stripeApi.invoices.retrieve.mockResolvedValue({
+        id: "in_renewal",
+        payments: {
+          data: [
+            { payment: { type: "payment_intent", payment_intent: "pi_renewal" } },
+          ],
+        },
+      })
+      errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      errorSpy.mockRestore()
+    })
+
+    it("answers a paid retry as it always has", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockResolvedValue({ id: "in_renewal", status: "paid" })
+
+      const res = await retry(user.id)
+
+      expect(res.status).toBe(200)
+      expect(res.body).toEqual({ success: true })
+    })
+
+    it("hands a retry the bank wants to authenticate back for the app to confirm", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockRejectedValue(
+        await cardError(
+          "authentication_required",
+          "Your card was declined. This transaction requires authentication.",
+        ),
+      )
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_renewal",
+        status: "requires_payment_method",
+        client_secret: "pi_renewal_secret_abc",
+        last_payment_error: {
+          code: "card_declined",
+          decline_code: "authentication_required",
+        },
+      })
+
+      const res = await retry(user.id)
+
+      // Not a 200: a build from before this reads the refusal the way it always has.
+      expect(res.status).toBe(402)
+      expect(res.body).toEqual({
+        code: "AUTHENTICATION_REQUIRED",
+        message: "Your card was declined. This transaction requires authentication.",
+        clientSecret: "pi_renewal_secret_abc",
+        paymentMethodId: "pm_member_card",
+      })
+      expect(stripeApi.invoices.retrieve).toHaveBeenCalledWith("in_renewal", {
+        expand: ["payments"],
+      })
+      // Still on hold: only the payment going through lifts it, through the webhook.
+      const membership = await db.membership.findUniqueOrThrow({
+        where: { userId: user.id },
+      })
+      expect(membership.paymentStatus).toBe("PENDING")
+    })
+
+    it("reports an ordinary decline with the card's own message", async () => {
+      const user = await heldMember()
+      stripeApi.invoices.pay.mockRejectedValue(
+        await cardError("card_declined", "Your card has insufficient funds."),
+      )
+      stripeApi.paymentIntents.retrieve.mockResolvedValue({
+        id: "pi_renewal",
+        status: "requires_payment_method",
+        client_secret: "pi_renewal_secret_abc",
+        last_payment_error: { code: "card_declined", decline_code: "insufficient_funds" },
+      })
+
+      const res = await retry(user.id)
+
+      expect(res.status).toBe(500)
+      expect(res.body).toEqual({ message: "Your card has insufficient funds." })
+    })
   })
 
   /**
