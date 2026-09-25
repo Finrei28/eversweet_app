@@ -15,22 +15,33 @@ import { Feather } from "@expo/vector-icons"
 import { cancelMembership } from "@/services/stripe-api"
 import Toast from "react-native-toast-message"
 import { formatShortDate } from "@/lib/formatters"
-import { MembershipDetails } from "@/utils/types"
+import { MembershipDetails, UsersMembership } from "@/utils/types"
+import { builtUpDiscountPercent } from "@/lib/membership"
 import { getErrorMessage } from "@/utils/getError"
 
 type CancelMembershipModalProps = {
   modalVisible: boolean
   setModalVisible: React.Dispatch<React.SetStateAction<boolean>>
   membershipDetails: MembershipDetails | null
+  usersMembership?: UsersMembership | null
   onCancelled?: () => Promise<void> | void
 }
 export default function CancelMembershipModal({
   modalVisible,
   setModalVisible,
   membershipDetails,
+  usersMembership,
   onCancelled,
 }: CancelMembershipModalProps) {
   const [canceling, setCanceling] = useState(false)
+  // The member's own figure, not "the lowest discount": 20% going back to 5% is what makes a
+  // member think twice, and a member still on the first step has no run to lose.
+  const builtUp = usersMembership ? builtUpDiscountPercent(usersMembership) : null
+  const step = usersMembership?.plan.membershipDiscount ?? null
+  const resetLine =
+    builtUp !== null && step !== null && builtUp > step
+      ? `If your membership ends, your ${builtUp}% discount resets and starts again at ${step}%.`
+      : "If your membership ever expires, your membership discount will reset and will start from the lowest discount."
   const handleClose = async () => {
     setModalVisible(false)
   }
@@ -106,8 +117,7 @@ export default function CancelMembershipModal({
                   and bonus loyalty rewards.
                 </Text>
                 <Text className="text-gray-700 text-center mb-1 font-bold">
-                  If your membership ever expires, your membership discount will
-                  reset and will start from the lowest discount.
+                  {resetLine}
                 </Text>
                 <Text className="text-gray-700 text-center mb-1 font-semibold">
                   Don't miss out on these awesome offers!

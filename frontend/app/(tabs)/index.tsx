@@ -24,6 +24,7 @@ import {
 import DancingStar from "@/_components/dancingStar"
 import AudienceBadge from "@/_components/audienceBadge"
 import { useAuth } from "@/store/authProvider"
+import MembershipWarningBanner from "@/_components/membershipWarningBanner"
 
 // This is needed for the order history screen to properly import FontAwesome
 export { FontAwesome }
@@ -68,6 +69,9 @@ export default function Index() {
         nestedScrollEnabled={true}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
+          {/* A member about to lose their discount and benefits; renders nothing otherwise. */}
+          <MembershipWarningBanner className="mx-10 mt-6" />
+
           {offers?.length > 0 && (
             <>
               <View className="flex-row items-center justify-center p-5 mt-4 text-center gap-5">

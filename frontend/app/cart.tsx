@@ -10,6 +10,7 @@ import { useAuth } from "@/store/authProvider"
 import { formatCurrency } from "@/lib/formatters"
 import { CartItems } from "@/_components/cartitems"
 import { SweetPointIcon } from "@/_components/sweetPointIcon"
+import MembershipWarningBanner from "@/_components/membershipWarningBanner"
 
 export default function CartPage() {
   const navigation = useNavigation()
@@ -73,6 +74,8 @@ export default function CartPage() {
       <CustomHeader />
       <View className="flex-1 bg-background pt-5 px-5 pb-10">
         <Text className="text-2xl font-bold mb-5 text-center">Your Cart</Text>
+        {/* On hold, the cart has just lost its member prices; say why, and how to get them back. */}
+        <MembershipWarningBanner className="mb-5" />
 
         {cartItems?.length === 0 ? (
           <View className="flex-1 justify-center items-center mb-24">
