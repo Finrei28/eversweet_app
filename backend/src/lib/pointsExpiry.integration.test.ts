@@ -96,8 +96,9 @@ describeIfDb("points expiry", () => {
     })
 
   /**
-   * A membership in the state given. One month paid unless `totalMonths` says otherwise:
-   * a membership that ever ran has at least one, and 0 is a join that never paid.
+   * A membership in the state given. One month paid unless the counts say otherwise: a
+   * membership that ever ran has at least one in `lifetimeMonths`, and 0 is a join that never
+   * paid. `totalMonths` is the run, which goes back to 0 when a subscription ends.
    */
   const membershipFor = async (
     userId: string,
@@ -106,6 +107,7 @@ describeIfDb("points expiry", () => {
       isActive: boolean
       paymentStatus: "SUCCESS" | "PENDING" | "FAILED"
       totalMonths?: number
+      lifetimeMonths?: number
     },
   ) => {
     const plan = await db.membershipPlan.create({
@@ -117,7 +119,7 @@ describeIfDb("points expiry", () => {
       },
     })
     await db.membership.create({
-      data: { userId, planId: plan.id, endDate, totalMonths: 1, ...state },
+      data: { userId, planId: plan.id, endDate, totalMonths: 1, lifetimeMonths: 1, ...state },
     })
     return plan
   }
@@ -229,6 +231,26 @@ describeIfDb("points expiry", () => {
     })
 
     /**
+     * The run goes back to 0 when the subscription ends, and it used to be what "was this
+     * membership paid for" was read from - so zeroing it would have told the sweep that a
+     * member of months had never paid, and taken their points the night after they left.
+     */
+    it("gives a lapsed member their month once the run has started again", async () => {
+      await switchOn()
+      const { user, loyalty } = await customerWithPoints(120)
+      await membershipFor(user.id, new Date("2026-10-25T02:00:00.000Z"), {
+        isActive: false,
+        paymentStatus: "SUCCESS",
+        totalMonths: 0,
+        lifetimeMonths: 3,
+      })
+
+      await expireInactivePoints(afterDeadline)
+
+      expect(await balanceOf(loyalty.id)).toBe(120)
+    })
+
+    /**
      * A join claimed but never paid carries an end date a month ahead. It must not keep a
      * balance alive as though a membership had run.
      */
@@ -239,6 +261,7 @@ describeIfDb("points expiry", () => {
         isActive: false,
         paymentStatus: "PENDING",
         totalMonths: 0,
+        lifetimeMonths: 0,
       })
 
       await expireInactivePoints(afterDeadline)
@@ -258,6 +281,7 @@ describeIfDb("points expiry", () => {
         isActive: false,
         paymentStatus: "FAILED",
         totalMonths: 0,
+        lifetimeMonths: 0,
       })
 
       await expireInactivePoints(afterDeadline)

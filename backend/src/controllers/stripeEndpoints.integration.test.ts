@@ -360,6 +360,102 @@ describeIfDb("Stripe endpoints", () => {
       expect(res.status).toBe(201)
     })
 
+    /**
+     * A membership Stripe has ended, on a row that was never told: the webhook failed, is
+     * still being retried, or never came. The row said active, so the join was refused as
+     * "still active" while Re-subscribe failed on the dead subscription - no way back in until
+     * the webhook landed, and none at all if it never did.
+     */
+    describe("when the row still says active", () => {
+      const staleMembership = async (userId: string) => {
+        const plan = await db.membershipPlan.findFirstOrThrow()
+        return db.membership.create({
+          data: {
+            userId,
+            planId: plan.id,
+            endDate: new Date(),
+            isActive: true,
+            cancel: true,
+            paymentStatus: "SUCCESS",
+            stripeSubscriptionId: "sub_old",
+            totalMonths: 4,
+            lifetimeMonths: 4,
+          },
+        })
+      }
+
+      it.each([["canceled"], ["incomplete_expired"]])(
+        "lets them join again once Stripe has the subscription %s",
+        async (status) => {
+          const user = await makeUser()
+          await withStripeCustomer(user.id)
+          await staleMembership(user.id)
+          stripeApi.subscriptions.retrieve.mockResolvedValue({
+            id: "sub_old",
+            status,
+            ended_at: Math.floor(Date.now() / 1000),
+            cancellation_details: { reason: "cancellation_requested" },
+          })
+
+          const res = await join(user.id, {})
+
+          expect(res.status).toBe(201)
+          expect(stripeApi.subscriptions.retrieve).toHaveBeenCalledWith("sub_old")
+          expect(stripeApi.subscriptions.create).toHaveBeenCalledTimes(1)
+          const membership = await db.membership.findUniqueOrThrow({
+            where: { userId: user.id },
+          })
+          expect(membership).toMatchObject({
+            isActive: false,
+            paymentStatus: "PENDING",
+            stripeSubscriptionId: "sub_new",
+            totalMonths: 0,
+            lifetimeMonths: 4,
+          })
+        },
+      )
+
+      /**
+       * Live Stripe keeps a cancelled subscription, so one it cannot find is one this key cannot
+       * see: a development server on a test key reading the live database. Taking that for an
+       * ending would switch off a real member's membership from someone's laptop.
+       */
+      it("leaves the membership alone when Stripe cannot find the subscription", async () => {
+        const user = await makeUser()
+        await withStripeCustomer(user.id)
+        await staleMembership(user.id)
+        const actual = await vi.importActual<typeof import("stripe")>("stripe")
+        stripeApi.subscriptions.retrieve.mockRejectedValue(resourceMissing(actual))
+        vi.spyOn(console, "warn").mockImplementation(() => {})
+
+        const res = await join(user.id, {})
+
+        expect(res.status).toBe(400)
+        expect(stripeApi.subscriptions.create).not.toHaveBeenCalled()
+        expect(
+          await db.membership.findUniqueOrThrow({ where: { userId: user.id } }),
+        ).toMatchObject({ isActive: true, totalMonths: 4 })
+      })
+
+      it("still refuses a member whose subscription is running", async () => {
+        const user = await makeUser()
+        await withStripeCustomer(user.id)
+        await staleMembership(user.id)
+        stripeApi.subscriptions.retrieve.mockResolvedValue({
+          id: "sub_old",
+          status: "active",
+        })
+
+        const res = await join(user.id, {})
+
+        expect(res.status).toBe(400)
+        expect(stripeApi.subscriptions.create).not.toHaveBeenCalled()
+        expect(
+          await db.membership.findUniqueOrThrow({ where: { userId: user.id } }),
+        ).toMatchObject({ isActive: true, totalMonths: 4 })
+      })
+    })
+
     describe("when the bank wants to authenticate the first payment", () => {
       /** A subscription whose first invoice's payment is `pi_first`. */
       const incompleteSubscription = () => ({
@@ -444,6 +540,128 @@ describeIfDb("Stripe endpoints", () => {
         expect(res.body).toEqual({ success: true })
         errorSpy.mockRestore()
       })
+    })
+  })
+
+  /**
+   * Re-subscribe on a membership Stripe had already ended called `subscriptions.update` on a
+   * cancelled subscription, which Stripe refuses, and answered "Failed to resume membership.
+   * Please try again." - every time, for a retry that could never work. When the webhook had
+   * not landed, the app kept showing Re-subscribe and never the join.
+   */
+  describe("resumeMembership", () => {
+    const resume = (userId: string) =>
+      request(app)
+        .post("/api/stripe/resumeMembership")
+        .set("Authorization", as(userId))
+        .send({})
+
+    const cancelledMembership = async (userId: string) => {
+      const plan = await db.membershipPlan.create({
+        data: { name: membershipPlanName(), stripePriceId: "price_plan" },
+      })
+      return db.membership.create({
+        data: {
+          userId,
+          planId: plan.id,
+          endDate: new Date(),
+          isActive: true,
+          cancel: true,
+          paymentStatus: "SUCCESS",
+          stripeSubscriptionId: "sub_member",
+          totalMonths: 3,
+          lifetimeMonths: 5,
+        },
+      })
+    }
+
+    beforeEach(() => {
+      stripeApi.subscriptions.update.mockResolvedValue({ id: "sub_member" })
+    })
+
+    it("resumes a subscription that is still running", async () => {
+      const user = await makeUser()
+      await cancelledMembership(user.id)
+      stripeApi.subscriptions.retrieve.mockResolvedValue({
+        id: "sub_member",
+        status: "active",
+        cancel_at_period_end: true,
+      })
+
+      const res = await resume(user.id)
+
+      expect(res.status).toBe(200)
+      expect(stripeApi.subscriptions.update).toHaveBeenCalledWith("sub_member", {
+        cancel_at_period_end: false,
+      })
+    })
+
+    it.each([["canceled"], ["incomplete_expired"]])(
+      "says the membership has ended, and records it, when the subscription is %s",
+      async (status) => {
+        const user = await makeUser()
+        const membership = await cancelledMembership(user.id)
+        const endedAt = Math.floor(Date.UTC(2026, 8, 20) / 1000)
+        stripeApi.subscriptions.retrieve.mockResolvedValue({
+          id: "sub_member",
+          status,
+          ended_at: endedAt,
+          cancellation_details: { reason: "cancellation_requested" },
+        })
+
+        const res = await resume(user.id)
+
+        expect(res.status).toBe(409)
+        expect(res.body).toEqual({
+          code: "MEMBERSHIP_ENDED",
+          message: "Your membership has ended. You can join again from the membership screen.",
+        })
+        expect(stripeApi.subscriptions.update).not.toHaveBeenCalled()
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({
+          isActive: false,
+          paymentStatus: "SUCCESS",
+          totalMonths: 0,
+          lifetimeMonths: 5,
+          stripeSubscriptionId: "sub_member",
+        })
+        expect(after.endDate.getTime()).toBe(endedAt * 1000)
+      },
+    )
+
+    // Not an ending: see "leaves the membership alone when Stripe cannot find the subscription".
+    it("leaves the membership alone when Stripe cannot find the subscription", async () => {
+      const user = await makeUser()
+      const membership = await cancelledMembership(user.id)
+      const actual = await vi.importActual<typeof import("stripe")>("stripe")
+      stripeApi.subscriptions.retrieve.mockRejectedValue(resourceMissing(actual))
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+
+      const res = await resume(user.id)
+
+      expect(res.status).toBe(404)
+      expect(stripeApi.subscriptions.update).not.toHaveBeenCalled()
+      expect(
+        await db.membership.findUniqueOrThrow({ where: { id: membership.id } }),
+      ).toMatchObject({ isActive: true, totalMonths: 3 })
+    })
+
+    it("records a membership that ended over a failed payment as failed", async () => {
+      const user = await makeUser()
+      const membership = await cancelledMembership(user.id)
+      stripeApi.subscriptions.retrieve.mockResolvedValue({
+        id: "sub_member",
+        status: "canceled",
+        ended_at: Math.floor(Date.now() / 1000),
+        cancellation_details: { reason: "payment_failed" },
+      })
+
+      expect((await resume(user.id)).status).toBe(409)
+      expect(
+        await db.membership.findUniqueOrThrow({ where: { id: membership.id } }),
+      ).toMatchObject({ isActive: false, paymentStatus: "FAILED" })
     })
   })
 

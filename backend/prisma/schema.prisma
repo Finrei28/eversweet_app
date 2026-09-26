@@ -94,7 +94,15 @@ model Membership {
   paymentStatus         PaymentStatus     @default(PENDING)
   paymentFailureCode    String?
   paymentFailureMessage String?
+  /// Monthly invoices paid in a row on the current subscription, and the input to the member
+  /// discount. Written by the order server from Stripe's own invoices, and put back to 0 when
+  /// the subscription ends: a rejoin is a new subscription that starts the run again. The
+  /// name is older than `lifetimeMonths` and is kept because installed app builds read it.
   totalMonths           Int               @default(0)
+  /// Every month of membership ever paid for, breaks included, across all of the member's
+  /// subscriptions. Never goes down. Points expiry reads it as "this membership was paid
+  /// for", which `totalMonths` could only answer while it was never reset.
+  lifetimeMonths        Int               @default(0)
   /// The end date a "your membership ends soon" reminder has already been claimed for. Cron
   /// runs in every order server instance, so the push needs a claim; keyed on the date rather
   /// than a flag, so resuming and cancelling again in a later period makes the next reminder
