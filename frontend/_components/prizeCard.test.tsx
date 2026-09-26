@@ -150,3 +150,25 @@ describe("place wording", () => {
     expect(textOf(tree)).toContain(expected)
   })
 })
+
+/**
+ * The card said "last month" whatever the prize. One stays listed until its expiry, which the
+ * website's date picker can set well past the month after, so it names the month it was won.
+ */
+describe("the month won", () => {
+  it("is named from the month and year the prize was settled under", () => {
+    const { tree } = render(makePrize({ month: 8, year: 2026, reward: reward() }))
+
+    expect(textOf(tree)).toContain("2nd place · August 2026")
+    expect(textOf(tree)).not.toContain("last month")
+  })
+
+  it("reads December and January across a new year", () => {
+    expect(textOf(render(makePrize({ month: 12, year: 2025 })).tree)).toContain(
+      "December 2025",
+    )
+    expect(textOf(render(makePrize({ month: 1, year: 2026 })).tree)).toContain(
+      "January 2026",
+    )
+  })
+})
