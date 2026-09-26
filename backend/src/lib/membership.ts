@@ -4,6 +4,28 @@ import {
   type LoyaltyRates,
 } from "./loyaltyRates"
 
+/** The plan row whose `stripePriceId` is a live-mode Stripe price. */
+export const LIVE_MEMBERSHIP_PLAN_NAME = "Monthly_Membership"
+/** The plan row whose `stripePriceId` is a test-mode Stripe price. */
+export const TEST_MEMBERSHIP_PLAN_NAME = "Test_Membership"
+
+/**
+ * Which `MembershipPlan` row this server sells.
+ *
+ * A Stripe price exists in exactly one mode, so a test key asked for the live plan's price
+ * gets `resource_missing`, and development (which runs on a test key) could not show or
+ * join the membership at all. The plan follows the key rather than NODE_ENV because the key
+ * is what decides which prices Stripe can see: nothing sets NODE_ENV in `.env`, and a
+ * production host that happened to leave it unset would otherwise sell the test plan to
+ * every customer. Restricted keys (`rk_live_`) count as live too.
+ */
+export const membershipPlanName = (
+  secretKey: string | undefined = process.env.STRIPE_SECRET_KEY,
+) =>
+  /^(sk|rk)_live_/.test(secretKey ?? "")
+    ? LIVE_MEMBERSHIP_PLAN_NAME
+    : TEST_MEMBERSHIP_PLAN_NAME
+
 /**
  * The token a benefit uses instead of writing the member multiplier out.
  *

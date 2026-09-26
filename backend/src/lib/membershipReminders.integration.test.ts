@@ -27,6 +27,7 @@ import { invalidateLoyaltyRates } from "./loyaltyRates"
 import { claimEndWarning, warnMembershipsEnding } from "./membershipReminders"
 import { describeIfDb, resetDatabase } from "../test/db"
 import { makeUser } from "../test/factories"
+import { membershipPlanName } from "./membership"
 
 /**
  * The reminder before a cancelled membership ends.
@@ -61,7 +62,7 @@ describeIfDb("membership end reminder", () => {
     const user = await makeUser()
     const plan = await db.membershipPlan.create({
       data: {
-        name: "Monthly_Membership",
+        name: membershipPlanName(),
         stripePriceId: `price_${Math.random().toString(36).slice(2)}`,
         benefits,
       },

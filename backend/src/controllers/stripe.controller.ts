@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client"
 
 import { Request, Response } from "express"
 import { Stripe } from "stripe"
-import { loadMembershipBenefits } from "../lib/membership"
+import { loadMembershipBenefits, membershipPlanName } from "../lib/membership"
 import {
   AUTHENTICATION_REQUIRED,
   warnRenewalDeclined,
@@ -828,7 +828,7 @@ export const getMembershipDetails = async (req: Request, res: Response) => {
   }
   try {
     const membershipPlan = await db.membershipPlan.findFirst({
-      where: { name: "Monthly_Membership" },
+      where: { name: membershipPlanName() },
       // Listed rather than selected wholesale, so a client generated either side of an
       // unapplied migration cannot ask for a column the database lacks.
       select: {
@@ -1085,7 +1085,7 @@ export const createMembership = async (req: Request, res: Response) => {
 
     const [plan, existingMembership] = await Promise.all([
       db.membershipPlan.findFirstOrThrow({
-        where: { name: "Monthly_Membership" },
+        where: { name: membershipPlanName() },
       }),
       db.membership.findUnique({ where: { userId } }),
     ])

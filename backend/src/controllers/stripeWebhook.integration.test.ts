@@ -6,6 +6,7 @@ import app from "../app"
 import { db } from "../lib/db"
 import { describeIfDb, resetDatabase } from "../test/db"
 import { makeUser } from "../test/factories"
+import { membershipPlanName } from "../lib/membership"
 import {
   resetStripeStub,
   resourceMissing,
@@ -141,7 +142,7 @@ const makeMembership = async (
   data: Record<string, unknown> = {},
 ) => {
   const plan = await db.membershipPlan.create({
-    data: { name: "Monthly_Membership", stripePriceId: "price_plan" },
+    data: { name: membershipPlanName(), stripePriceId: "price_plan" },
   })
   return db.membership.create({
     data: {
