@@ -11,6 +11,7 @@ import {
 } from "react-native"
 import { useRouter } from "expo-router"
 import { isPaidUpMember } from "@/lib/membership"
+import { bankCheckMessage } from "@/lib/bankCheck"
 import { useCartStore } from "@/store/cart"
 import { Feather, Octicons } from "@expo/vector-icons"
 import Checkbox from "expo-checkbox"
@@ -139,11 +140,7 @@ function MembershipContent() {
     })
 
     if (error) {
-      throw new Error(
-        error.code === "Canceled"
-          ? "The payment wasn't confirmed with your bank, so you haven't been charged."
-          : (error.message ?? "Your bank couldn't confirm this payment."),
-      )
+      throw new Error(bankCheckMessage(error))
     }
   }
 

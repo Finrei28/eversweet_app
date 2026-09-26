@@ -71,6 +71,7 @@ import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { getErrorMessage } from "@/utils/getError"
 import { TickAnimation } from "@/_components/tickAnimation"
 import { isPaidUpMember } from "@/lib/membership"
+import { bankCheckMessage } from "@/lib/bankCheck"
 
 // Your Stripe publishable key - should be in environment variables
 const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!
@@ -870,9 +871,7 @@ function CheckoutContent() {
             declineCode: error.declineCode,
           })
 
-          throw new CardNotConfirmedError(
-            error.message ?? "Your card was declined. Please try another one.",
-          )
+          throw new CardNotConfirmedError(bankCheckMessage(error))
         }
 
         // A hold is what this build asks for: the server takes the money once the
