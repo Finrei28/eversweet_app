@@ -13,6 +13,8 @@ import { useRouter } from "expo-router"
 import { resetPassword } from "@/services/api"
 import Toast from "react-native-toast-message"
 import { getErrorMessage } from "@/utils/getError"
+import { fetchSupportEmail } from "@/services/queries"
+import { contactUs } from "@/lib/supportContact"
 
 export default function ResetPassword({
   email,
@@ -67,10 +69,11 @@ export default function ResetPassword({
         })
         router.replace("/signin")
       } else {
+        const supportEmail = await fetchSupportEmail()
         Toast.show({
           type: "error",
           text1: `Password could not be changed`,
-          text2: `Please contact eversweet@eversweet.co.nz to reset your password.`,
+          text2: `Please ${contactUs(supportEmail)} to reset your password.`,
           position: "bottom",
           visibilityTime: 3000,
           autoHide: true,

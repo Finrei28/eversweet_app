@@ -1,9 +1,11 @@
 import React from "react"
-import { View, Text, Modal, TouchableOpacity, Image } from "react-native"
+import { View, Text, Modal, TouchableOpacity } from "react-native"
 import { setMembershipPopupExpiration } from "@/services/notifications"
 import { useRouter } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import { useAuth } from "@/store/authProvider"
+import { useMembershipDetailsQuery } from "@/services/queries"
+import EversweetLogo from "./eversweetLogo"
 
 type MembershipPopupProps = {
   modalVisible: boolean
@@ -13,7 +15,10 @@ export default function MembershipPopup({
   modalVisible,
   setModalVisible,
 }: MembershipPopupProps) {
-  const { membershipDetails } = useAuth()
+  const { token } = useAuth()
+  const { data: membershipDetails } = useMembershipDetailsQuery({
+    enabled: !!token,
+  })
   const router = useRouter()
   const handleClose = async () => {
     setModalVisible(false)
@@ -45,14 +50,11 @@ export default function MembershipPopup({
               <Text className="text-gray-600 text-2xl font-bold">×</Text>
             </TouchableOpacity>
 
-            {/* Banner image */}
-            <Image
-              source={{
-                uri: "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1747456979/eversweet_square_u6iyov.png",
-              }}
-              className="w-full h-40 rounded-xl mb-4"
-              resizeMode="contain"
-            />
+            {/* Bundled, not a Cloudinary URL typed in here: an asset renamed or deleted
+                there left the popup with a blank space where its picture was. */}
+            <View className="mt-6 mb-6">
+              <EversweetLogo height={64} />
+            </View>
 
             {/* Title */}
             <Text className="text-2xl font-bold text-center mb-2">
@@ -67,7 +69,9 @@ export default function MembershipPopup({
             <View className="space-y-3 my-6 px-5">
               {membershipDetails?.membershipBenefits.map((benefits, index) => (
                 <View className="flex-row" key={index}>
-                  <Feather name="x-circle" size={18} color="#EF4444" />
+                  {/* A tick, as the membership screen lists them: this is what joining
+                      gives. The red cross read as "you don't get this". */}
+                  <Feather name="check-circle" size={18} color="#10B981" />
                   <Text className="ml-2 text-gray-700">{benefits}</Text>
                 </View>
               ))}

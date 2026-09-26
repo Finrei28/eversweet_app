@@ -14,12 +14,11 @@ import { jwtDecode } from "jwt-decode"
 import { AppState } from "react-native"
 import {
   LeaderBoardDetails,
-  MembershipDetails,
   StoreHours,
   UserDetails,
   UsersMembership,
 } from "@/utils/types"
-import { getMembershipDetails, getUsersMembership } from "@/services/stripe-api"
+import { getUsersMembership } from "@/services/stripe-api"
 import {
   getDaysOff,
   getLeaderboardDetails,
@@ -49,7 +48,6 @@ interface DecodedToken {
 interface AuthContextType {
   token: string | null
   usersMembership: UsersMembership | null
-  membershipDetails: MembershipDetails | null
   userDetails: UserDetails | null
   leaderboardDetails: LeaderBoardDetails | null
   setUserDetails: React.Dispatch<React.SetStateAction<UserDetails | null>>
@@ -106,8 +104,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const membershipLoadedAt = useRef(0)
   const [usersMembership, setUsersMembership] =
     useState<UsersMembership | null>(null)
-  const [membershipDetails, setMembershipDetails] =
-    useState<MembershipDetails | null>(null)
   // No stand-in hours. The app used to start from a hard-coded copy, which offered times
   // from hours the shop may since have changed - and the server, reading the real ones,
   // then refused them. Checkout waits for `storeHoursStatus` instead.
@@ -190,7 +186,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!token) {
       setUserDetails(null)
       setUsersMembership(null)
-      setMembershipDetails(null)
       setLeaderboardDetails(null)
       // There is no per-user data to wait for when signed out. Without this the
       // flag stayed true for the whole session and every screen gating on it
@@ -203,32 +198,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const loadUserData = async () => {
       try {
         setDataLoading(true)
-        const [
-          membershipResult,
-          membershipDetailsResult,
-          userResult,
-          leaderboardResult,
-        ] = await Promise.allSettled([
-          getUsersMembership(),
-          getMembershipDetails(),
-          getUserProfile(),
-          getLeaderboardDetails(),
-        ])
+        // The plan's price and benefits are not here: they are the shop's to edit, so they
+        // live in react-query (`useMembershipDetailsQuery`) where they are refreshed.
+        const [membershipResult, userResult, leaderboardResult] =
+          await Promise.allSettled([
+            getUsersMembership(),
+            getUserProfile(),
+            getLeaderboardDetails(),
+          ])
 
         if (membershipResult.status === "fulfilled") {
           setUsersMembership(membershipResult.value)
           membershipLoadedAt.current = Date.now()
         } else {
           console.error("Failed to fetch membership:", membershipResult.reason)
-        }
-
-        if (membershipDetailsResult.status === "fulfilled") {
-          setMembershipDetails(membershipDetailsResult.value)
-        } else {
-          console.error(
-            "Failed to fetch membership details:",
-            membershipDetailsResult.reason,
-          )
         }
 
         if (userResult.status === "fulfilled") {
@@ -431,7 +414,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     () => ({
       token,
       usersMembership,
-      membershipDetails,
       userDetails,
       leaderboardDetails,
       setUserDetails,
@@ -450,7 +432,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [
       token,
       usersMembership,
-      membershipDetails,
       userDetails,
       leaderboardDetails,
       refetchUserDetails,

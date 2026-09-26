@@ -20,6 +20,8 @@ import Toast from "react-native-toast-message"
 import { useRouter } from "expo-router"
 import { useAuth } from "@/store/authProvider"
 import { getErrorMessage } from "@/utils/getError"
+import { fetchSupportEmail } from "@/services/queries"
+import { contactUs } from "@/lib/supportContact"
 
 const OTPInput = ({
   onChange,
@@ -102,11 +104,11 @@ const OTPInput = ({
           setResetToken?.(data.resetToken)
           setIsResettingPassword(true)
         } else {
+          const supportEmail = await fetchSupportEmail()
           Toast.show({
             type: "error",
             text1: `Could not verify your code`,
-            text2:
-              "Please try again later, contact eversweet@eversweet.co.nz if problem presists",
+            text2: `Please try again later, or ${contactUs(supportEmail)} if the problem persists.`,
             position: "bottom",
             visibilityTime: 5000,
             autoHide: true,

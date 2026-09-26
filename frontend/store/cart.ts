@@ -26,7 +26,8 @@ import {
 } from "@/lib/priceHelper"
 import { getErrorMessage } from "@/utils/getError"
 import { ApiError } from "@/services/apiClient"
-import { fetchLoyaltyRates } from "@/services/queries"
+import { fetchLoyaltyRates, fetchSupportEmail } from "@/services/queries"
+import { contactUs } from "@/lib/supportContact"
 
 interface CartState {
   items: CartItem[]
@@ -455,12 +456,15 @@ export const useCartStore = create<CartState>((set, get) => ({
           error: "Failed to remove item",
         })
         if (item?.loyaltyPointsUsed && item.loyaltyPointsUsed > 0) {
-          await useLoyaltyStore.getState().fetchPoints()
+          const [, supportEmail] = await Promise.all([
+            useLoyaltyStore.getState().fetchPoints(),
+            fetchSupportEmail(),
+          ])
           console.error("Failed to restore points", error)
           Toast.show({
             type: "error",
             text1: `Failed to restore loyalty points (${item.loyaltyPointsUsed})`,
-            text2: "Please contact eversweet@eversweet.co.nz",
+            text2: `Please ${contactUs(supportEmail)}.`,
             position: "bottom",
             visibilityTime: 0,
             autoHide: false,

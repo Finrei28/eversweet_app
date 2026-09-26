@@ -6,6 +6,7 @@ import { resumeMembership } from "@/services/stripe-api"
 import { formatShortDate } from "@/lib/formatters"
 import { getErrorMessage } from "@/utils/getError"
 import CancelMembershipModal from "@/_components/cancelMembershipModal"
+import { useMembershipDetailsQuery } from "@/services/queries"
 import { UsersMembership } from "@/utils/types"
 import {
   builtUpDiscountPercent,
@@ -28,7 +29,10 @@ export default function ManageMembershipCard({
   isProcessingPayment: boolean
   onRetryPayment: () => void
 }) {
-  const { membershipDetails, refetchUsersMembership } = useAuth()
+  const { token, refetchUsersMembership } = useAuth()
+  const { data: membershipDetails } = useMembershipDetailsQuery({
+    enabled: !!token,
+  })
   const [isResuming, setIsResuming] = useState(false)
   const [cancelMembership, setCancelMembership] = useState(false)
 
@@ -159,7 +163,7 @@ export default function ManageMembershipCard({
         <CancelMembershipModal
           modalVisible={cancelMembership}
           setModalVisible={setCancelMembership}
-          membershipDetails={membershipDetails}
+          membershipDetails={membershipDetails ?? null}
           usersMembership={usersMembership}
           onCancelled={refetchUsersMembership}
         />

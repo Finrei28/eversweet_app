@@ -32,6 +32,7 @@ import ManageMembershipCard from "@/_components/manageMembershipCard"
 import { openPaymentSheetForSetup } from "@/utils/stripeMethod"
 import { StripeProvider, useStripe } from "@stripe/stripe-react-native"
 import { getErrorMessage } from "@/utils/getError"
+import { useMembershipDetailsQuery } from "@/services/queries"
 
 /**
  * The payment went through on this device but the membership has not switched on yet - the
@@ -57,9 +58,10 @@ function MembershipContent() {
     authLoading,
     dataLoading,
     usersMembership,
-    membershipDetails,
     refetchUsersMembership,
   } = useAuth()
+  const { data: membershipDetails, isLoading: loadingMembershipDetails } =
+    useMembershipDetailsQuery({ enabled: !!token })
   const { initPaymentSheet, presentPaymentSheet, confirmPayment } = useStripe()
   const [savedCards, setSavedCards] = useState<any[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
@@ -316,7 +318,7 @@ function MembershipContent() {
     }
   }
 
-  if (authLoading || dataLoading || loadingCards) {
+  if (authLoading || dataLoading || loadingCards || loadingMembershipDetails) {
     return (
       <View className="flex-1 bg-background">
         <CustomHeader />
