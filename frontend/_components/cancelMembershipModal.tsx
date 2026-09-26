@@ -6,7 +6,6 @@ import {
   Text,
   Modal,
   TouchableOpacity,
-  Image,
   TouchableWithoutFeedback,
   Alert,
   ActivityIndicator,
@@ -18,6 +17,7 @@ import { formatShortDate } from "@/lib/formatters"
 import { MembershipDetails, UsersMembership } from "@/utils/types"
 import { builtUpDiscountPercent } from "@/lib/membership"
 import { getErrorMessage } from "@/utils/getError"
+import EversweetLogo from "./eversweetLogo"
 
 type CancelMembershipModalProps = {
   modalVisible: boolean
@@ -87,20 +87,18 @@ export default function CancelMembershipModal({
             <TouchableWithoutFeedback>
               <View className="bg-white rounded-2xl p-6 w-full max-w-md relative items-center">
                 {/* Close button */}
-                <View className="flex-row justify-between">
-                  <Image
-                    source={{
-                      uri: "https://res.cloudinary.com/dlqjgl6ju/image/upload/v1747456979/eversweet_square_u6iyov.png",
-                    }}
-                    className="w-full h-40 rounded-xl mb-4"
-                    resizeMode="contain"
-                  />
-                  <TouchableOpacity className="" onPress={handleClose}>
-                    <Text className="text-gray-700 text-xl font-bold">✕</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  className="absolute top-4 right-4"
+                  onPress={handleClose}
+                >
+                  <Text className="text-gray-700 text-xl font-bold">✕</Text>
+                </TouchableOpacity>
 
-                {/* Banner image */}
+                {/* Bundled, not a Cloudinary URL typed in here: an asset renamed or deleted
+                    there left the modal with a blank space where its picture was. */}
+                <View className="mt-6 mb-6">
+                  <EversweetLogo height={64} />
+                </View>
 
                 {/* Title */}
                 <Text className="text-2xl font-bold text-center mb-2">

@@ -16,6 +16,7 @@ import {
   showOfferForClient,
   showOffers,
 } from "./api"
+import { getMembershipDetails } from "./stripe-api"
 
 /**
  * One place for every cache key, so screens that show the same data share it
@@ -35,6 +36,7 @@ export const queryKeys = {
   privacyPolicy: ["privacy-policy"] as const,
   termsAndConditions: ["terms-and-conditions"] as const,
   loyaltyRates: ["loyalty-rates"] as const,
+  membershipDetails: ["membership-details"] as const,
   customisations: (dessertId: string) =>
     ["customisations", dessertId] as const,
 }
@@ -107,6 +109,22 @@ export const useLeaderboardQuery = ({ enabled = true }: AuthedOptions = {}) =>
     enabled,
   })
 
+/**
+ * The plan's price and benefit list, which the website's `/admin/settings` edits.
+ *
+ * AuthProvider used to load this once at sign-in and keep it for the session, so a benefit
+ * reworded or dropped on the website stayed on the join screen, the popup, the cancel modal and
+ * the warning banner until the app was restarted. Shop-wide, so it keeps the five-minute tier.
+ * The endpoint takes a token, hence `enabled`.
+ */
+export const useMembershipDetailsQuery = ({ enabled = true }: AuthedOptions = {}) =>
+  useQuery({
+    queryKey: queryKeys.membershipDetails,
+    queryFn: getMembershipDetails,
+    enabled,
+    staleTime: SHARED_DATA_STALE_TIME,
+  })
+
 export const useStoreInfoQuery = () =>
   useQuery({
     queryKey: queryKeys.storeInfo,
@@ -145,6 +163,26 @@ export const useCustomisationsQuery = (dessertId: string | undefined) =>
     enabled: Boolean(dessertId),
     staleTime: SHARED_DATA_STALE_TIME,
   })
+
+/**
+ * The shop's email, for error messages that tell the customer who to contact. From the cache
+ * when the store screen has already loaded it, otherwise fetched once and kept like any other
+ * shop-wide data. Undefined when it cannot be had: the message is written to read without it
+ * (`contactUs`), so a failure here never costs the customer the error itself.
+ */
+export const fetchSupportEmail = async (): Promise<string | undefined> => {
+  try {
+    const info = await queryClient.fetchQuery({
+      queryKey: queryKeys.storeInfo,
+      queryFn: getStoreInfo,
+      staleTime: SHARED_DATA_STALE_TIME,
+    })
+    return info.email || undefined
+  } catch (error) {
+    console.error("Failed to load the shop's email", error)
+    return undefined
+  }
+}
 
 /**
  * For callers outside React — the cart store works out earnable points on every

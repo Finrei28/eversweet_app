@@ -1,5 +1,4 @@
 import { CachedImage } from "@/_components/cachedImage"
-import { isPaidUpMember } from "@/lib/membership"
 import {
   View,
   Text,
@@ -346,24 +345,19 @@ export default function CustomModal({
                       <View className="flex flex-row items-center mt-2">
                         <Text className="font-semibold text-lg">Price: </Text>
                         {type === "cents" ? (
-                          isPaidUpMember(usersMembership) ||
-                          selectedDessert.promo?.isActive ? (
-                            <>
-                              <View className="flex flex-row items-center gap-1">
-                                <Text className="text-red-600 line-through text-sm">
-                                  {formatCurrency(pricebeforeDiscount)}
-                                </Text>
-                                {offerId ? (
-                                  <Text className="font-bold">
-                                    {formatCurrency(priceAfterDiscount)}
-                                  </Text>
-                                ) : (
-                                  <Text className="font-bold">
-                                    {formatCurrency(priceAfterDiscount)}
-                                  </Text>
-                                )}
-                              </View>
-                            </>
+                          // Struck through only when something has actually come off. This
+                          // asked "a member, or `promo.isActive`", so a promotion past its end
+                          // date struck the price through above the same price; comparing the
+                          // two figures also covers an offer price and a cart line's own.
+                          priceAfterDiscount < pricebeforeDiscount ? (
+                            <View className="flex flex-row items-center gap-1">
+                              <Text className="text-red-600 line-through text-sm">
+                                {formatCurrency(pricebeforeDiscount)}
+                              </Text>
+                              <Text className="font-bold">
+                                {formatCurrency(priceAfterDiscount)}
+                              </Text>
+                            </View>
                           ) : (
                             <Text className="font-bold">
                               {formatCurrency(priceAfterDiscount)}

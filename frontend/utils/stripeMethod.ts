@@ -1,5 +1,9 @@
 import { Alert } from "react-native"
-import { PaymentSheet, useStripe } from "@stripe/stripe-react-native"
+import {
+  PaymentSheet,
+  PaymentSheetError,
+  useStripe,
+} from "@stripe/stripe-react-native"
 import {
   createSetupIntent,
   setCardForMembershipPayments,
@@ -88,7 +92,9 @@ export const openPaymentSheetForSetup = async (
     // Present the payment sheet
     const result = await presentPaymentSheet()
     if (result.error) {
-      if (result.error.message === "The payment has been canceled") {
+      // By code, not by the message's wording. It compared the English sentence, so a
+      // reworded or localised message turned a plain "close the sheet" into an error alert.
+      if (result.error.code === PaymentSheetError.Canceled) {
         refetchCards()
         return
       }

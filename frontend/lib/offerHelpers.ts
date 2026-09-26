@@ -15,6 +15,10 @@ export const canRedeemAudience = (
       return viewer.isActiveMember
     case "NEW_USERS":
       return viewer.isNewCustomer
+    // An audience added after this build was made: locked, rather than `undefined` falling
+    // through as a guess. The server decides, and a Redeem it would refuse is worse.
+    default:
+      return false
   }
 }
 

@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { useAuth } from "@/store/authProvider"
 import { membershipWarning } from "@/lib/membership"
+import { useMembershipDetailsQuery } from "@/services/queries"
 
 /**
  * A member about to lose what they have built up: a renewal on hold, or a cancelled membership
@@ -23,7 +24,13 @@ export default function MembershipWarningBanner({
   className?: string
 }) {
   const router = useRouter()
-  const { usersMembership, membershipDetails } = useAuth()
+  const { usersMembership } = useAuth()
+  // Only for someone with a membership running: nobody else is warned, so the home tab of
+  // everyone else asks for nothing. The benefits name a perk, and until they arrive the
+  // warning reads without one.
+  const { data: membershipDetails } = useMembershipDetailsQuery({
+    enabled: !!usersMembership?.isActive,
+  })
 
   const warning = membershipWarning(
     usersMembership,

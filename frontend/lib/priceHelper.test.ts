@@ -1,9 +1,10 @@
 import {
+  appliedDiscount,
   calculateBestDiscountedPrice,
   calculatePriceAfterPromo,
   isPromoLive,
 } from "./priceHelper"
-import { Dessert } from "@/utils/types"
+import { Dessert, UsersMembership } from "@/utils/types"
 
 const START = new Date("2026-10-01T00:00:00.000Z")
 const END = new Date("2026-10-31T10:59:59.999Z")
@@ -77,5 +78,52 @@ describe("promotion prices", () => {
     expect(
       calculatePriceAfterPromo(dessert(promo({ type: "FIXED_AMOUNT", value: 1500 })), END),
     ).toBe(0)
+  })
+})
+
+// Only the fields the membership helpers read: a 5% step, capped at 25%.
+const member = (
+  totalMonths: number,
+  paymentStatus: UsersMembership["paymentStatus"] = "SUCCESS",
+) =>
+  ({
+    isActive: true,
+    paymentStatus,
+    totalMonths,
+    plan: { membershipDiscount: 5, maxDiscount: 25 },
+  }) as unknown as UsersMembership
+
+/**
+ * The label on a price names the discount the server will take - the better of the two, never
+ * both. The card asked `promo.isActive` alone, so an ended promotion struck the price through
+ * over a price nothing had come off.
+ */
+describe("appliedDiscount", () => {
+  it("is nothing once the promotion has ended, whatever its switch says", () => {
+    const after = new Date(END.getTime() + 1)
+    expect(appliedDiscount(dessert(promo()), null, after)).toBeNull()
+  })
+
+  it("is nothing for a dessert with no promotion and no member", () => {
+    expect(appliedDiscount(dessert(null), null, END)).toBeNull()
+  })
+
+  it("is the promotion when it beats the member discount", () => {
+    // 20% promotion against a 10% member step.
+    expect(appliedDiscount(dessert(promo()), member(2), END)).toBe("promo")
+  })
+
+  it("is the member discount when it beats the promotion", () => {
+    // 25% member cap against the 20% promotion.
+    expect(appliedDiscount(dessert(promo()), member(9), END)).toBe("member")
+  })
+
+  it("is the member discount on a tie", () => {
+    expect(appliedDiscount(dessert(promo()), member(4), END)).toBe("member")
+  })
+
+  it("leaves the promotion to a member on hold, who is given no member price", () => {
+    expect(appliedDiscount(dessert(promo()), member(9, "PENDING"), END)).toBe("promo")
+    expect(appliedDiscount(dessert(null), member(9, "PENDING"), END)).toBeNull()
   })
 })

@@ -75,6 +75,13 @@ const PODIUM_STYLES: Record<Place, PodiumStyle> = {
   },
 }
 
+/**
+ * How many places the board shows: the order server's `getLeaderBoard` sends
+ * `leaderboard.slice(0, 10)`. Named so the copy and the arithmetic below say the
+ * same number, and there is one place to change if the server's does.
+ */
+const LEADERBOARD_SIZE = 10
+
 /** The logo brown, as in sweetPointIcon — darker than `primary`, so a glyph
  * beside a points value does not blend into the number. */
 const LOGO_BROWN = "#B97B53"
@@ -355,10 +362,10 @@ const YourStandingCard = React.memo(
     const blurb =
       userRank.position <= 3
         ? "You're on the podium"
-        : userRank.position <= 10
-          ? "You're in the top 10 this month"
+        : userRank.position <= LEADERBOARD_SIZE
+          ? `You're in the top ${LEADERBOARD_SIZE} this month`
           : pointsToTopTen !== null
-            ? `${formatNumber(pointsToTopTen)} points to the top 10`
+            ? `${formatNumber(pointsToTopTen)} points to the top ${LEADERBOARD_SIZE}`
             : "Keep earning to climb the board"
 
     return (
@@ -502,10 +509,13 @@ export default function LeaderBoardPage() {
    * ten can exist — so the tenth score is always in hand when this is needed.
    */
   const pointsToTopTen = useMemo(() => {
-    if (!userRank || userRank.position <= 10 || leaderboard.length < 10) {
+    // From the board's own last row rather than `leaderboard[9]`: a position below the
+    // board means the board was cut off, and its last row is the score to beat.
+    const lastOnBoard = leaderboard[leaderboard.length - 1]
+    if (!userRank || !lastOnBoard || userRank.position <= leaderboard.length) {
       return null
     }
-    return Math.max(1, leaderboard[9].pointsEarned - userRank.points + 1)
+    return Math.max(1, lastOnBoard.pointsEarned - userRank.points + 1)
   }, [userRank, leaderboard])
 
   /*

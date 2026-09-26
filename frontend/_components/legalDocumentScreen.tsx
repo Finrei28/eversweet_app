@@ -21,9 +21,16 @@ import { LegalDocument, LegalPlatform } from "@/utils/types"
  *   that silently showed nothing at all.
  */
 
-const platformLabel = (appliesTo?: LegalPlatform[]): string | null => {
-  if (!appliesTo || appliesTo.length === 0 || appliesTo.length === 2) return null
-  return appliesTo[0] === "app" ? "In this app" : "Ordering on our website"
+/**
+ * Labelled only when the section is for exactly one channel this build knows. Anything else -
+ * both, neither, or a platform added after this build - goes unlabelled, which reads as "applies
+ * to you". It labelled every value but "app" as the website.
+ */
+export const platformLabel = (appliesTo?: LegalPlatform[]): string | null => {
+  if (appliesTo?.length !== 1) return null
+  if (appliesTo[0] === "app") return "In this app"
+  if (appliesTo[0] === "web") return "Ordering on our website"
+  return null
 }
 
 type Props = {

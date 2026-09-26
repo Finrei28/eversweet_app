@@ -16,6 +16,32 @@ const PLACE_WORDS: Record<number, string> = {
 
 const placeLabel = (place: number) => PLACE_WORDS[place] ?? `${place}th`
 
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+]
+
+/**
+ * The month the prize was won, from the month and year the server settled it under. The card
+ * said "last month" whatever the prize: one stays listed until its expiry, which the website
+ * can set well past the month after. Plain names, not a date formatter - this is a calendar
+ * month the shop named, not an instant, so there is no timezone to get wrong.
+ */
+export const wonIn = (prize: Pick<Prize, "month" | "year">) => {
+  const name = MONTH_NAMES[prize.month - 1]
+  return name ? `${name} ${prize.year}` : `${prize.year}`
+}
+
 /**
  * A month the customer finished in the top three.
  *
@@ -50,7 +76,7 @@ export const PrizeCard = React.memo(
 
           <View className="flex-1">
             <Text className="text-xs font-semibold text-primary">
-              {`${placeLabel(prize.place)} place · last month`}
+              {`${placeLabel(prize.place)} place · ${wonIn(prize)}`}
             </Text>
             <Text
               numberOfLines={2}

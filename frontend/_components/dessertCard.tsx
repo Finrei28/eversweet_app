@@ -1,6 +1,8 @@
 import { formatCurrency } from "@/lib/formatters"
-import { isPaidUpMember } from "@/lib/membership"
-import { calculateBestDiscountedPrice } from "@/lib/priceHelper"
+import {
+  appliedDiscount,
+  calculateBestDiscountedPrice,
+} from "@/lib/priceHelper"
 import { Dessert, UsersMembership } from "@/utils/types"
 import { Router } from "expo-router"
 import React, { useMemo } from "react"
@@ -40,6 +42,14 @@ export const DessertCard = React.memo(
     const dessertPriceInCentsAfterDiscount = useMemo(() => {
       return calculateBestDiscountedPrice(dessert, usersMembership)
     }, [dessert, usersMembership])
+    const discount = useMemo(
+      () => appliedDiscount(dessert, usersMembership),
+      [dessert, usersMembership],
+    )
+    // A balance of 0 is a balance. `loyaltyPoints ? ... : false` read it as "no balance
+    // given", so a customer with no points could open every reward for the server to refuse.
+    const cannotAfford =
+      loyaltyPoints !== undefined && loyaltyPoints < dessert.priceInLoyaltyPoints
     return (
       <View className="flex items-center mb-6 shadow-sm bg-white rounded-2xl mx-10 pb-5 p-1">
         <CachedImage
@@ -63,10 +73,8 @@ export const DessertCard = React.memo(
               router.push("/signin")
             }
           }}
-          disabled={
-            loyaltyPoints ? loyaltyPoints < dessert.priceInLoyaltyPoints : false
-          }
-          className={`${loyaltyPoints && loyaltyPoints < dessert.priceInLoyaltyPoints ? "bg-gray-300" : "bg-primary"} rounded-lg p-3 items-center w-1/2  mx-auto`}
+          disabled={cannotAfford}
+          className={`${cannotAfford ? "bg-gray-300" : "bg-primary"} rounded-lg p-3 items-center w-1/2  mx-auto`}
         >
           {token ? (
             <View className="flex-col items-center justify-center">
@@ -74,7 +82,7 @@ export const DessertCard = React.memo(
                 <View className="h-6 w-16 rounded bg-white/40" />
               ) : currency === "cents" ? (
                 <>
-                  {isPaidUpMember(usersMembership) || dessert.promo?.isActive ? (
+                  {discount ? (
                     <>
                       <View className="flex-row items-center gap-1">
                         <Text className="text-red-600 line-through text-sm">
@@ -87,9 +95,7 @@ export const DessertCard = React.memo(
                         </Text>
                       </View>
                       <Text className="text-xs text-yellow-300">
-                        {isPaidUpMember(usersMembership)
-                          ? "Member Price"
-                          : "Special Offer"}
+                        {discount === "member" ? "Member Price" : "Special Offer"}
                       </Text>
                     </>
                   ) : (

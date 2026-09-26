@@ -5,6 +5,25 @@ type StatusBadgeProps = {
   status: string
 }
 
+/** What each of the order server's `Status` values is called on screen. */
+const STATUS_LABELS: Record<string, string> = {
+  PENDING: "Pending",
+  ACCEPTED: "Accepted",
+  MAKING: "Making",
+  READY: "Ready",
+  PICKED_UP: "Picked up",
+}
+
+/**
+ * The badge printed the enum as it came off the wire, so a collected order read "PICKED_UP".
+ * A status added after this build still gets a readable label, "OUT_FOR_DELIVERY" as "Out for
+ * delivery", rather than the raw value or nothing.
+ */
+export const statusLabel = (status: string) =>
+  STATUS_LABELS[status] ??
+  status.charAt(0).toUpperCase() +
+    status.slice(1).toLowerCase().replace(/_/g, " ")
+
 export const StatusBadge = ({ status }: StatusBadgeProps) => {
   // Create animated values
   const opacity = useRef(new Animated.Value(1)).current
@@ -40,13 +59,6 @@ export const StatusBadge = ({ status }: StatusBadgeProps) => {
           text: "text-green-800",
           border: "border-green-300",
           shadow: "#10B981", // Green 500
-        }
-      case "DECLINED":
-        return {
-          bgColor: "bg-red-100",
-          text: "text-red-800",
-          border: "border-red-300",
-          shadow: "#EF4444", // Red 500
         }
       default:
         return {
@@ -121,7 +133,9 @@ export const StatusBadge = ({ status }: StatusBadgeProps) => {
         <View
           className={`px-3 py-1 rounded-full ${colors.bg} ${colors.border} border`}
         >
-          <Text className={`text-xs font-medium ${colors.text}`}>MAKING</Text>
+          <Text className={`text-xs font-medium ${colors.text}`}>
+            {statusLabel(status)}
+          </Text>
         </View>
       </Animated.View>
     )
@@ -131,7 +145,9 @@ export const StatusBadge = ({ status }: StatusBadgeProps) => {
     <View
       className={`px-3 py-1 rounded-full ${colors.bg} ${colors.border} border`}
     >
-      <Text className={`text-xs font-medium ${colors.text}`}>{status}</Text>
+      <Text className={`text-xs font-medium ${colors.text}`}>
+        {statusLabel(status)}
+      </Text>
     </View>
   )
 }
