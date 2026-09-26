@@ -206,8 +206,9 @@ npm run lint
 Workflows live only in the **root** `.github/workflows/` (GitHub reads nothing else), are
 path-filtered per app, and `cd` into the app directory. Backend CI = `tsc --noEmit`,
 `npm audit --audit-level=critical`, and vitest against a real `postgres:16` service (Redis
-is stubbed in-process). Frontend CI = `tsc --noEmit`, `expo lint`, and a report-only
-audit. Both audits are gated at `critical` with the reasoning written into the workflow
+is stubbed in-process). Frontend CI = `tsc --noEmit`, `expo lint`, jest (`npm test -- --ci`,
+unit tests only, in the runner's UTC zone — the multi-zone run above is local), and a
+report-only audit. `admin/` has no CI; its tests run only locally. Both audits are gated at `critical` with the reasoning written into the workflow
 files — read those comments before "fixing" an advisory.
 
 ## Architecture
@@ -1064,6 +1065,13 @@ dropped, so items vanished with nothing said.
 `text1NumberOfLines` from its own arguments, defaulting to one line. The
 `props: { text1NumberOfLines: 0 }` blocks dotted through the call sites are inert; those
 toasts only wrap because `app/_layout.tsx` sets it for that type.
+
+**Toast placement belongs to `_components/toastHost.tsx`, not the call site.** It sits the
+toast above the tab bar on tab screens and above the safe area elsewhere, following the
+route, and hides it on navigation (bar one shown in the second before, which is about the
+screen being landed on). Don't pass `bottomOffset`, `onShow` or `onHide` to `Toast.show`:
+every call used to pass `bottomOffset: 90`, which left toasts floating a tab bar's height
+up on every other screen.
 
 Customers have no socket connection — realtime for them is Expo push notifications
 (`services/notifications.ts`, token synced on launch and on every foreground).

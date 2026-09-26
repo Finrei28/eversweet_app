@@ -270,7 +270,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,
-        bottomOffset: 90,
       })
     } finally {
       setDataLoading(false)
@@ -291,7 +290,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         position: "bottom",
         visibilityTime: 5000,
         autoHide: true,
-        bottomOffset: 90,
       })
     } finally {
       setDataLoading(false)

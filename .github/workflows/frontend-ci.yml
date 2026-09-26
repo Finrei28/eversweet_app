@@ -11,7 +11,7 @@ on:
 
 jobs:
   quality-checks:
-    name: Type-check, lint and security audit
+    name: Type-check, lint, test and security audit
     runs-on: ubuntu-latest
 
     # The repo holds backend/, frontend/ and admin/, but GitHub only reads

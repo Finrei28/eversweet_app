@@ -56,7 +56,6 @@ export default function SignIn() {
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
-        bottomOffset: 90,
         props: {
           text1NumberOfLines: 0,
           text2NumberOfLines: 0, // allow wrapping
