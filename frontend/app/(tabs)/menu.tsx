@@ -18,16 +18,21 @@ import CustomModal from "@/_components/modal"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { useAuth } from "@/store/authProvider"
 import { DessertCard } from "@/_components/dessertCard"
+import { useCategoryBarScroll } from "@/lib/useCategoryBarScroll"
 
 export default function Menu() {
   const [selectedCategory, setSelectedCategory] =
     useState<DessertCategory | null>(null)
-  const { categoryParam } = useLocalSearchParams()
+  // By id. This was the category's name, matched with `cat.name === categoryParam`: a category
+  // renamed on the website left the old one selected with its old desserts, and two categories
+  // sharing a name could never both be reached.
+  const { categoryId } = useLocalSearchParams<{ categoryId?: string }>()
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
-  const [previousIndex, setPreviousIndex] = useState(0)
   const { token, usersMembership, authLoading, dataLoading } = useAuth()
   const flatListRef = useRef<FlatList<Dessert>>(null)
+  const { scrollViewRef, scrollToCategory, onPillLayout } =
+    useCategoryBarScroll()
   const router = useRouter()
   const cartItems = useCartStore((state) => state.items)
 
@@ -60,9 +65,10 @@ export default function Menu() {
       const fetchData = async () => {
         if (!menu) return
 
-        const selected = categoryParam
-          ? menu.find((cat) => cat.name === categoryParam)
-          : menu[0]
+        // The first category when the one asked for is gone - taken off the menu since the
+        // link was made - rather than keeping whatever was selected before.
+        const selected =
+          (categoryId && menu.find((cat) => cat.id === categoryId)) || menu[0]
 
         if (selected) {
           setSelectedCategory(selected)
@@ -71,65 +77,22 @@ export default function Menu() {
       }
 
       fetchData()
-      // Not scrollToCategory: it is a new function every render, and listing it would
-      // re-run this on every render while the tab is focused — re-selecting and re-scrolling
-      // the category bar over whatever the customer does. This is meant to run on focus and
-      // when the category or the menu changes, and the offset it works out on a later focus
-      // matches the one it scrolled to when that category was picked.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [categoryParam, menu]),
+      // scrollToCategory is stable (useCategoryBarScroll), so this still runs only on focus
+      // and when the category or the menu changes.
+    }, [categoryId, menu, scrollToCategory]),
   )
 
   useEffect(() => {
     if (flatListRef.current) {
       flatListRef.current.scrollToOffset({ offset: 0, animated: true })
     }
-  }, [categoryParam])
-
-  const changeCategory = (newCategory: string) => {
-    router.replace({
-      pathname: "/menu",
-      params: { categoryParam: newCategory },
-    })
-  }
+  }, [categoryId])
 
   const handleCategoryChange = (category: DessertCategory) => {
-    changeCategory(category.name)
-  }
-
-  const scrollViewRef = useRef<ScrollView>(null)
-
-  const scrollToCategory = (id: string) => {
-    if (!menu) return
-
-    const index = menu.findIndex((cat) => cat.id === id)
-    if (scrollViewRef.current) {
-      const newIndex =
-        index >= previousIndex
-          ? index < 6
-            ? index * 130
-            : index < 7
-              ? index * 145
-              : index * 160
-          : index < 3
-            ? index
-            : index < 4
-              ? index * 50
-              : index < 5
-                ? index * 70
-                : index < 6
-                  ? index * 100
-                  : index < 7
-                    ? index * 120
-                    : index < 8
-                      ? index * 135
-                      : index * 140
-      scrollViewRef.current.scrollTo({
-        x: newIndex,
-        animated: true,
-      })
-      setPreviousIndex(index)
-    }
+    router.replace({
+      pathname: "/menu",
+      params: { categoryId: category.id },
+    })
   }
 
   return (
@@ -163,6 +126,7 @@ export default function Menu() {
                   {menu.map((category) => (
                     <TouchableOpacity
                       key={category.id}
+                      onLayout={onPillLayout(category.id)}
                       className={`rounded-full px-4 p-2 text-sm font-medium text-gray-700 ${
                         selectedCategory?.id === category.id
                           ? "bg-secondary text-primary"

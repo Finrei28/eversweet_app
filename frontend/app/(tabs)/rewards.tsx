@@ -20,6 +20,7 @@ import { pointsExpiryNotice } from "@/lib/pointsExpiry"
 import { useAuth } from "@/store/authProvider"
 import { DessertCard } from "@/_components/dessertCard"
 import { SweetPointIcon } from "@/_components/sweetPointIcon"
+import { useCategoryBarScroll } from "@/lib/useCategoryBarScroll"
 
 export default function Loyalty() {
   const { token, authLoading, usersMembership } = useAuth()
@@ -28,8 +29,9 @@ export default function Loyalty() {
   const [activeCategory, setActiveCategory] = useState<string>("")
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
-  const [previousIndex, setPreviousIndex] = useState(0)
   const flatListRef = useRef<FlatList<Dessert>>(null)
+  const { scrollViewRef, scrollToCategory: scrollBarTo, onPillLayout } =
+    useCategoryBarScroll()
   const router = useRouter()
 
   const cartItems = useCartStore((state) => state.items)
@@ -42,6 +44,15 @@ export default function Loyalty() {
 
   // Hoisted to keep a stable identity across renders — see the note on the
   // list below.
+  // Selects the category and brings its pill into view. Stable: both halves are.
+  const scrollToCategory = useCallback(
+    (id: string) => {
+      setActiveCategory(id)
+      scrollBarTo(id)
+    },
+    [scrollBarTo],
+  )
+
   const renderDessert = useCallback(
     ({ item }: { item: Dessert }) => (
       <DessertCard
@@ -82,11 +93,9 @@ export default function Loyalty() {
       }
     }
     fetchData()
-    // Not scrollToCategory: it is a new function every render, and listing it would snap
-    // the tab back to the first category on every render. This runs when the menu arrives
-    // or actually changes (react-query keeps the same array while the data is unchanged).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories])
+    // scrollToCategory is stable, so this still runs only when the menu arrives or actually
+    // changes (react-query keeps the same array while the data is unchanged).
+  }, [categories, scrollToCategory])
 
   useEffect(() => {
     if (categories && categories.length > 0) {
@@ -105,42 +114,6 @@ export default function Loyalty() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory])
 
-  const scrollViewRef = useRef<ScrollView>(null)
-
-  const scrollToCategory = (id: string) => {
-    setActiveCategory(id)
-
-    if (!categories) return
-
-    const index = categories.findIndex((cat) => cat.id === id)
-    if (scrollViewRef.current) {
-      const newIndex =
-        index >= previousIndex
-          ? index < 6
-            ? index * 130
-            : index < 7
-              ? index * 145
-              : index * 160
-          : index < 3
-            ? index
-            : index < 4
-              ? index * 50
-              : index < 5
-                ? index * 70
-                : index < 6
-                  ? index * 100
-                  : index < 7
-                    ? index * 120
-                    : index < 8
-                      ? index * 135
-                      : index * 140
-      scrollViewRef.current.scrollTo({
-        x: newIndex,
-        animated: true,
-      })
-      setPreviousIndex(index)
-    }
-  }
 
   return (
     <>
@@ -194,6 +167,7 @@ export default function Loyalty() {
                       {categories.map((category) => (
                         <TouchableOpacity
                           key={category.id}
+                          onLayout={onPillLayout(category.id)}
                           className={`rounded-full px-4 p-2 text-sm font-medium text-gray-700 ${
                             activeCategory === category.id ? "bg-secondary" : ""
                           }`}

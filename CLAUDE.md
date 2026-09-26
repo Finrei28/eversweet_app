@@ -1106,9 +1106,11 @@ comparisons come from; never use the device clock or locale for trading hours.
 errors. Before "fixing" one, check whether the value is stable:
 - **Stable, safe to list:** expo-router's `useRouter()` returns a module singleton, zustand
   store actions never change, and AuthProvider's callbacks are memoised on the token.
-- **Not stable:** a plain function declared in the component body. The Menu and Rewards
-  tabs deliberately leave `scrollToCategory` out, with a disable comment saying why. Listing
-  it would re-run those effects on every render and keep snapping the category bar back.
+- **Not stable:** a plain function declared in the component body. Listing one re-runs the
+  effect on every render. The Menu and Rewards tabs' `scrollToCategory` used to be one, and
+  was left out of their effects for that reason; it now comes from
+  `lib/useCategoryBarScroll` (stable, and it scrolls to each pill's measured position rather
+  than a pixel offset guessed per index), so it is listed.
 
 ### admin/ (staff app)
 

@@ -223,7 +223,7 @@ export default function Index() {
                   <TouchableOpacity
                     onPress={() => {
                       router.replace(
-                        `/menu?categoryParam=${encodeURIComponent(category.name)}`,
+                        `/menu?categoryId=${encodeURIComponent(category.id)}`,
                       )
                     }}
                     accessibilityLabel={`View menu for ${category.name}`}
