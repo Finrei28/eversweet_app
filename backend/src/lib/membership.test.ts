@@ -7,6 +7,7 @@ import {
   WHILE_POINTS_EXPIRE_TOKEN,
   headlinePerk,
   loadMembershipBenefits,
+  membershipPlanName,
   resolveMembershipBenefits,
 } from "./membership"
 
@@ -201,5 +202,24 @@ describe("headlinePerk", () => {
     expect(headlinePerk(["Stackable membership discount", "Cancel anytime"])).toBeNull()
     expect(headlinePerk([])).toBeNull()
     expect(headlinePerk(["   "])).toBeNull()
+  })
+})
+
+describe("membershipPlanName", () => {
+  // A Stripe price lives in one mode only, so the plan has to follow the key: the live
+  // plan's price asked for with a test key is resource_missing, and the other way round.
+  it("sells the live plan on a live key, secret or restricted", () => {
+    expect(membershipPlanName("sk_live_abc")).toBe("Monthly_Membership")
+    expect(membershipPlanName("rk_live_abc")).toBe("Monthly_Membership")
+  })
+
+  it("sells the test plan on a test key", () => {
+    expect(membershipPlanName("sk_test_abc")).toBe("Test_Membership")
+    expect(membershipPlanName("rk_test_abc")).toBe("Test_Membership")
+  })
+
+  it("never takes a key that merely mentions live for a live one", () => {
+    expect(membershipPlanName("sk_test_live_abc")).toBe("Test_Membership")
+    expect(membershipPlanName(undefined)).toBe("Test_Membership")
   })
 })

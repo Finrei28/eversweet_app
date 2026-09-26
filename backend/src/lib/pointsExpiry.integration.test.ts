@@ -33,7 +33,7 @@ import app from "../app"
 import { db } from "./db"
 import { invalidateLoyaltyRates } from "./loyaltyRates"
 import { rankMonth } from "./leaderboardRanking"
-import { POINTS_NEVER_EXPIRE_BENEFIT } from "./membership"
+import { membershipPlanName, POINTS_NEVER_EXPIRE_BENEFIT } from "./membership"
 import {
   creditRefund,
   expireBalance,
@@ -111,7 +111,7 @@ describeIfDb("points expiry", () => {
     const plan = await db.membershipPlan.create({
       data: {
         // The name `getMembershipDetails` looks the plan up by.
-        name: "Monthly_Membership",
+        name: membershipPlanName(),
         stripePriceId: `price_${Math.random().toString(36).slice(2)}`,
         benefits: ["Cancel anytime", POINTS_NEVER_EXPIRE_BENEFIT],
       },

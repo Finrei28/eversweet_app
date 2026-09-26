@@ -13,6 +13,7 @@ import {
   stripeApi,
 } from "../test/stripeStub"
 import EmailSender from "../lib/emailSender"
+import { membershipPlanName } from "../lib/membership"
 
 vi.mock("../lib/redis", () => ({
   get redis() {
@@ -179,7 +180,7 @@ const stripeSaysDeclined = () => {
 const makePlan = () =>
   db.membershipPlan.create({
     data: {
-      name: "Monthly_Membership",
+      name: membershipPlanName(),
       stripePriceId: "price_plan",
       membershipDiscount: 5,
       maxDiscount: 25,

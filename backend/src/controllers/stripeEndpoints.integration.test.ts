@@ -7,6 +7,7 @@ import { db } from "../lib/db"
 import { customerDetailsOf } from "../lib/stripeCustomer"
 import { describeIfDb, resetDatabase, tokenFor } from "../test/db"
 import { makeCustomerWithCart, makeUser } from "../test/factories"
+import { membershipPlanName } from "../lib/membership"
 import {
   resetStripeStub,
   resourceMissing,
@@ -176,7 +177,7 @@ describeIfDb("Stripe endpoints", () => {
 
     beforeEach(async () => {
       await db.membershipPlan.create({
-        data: { name: "Monthly_Membership", stripePriceId: PLAN_PRICE },
+        data: { name: membershipPlanName(), stripePriceId: PLAN_PRICE },
       })
       stripeApi.subscriptions.list.mockResolvedValue({ data: [] })
       stripeApi.customers.update.mockResolvedValue({})
@@ -288,7 +289,7 @@ describeIfDb("Stripe endpoints", () => {
       const user = await makeUser()
       await withStripeCustomer(user.id)
       const plan = await db.membershipPlan.findFirstOrThrow({
-        where: { name: "Monthly_Membership" },
+        where: { name: membershipPlanName() },
       })
       await db.membership.create({
         data: {
@@ -466,7 +467,7 @@ describeIfDb("Stripe endpoints", () => {
         invoice_settings: { default_payment_method: "pm_member_card" },
       })
       const plan = await db.membershipPlan.create({
-        data: { name: "Monthly_Membership", stripePriceId: "price_plan" },
+        data: { name: membershipPlanName(), stripePriceId: "price_plan" },
       })
       await db.membership.create({
         data: {
