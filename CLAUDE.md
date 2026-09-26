@@ -661,6 +661,25 @@ set to cancel a subscription whose retries all fail (keep it so — with "unpaid
 due" a lapsed member stays `isActive`, can only retry, and `createMembership` refuses them),
 and rejoining creates a new subscription counted from one.
 
+Two month counts, both read from Stripe's invoices and written as they stand:
+- **`totalMonths` is the run**, the discount's input, and goes back to 0 when the subscription
+  ends. The name predates the split and stays because installed builds read it off the wire.
+- **`lifetimeMonths` is every month ever paid**, breaks included, across all the customer's
+  subscriptions (`lib/membershipMonths.countLifetimePaidMonths`). It only ever goes up — a
+  conditional write, never below the run — because a replaced Stripe customer has none of
+  the old invoices. It is what points expiry reads as "was paid for". Migration
+  `20260928000000_membership_lifetime_months` seeded it from the run;
+  `src/scripts/backfillLifetimeMonths.ts` adds the months before a break from Stripe.
+
+**An ended subscription the row has not heard about** (the deletion webhook failed, is being
+retried, or never came) used to lock the customer out: Re-subscribe failed on the dead
+subscription and the join was refused as "still active". `resumeMembership` and
+`createMembership` now ask Stripe (`reconcileSubscription`) and record the end themselves -
+`resumeMembership` then answers 409 `MEMBERSHIP_ENDED` and the app reloads into the join.
+**A subscription Stripe cannot find is left alone, never treated as ended**: live Stripe keeps
+cancelled subscriptions, so "missing" means the key cannot see it — which is the development
+server, on a test key against the live database.
+
 Because event payloads are in acacia shape and SDK responses in basil (see **Stripe**
 above), handlers read events defensively and re-read live state through the SDK. The
 handlers:
@@ -673,7 +692,10 @@ handlers:
   subscription.
 - **`customer.subscription.deleted`:** sets FAILED only when `cancellation_details.reason`
   is a failed or disputed payment. An ordinary end sets SUCCESS ("nothing owed"). The enum
-  has no ENDED, and PENDING would offer to retry a payment for a dead subscription.
+  has no ENDED, and PENDING would offer to retry a payment for a dead subscription. It zeroes
+  the run and **keeps `stripeSubscriptionId`**: late events for that subscription match on
+  it and then do nothing, where a cleared id would send them to the owner claim below, which
+  matches a rejoin in progress.
 - **Unknown subscriptions:** logged and acknowledged with 200. A throw makes Stripe
   redeliver for days.
 - **First-payment race:** `createMembership` writes the subscription id only after Stripe
@@ -888,12 +910,13 @@ null means off, and the setting falls back to off, so an unreadable table expire
   points-only included), the end of a membership that has **ended**, and
   `pointsExpireFrom` - the launch grace, so switching on gives everyone a full month.
   Active members (`isActive && SUCCESS`) never expire.
-- **Only an ended membership that was paid for anchors** (`totalMonths > 0`, which only paid
-  invoices write). `createMembership` writes an `endDate` a month ahead before the first
-  payment is attempted. Checking the date alone kept a failed join out until that date
-  passed, then let it in: up to a month's extra points life for a membership that never
-  ran. For the same reason the rejoin claim leaves `totalMonths` alone, so a returning
-  member whose rejoin fails keeps the anchor of their real end.
+- **Only an ended membership that was paid for anchors** (`lifetimeMonths > 0`, which only
+  paid invoices write — not `totalMonths`, the run, which is zeroed when the subscription
+  ends). `createMembership` writes an `endDate` a month ahead before the first payment is
+  attempted. Checking the date alone kept a failed join out until that date passed, then let
+  it in: up to a month's extra points life for a membership that never ran. For the same
+  reason the rejoin claim leaves the counts alone, so a returning member whose rejoin fails
+  keeps the anchor of their real end.
 - **The sweep and the warning run three customers at a time** (`forEachWithConcurrency`,
   `lib/concurrency`). Each customer is several round trips, and the launch grace puts
   everyone's first deadline on the same day. Three is small enough to leave the pool to the

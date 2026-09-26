@@ -68,6 +68,10 @@ export default function ManageMembershipCard({
           "Could not resume your membership at this time. Please try again later or contact support.",
         ),
       )
+      // A membership that has ended can't be resumed, and the server records the end before
+      // saying so. Reloading swaps this card for the join; without it the button stayed, and
+      // every tap failed the same way until the customer left the screen.
+      await refetchUsersMembership()
     } finally {
       setIsResuming(false)
     }

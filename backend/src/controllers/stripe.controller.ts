@@ -36,6 +36,11 @@ import { getErrorMessage } from "../utils/getError"
 import { isOfferLive } from "../lib/offerAvailability"
 import { idOf, stripe } from "../lib/stripeClient"
 import {
+  countLifetimePaidMonths,
+  paysForAMonth,
+  subscriptionIdOf,
+} from "../lib/membershipMonths"
+import {
   type CustomerDetails,
   customerDetailsOf,
   describeStripeFailure,
@@ -1104,6 +1109,18 @@ export const createMembership = async (req: Request, res: Response) => {
       return
     }
 
+    // A row still switched on may be one Stripe has already ended, with the webhook yet to
+    // say so. It was refused as "still active" while Re-subscribe failed on the dead
+    // subscription, so the customer had no way back in until the webhook landed. Only this
+    // path asks Stripe; an ordinary join pays nothing for it.
+    if (
+      membership?.isActive &&
+      membership.stripeSubscriptionId &&
+      (await reconcileSubscription(membership.stripeSubscriptionId)) === "ended"
+    ) {
+      membership = await db.membership.findUnique({ where: { userId } })
+    }
+
     if (membership && membership.isActive) {
       res.status(400).json({ message: "Your membership is still active" })
       return
@@ -1183,10 +1200,10 @@ export const createMembership = async (req: Request, res: Response) => {
             { updatedAt: { lt: new Date(Date.now() - JOIN_IN_PROGRESS_MS) } },
           ],
         },
-        // `totalMonths` is left as it was. It used to be zeroed here, which served nothing -
-        // the new subscription's first payment writes its own count - and cost a returning
-        // member whose rejoin failed their real end date as the start of their points month:
-        // expiry counts only a membership that was paid for, and zero reads as never paid.
+        // Neither month count is touched. The run was zeroed when the last subscription ended
+        // and the new one's first payment writes its own. `lifetimeMonths` is what points
+        // expiry reads as "was paid for": zeroing it here would cost a returning member whose
+        // rejoin failed their real end date as the start of their points month.
         data: {
           paymentStatus: "PENDING",
           isActive: false,
@@ -1329,6 +1346,25 @@ export const resumeMembership = async (req: Request, res: Response) => {
       return
     }
 
+    // Stripe refuses to update a subscription that has ended, so resuming one answered
+    // "Please try again" every time - and when the webhook had not recorded the end, the
+    // app went on offering Re-subscribe and never the join. The end is recorded here instead,
+    // and the app reloads the membership and shows the join. A 409 rather than a 426: the
+    // build is fine, the membership is over.
+    const state = await reconcileSubscription(membership.stripeSubscriptionId)
+    if (state === "ended") {
+      res.status(409).json({
+        code: "MEMBERSHIP_ENDED",
+        message:
+          "Your membership has ended. You can join again from the membership screen.",
+      })
+      return
+    }
+    if (state === "missing") {
+      res.status(404).json({ message: "Subscription not found" })
+      return
+    }
+
     await stripe.subscriptions.update(membership.stripeSubscriptionId, {
       cancel_at_period_end: false,
     })
@@ -1404,16 +1440,6 @@ export const getCurrentSubscriptionPaymentMethodId = async (
     return
   }
 }
-
-/** The invoices that pay for a month of membership, as opposed to prorations or one-offs. */
-const MEMBERSHIP_MONTH_REASONS = new Set<Stripe.Invoice.BillingReason>([
-  "subscription_create",
-  "subscription_cycle",
-])
-
-const paysForAMonth = (invoice: Stripe.Invoice) =>
-  !!invoice.billing_reason &&
-  MEMBERSHIP_MONTH_REASONS.has(invoice.billing_reason)
 
 /**
  * How many months of this subscription have been paid in a row, up to the newest month
@@ -1493,6 +1519,44 @@ async function countConsecutivePaidMonths(
 }
 
 /**
+ * Raises the membership's lifetime count to what Stripe shows, and never lowers it: a Stripe
+ * customer that went missing is replaced (`getOrCreateCustomerId`), and the new one has none
+ * of the old invoices. Never below the run either - every month in it was paid.
+ *
+ * Never throws. The payment is recorded by the time this runs, and the next one, or
+ * `src/scripts/backfillLifetimeMonths.ts`, catches the count up.
+ */
+async function recordLifetimeMonths(
+  subscriptionId: string,
+  invoice: Stripe.Invoice,
+  totalMonths: number,
+) {
+  try {
+    const customerId = idOf(invoice.customer)
+    const counted = customerId
+      ? await countLifetimePaidMonths(customerId, invoice).catch((error) => {
+          console.error(
+            `Could not count the months paid by customer ${customerId}:`,
+            getErrorMessage(error),
+          )
+          return 0
+        })
+      : 0
+    const lifetimeMonths = Math.max(counted, totalMonths)
+
+    await db.membership.updateMany({
+      where: { stripeSubscriptionId: subscriptionId, lifetimeMonths: { lt: lifetimeMonths } },
+      data: { lifetimeMonths },
+    })
+  } catch (error) {
+    console.error(
+      `Could not record the lifetime months for subscription ${subscriptionId}:`,
+      getErrorMessage(error),
+    )
+  }
+}
+
+/**
  * Brings a membership in line with its subscription after a successful payment.
  *
  * Every figure is read from Stripe and written as it stands, never adjusted from what the
@@ -1557,6 +1621,18 @@ async function recordMembershipPayment(
     (await updateSubscriptionMembership(subscription, "payment", data)) ===
       "claimed"
 
+  // After the write above, which is what puts the subscription id on a row whose payment beat
+  // it there.
+  await recordLifetimeMonths(subscription.id, invoice, totalMonths)
+
+  // The subscription was read as running before the write, and Stripe can end it in between.
+  // When the end was recorded first - by customer.subscription.deleted, or by a resume or join
+  // that reconciled it - the write above switched the ended membership back on, member prices
+  // and all, and nothing was left to correct it. Asked again now, after the write: whoever
+  // recorded the end had read it from Stripe before writing, so if this write landed after
+  // theirs, this read is after the end too and puts the row back.
+  if (await endedDuringPayment(subscription.id)) return
+
   // Joining reprices what is already in the cart, a renewal steps the discount up, and a
   // paid retry lifts a hold - all three change what the cart should cost.
   const sync = await syncCartAfterMembershipChange(subscription.id)
@@ -1568,6 +1644,30 @@ async function recordMembershipPayment(
         typeof invoice.amount_paid === "number" ? invoice.amount_paid : null,
       cartRepriced: (sync?.repriced ?? 0) > 0,
     })
+  }
+}
+
+/**
+ * Whether the subscription a payment was just recorded for has ended since it was read, in
+ * which case the end is recorded again over the payment's write. Never throws: the payment is
+ * written by now, and a failure to ask leaves this race as open as it was before the check.
+ */
+async function endedDuringPayment(subscriptionId: string): Promise<boolean> {
+  try {
+    const now = await orNullIfMissing(stripe.subscriptions.retrieve(subscriptionId))
+    if (!now || !ENDED_SUBSCRIPTION_STATUSES.has(now.status)) return false
+
+    console.warn(
+      `Subscription ${subscriptionId} ended while its payment was being recorded; recording the end again.`,
+    )
+    await markMembershipEnded(now.id, now)
+    return true
+  } catch (error) {
+    console.error(
+      `Could not check whether subscription ${subscriptionId} ended during its payment:`,
+      getErrorMessage(error),
+    )
+    return false
   }
 }
 
@@ -1630,11 +1730,6 @@ async function updateSubscriptionMembership(
   )
   return "none"
 }
-
-/** The subscription an invoice was raised for, in either shape Stripe sends. */
-const subscriptionIdOf = (invoice: Stripe.Invoice) =>
-  idOf(invoice.lines?.data[0]?.subscription) ??
-  idOf(invoice.parent?.subscription_details?.subscription)
 
 /** Subscription states in which a declined renewal is still being retried. */
 const RETRYING_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
@@ -1809,21 +1904,82 @@ async function recordMembershipEnded(delivered: Stripe.Subscription) {
       ? delivered.cancellation_details
       : (await orNullIfMissing(stripe.subscriptions.retrieve(delivered.id)))
           ?.cancellation_details
-  const reason = details?.reason
+
+  await markMembershipEnded(delivered.id, {
+    ended_at: delivered.ended_at,
+    cancellation_details: details ?? null,
+  })
+}
+
+/** Subscription states Stripe never moves on from: whatever was paid for has run out. */
+const ENDED_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete_expired",
+])
+
+/**
+ * Writes the end of the membership a subscription belonged to. Shared by the webhook and by
+ * the endpoints that find the subscription ended before the webhook has said so.
+ *
+ * The run goes back to 0: it is the discount's input, and a rejoin is a new subscription that
+ * starts it again. `lifetimeMonths` keeps what was paid, which is what points expiry reads.
+ *
+ * The subscription id stays on the row. It is what every late or redelivered event for this
+ * subscription matches on, and each of those reads the subscription's live status and does
+ * nothing for one that has ended. Cleared, they would match nothing and fall through to
+ * `updateSubscriptionMembership`'s claim by owner - which takes a row that is switched off and
+ * waiting on a first payment, exactly what a rejoin in progress looks like. A rejoin writes
+ * its own id over this one.
+ */
+async function markMembershipEnded(
+  subscriptionId: string,
+  ending: Pick<Stripe.Subscription, "ended_at" | "cancellation_details">,
+) {
+  const reason = ending.cancellation_details?.reason
   const unpaid = reason === "payment_failed" || reason === "payment_disputed"
 
   await db.membership.updateMany({
-    where: { stripeSubscriptionId: delivered.id },
+    where: { stripeSubscriptionId: subscriptionId },
     data: {
       paymentStatus: unpaid ? "FAILED" : "SUCCESS",
       isActive: false,
-      endDate: delivered.ended_at
-        ? new Date(delivered.ended_at * 1000)
-        : new Date(),
+      endDate: ending.ended_at ? new Date(ending.ended_at * 1000) : new Date(),
       cancel: true,
+      totalMonths: 0,
     },
   })
-  await syncCartAfterMembershipChange(delivered.id)
+  await syncCartAfterMembershipChange(subscriptionId)
+}
+
+/**
+ * Asks Stripe whether a membership's subscription is still running, and records the end if it
+ * is not - for a request that finds the row still switched on after Stripe has ended the
+ * subscription, because `customer.subscription.deleted` failed, is still being retried, or
+ * never came. Until then the member could neither resume (Stripe refuses to update an ended
+ * subscription) nor rejoin (the row said they were still a member).
+ *
+ * A subscription Stripe cannot find is "missing", not ended, and nothing is written. Live
+ * Stripe keeps cancelled subscriptions, so one it cannot find is one this key cannot see: a
+ * development server runs on a test key against the live database, and taking that for an
+ * ending would switch a real member off.
+ */
+async function reconcileSubscription(
+  subscriptionId: string,
+): Promise<"running" | "ended" | "missing"> {
+  const subscription = await orNullIfMissing(
+    stripe.subscriptions.retrieve(subscriptionId),
+  )
+
+  if (!subscription) {
+    console.warn(
+      `Subscription ${subscriptionId} could not be found with this Stripe key; its membership is left as it is.`,
+    )
+    return "missing"
+  }
+  if (!ENDED_SUBSCRIPTION_STATUSES.has(subscription.status)) return "running"
+
+  await markMembershipEnded(subscription.id, subscription)
+  return "ended"
 }
 
 /**

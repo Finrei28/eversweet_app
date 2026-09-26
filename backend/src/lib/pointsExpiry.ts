@@ -41,7 +41,10 @@ export type ExpiryActivity = {
     endDate: Date
     /** The codebase's one definition of a member: `isActive` and paid up. */
     isMember: boolean
-    /** Whether it was ever paid for - `totalMonths` is written only from paid invoices. */
+    /**
+     * Whether it was ever paid for: `lifetimeMonths`, written only from paid invoices. Not
+     * `totalMonths`, the run, which goes back to 0 when the subscription ends.
+     */
     wasPaid: boolean
   } | null
 }
@@ -118,7 +121,7 @@ export const loadExpiryActivity = async (
         endDate: true,
         isActive: true,
         paymentStatus: true,
-        totalMonths: true,
+        lifetimeMonths: true,
       },
     }),
   ])
@@ -140,7 +143,7 @@ export const loadExpiryActivity = async (
     entry(membership.userId).membership = {
       endDate: membership.endDate,
       isMember: membership.isActive && membership.paymentStatus === "SUCCESS",
-      wasPaid: membership.totalMonths > 0,
+      wasPaid: membership.lifetimeMonths > 0,
     }
   }
   return activity

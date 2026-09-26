@@ -6,6 +6,7 @@ import app from "../app"
 import { db } from "../lib/db"
 import { describeIfDb, resetDatabase } from "../test/db"
 import { makeUser } from "../test/factories"
+import EmailSender from "../lib/emailSender"
 import { membershipPlanName } from "../lib/membership"
 import {
   resetStripeStub,
@@ -362,6 +363,51 @@ describeIfDb("Stripe webhook", () => {
     })
 
     /**
+     * The payment reads the subscription as running and writes the membership on some moments
+     * later. If Stripe ends the subscription in between, and the end is recorded first - by
+     * the deletion webhook, or by a resume or join that reconciled it - the payment's write
+     * landed last and switched the ended membership back on, member prices and all, with
+     * nothing left to correct it.
+     */
+    it("does not leave a membership switched on when the subscription ended during the payment", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id, { cancel: true, totalMonths: 3 })
+      const ended = subscription({
+        status: "canceled",
+        ended_at: Math.floor(Date.UTC(2026, 9, 1) / 1000),
+        cancellation_details: { reason: "cancellation_requested" },
+      })
+      stripeApi.subscriptions.retrieve
+        .mockImplementationOnce(async () => {
+          // Read as running; the end is recorded before this delivery writes.
+          await db.membership.update({
+            where: { id: membership.id },
+            data: { isActive: false, totalMonths: 0 },
+          })
+          return subscription()
+        })
+        .mockResolvedValue(ended)
+      stripeApi.invoices.list.mockResolvedValue(
+        paidInvoices(["in_first", "subscription_create"], ["in_second", "subscription_cycle"]),
+      )
+      vi.mocked(EmailSender).mockClear()
+
+      expect((await deliver(paymentSucceeded())).status).toBe(200)
+
+      const after = await db.membership.findUniqueOrThrow({
+        where: { id: membership.id },
+      })
+      expect(after).toMatchObject({
+        isActive: false,
+        paymentStatus: "SUCCESS",
+        totalMonths: 0,
+        cancel: true,
+      })
+      // Not welcomed into a membership that has already ended.
+      expect(EmailSender).not.toHaveBeenCalled()
+    })
+
+    /**
      * The discount grows a step for each month paid in a row, and a month that was never
      * paid starts the customer from the first step again.
      */
@@ -534,6 +580,159 @@ describeIfDb("Stripe webhook", () => {
         expect(stripeApi.invoices.list).toHaveBeenLastCalledWith(
           expect.objectContaining({ starting_after: "in_aug" }),
         )
+      })
+    })
+
+    /**
+     * `totalMonths` is the run, and starts again after a break. `lifetimeMonths` is every month
+     * ever paid for, across every subscription the member has had.
+     */
+    describe("the lifetime count", () => {
+      const CUSTOMER = "cus_member"
+
+      /** One of the customer's invoices, with the subscription it was raised for. */
+      const customerInvoice = (
+        id: string,
+        subscriptionId: string | null,
+        created: number,
+        billing_reason = "subscription_cycle",
+      ) => ({
+        id,
+        billing_reason,
+        status: "paid",
+        created,
+        parent: subscriptionId
+          ? { subscription_details: { subscription: subscriptionId } }
+          : null,
+      })
+
+      /** An earlier membership: three months paid, then it ended. */
+      const EARLIER = [
+        customerInvoice("in_jan", "sub_earlier", raisedIn(0), "subscription_create"),
+        customerInvoice("in_feb", "sub_earlier", raisedIn(1)),
+        customerInvoice("in_mar", "sub_earlier", raisedIn(2)),
+      ]
+
+      /**
+       * Stripe lists the subscription's invoices for the run and the customer's for the
+       * lifetime, so each is answered from its own list.
+       */
+      const listing = (
+        run: ReturnType<typeof invoicePage>,
+        customerInvoices: ReturnType<typeof customerInvoice>[],
+      ) =>
+        stripeApi.invoices.list.mockImplementation(
+          async (params: { subscription?: string; customer?: string }) =>
+            params.customer
+              ? {
+                  data: [...customerInvoices].sort((a, b) => b.created - a.created),
+                  has_more: false,
+                }
+              : run,
+        )
+
+      /** The member's payment, carrying the customer as every real invoice does. */
+      const paid = (invoiceId = "in_second") => {
+        const event = paymentSucceeded(invoiceId)
+        return {
+          ...event,
+          data: { object: { ...event.data.object, customer: CUSTOMER } },
+        }
+      }
+
+      it("counts every month paid, across a break, however often it is delivered", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id)
+        stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+        listing(
+          paidInvoices(["in_first", "subscription_create"], ["in_second", "subscription_cycle"]),
+          [
+            ...EARLIER,
+            // Neither is a month: a proration, and a one-off with no subscription.
+            customerInvoice("in_prorate", "sub_earlier", raisedIn(1) + 3600, "subscription_update"),
+            customerInvoice("in_one_off", null, raisedIn(4), "manual"),
+            customerInvoice("in_first", SUBSCRIPTION, RAISED.in_first, "subscription_create"),
+            customerInvoice("in_second", SUBSCRIPTION, RAISED.in_second),
+          ],
+        )
+
+        for (let delivery = 0; delivery < 3; delivery++) {
+          expect((await deliver(paid())).status).toBe(200)
+        }
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({ totalMonths: 2, lifetimeMonths: 5 })
+        expect(stripeApi.invoices.list).toHaveBeenCalledWith(
+          expect.objectContaining({ customer: CUSTOMER, status: "paid" }),
+        )
+      })
+
+      it("counts the payment being delivered even if the list has not caught up", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id)
+        stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+        listing(paidInvoices(["in_first", "subscription_create"]), [
+          ...EARLIER,
+          customerInvoice("in_first", SUBSCRIPTION, RAISED.in_first, "subscription_create"),
+        ])
+
+        await deliver(paid("in_second"))
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after.lifetimeMonths).toBe(5)
+      })
+
+      /**
+       * A Stripe customer that went missing is replaced (`getOrCreateCustomerId`), and the new
+       * one has none of the old invoices. What was paid stays paid.
+       */
+      it("never lowers the count", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id, { lifetimeMonths: 12 })
+        stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+        listing(paidInvoices(["in_first", "subscription_create"], ["in_second", "subscription_cycle"]), [
+          customerInvoice("in_first", SUBSCRIPTION, RAISED.in_first, "subscription_create"),
+          customerInvoice("in_second", SUBSCRIPTION, RAISED.in_second),
+        ])
+
+        await deliver(paid())
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({ totalMonths: 2, lifetimeMonths: 12 })
+      })
+
+      // Every month in the run was paid for, so the lifetime can never be the smaller.
+      it("is never less than the run, even when the customer's invoices cannot be read", async () => {
+        const user = await makeUser()
+        const membership = await makeMembership(user.id, { lifetimeMonths: 0 })
+        stripeApi.subscriptions.retrieve.mockResolvedValue(subscription())
+        stripeApi.invoices.list.mockImplementation(
+          async (params: { subscription?: string; customer?: string }) => {
+            if (params.customer) throw new Error("Stripe is down")
+            return paidInvoices(
+              ["in_first", "subscription_create"],
+              ["in_second", "subscription_cycle"],
+            )
+          },
+        )
+
+        expect((await deliver(paid())).status).toBe(200)
+
+        const after = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        })
+        expect(after).toMatchObject({
+          isActive: true,
+          paymentStatus: "SUCCESS",
+          totalMonths: 2,
+          lifetimeMonths: 2,
+        })
       })
     })
   })
@@ -983,6 +1182,34 @@ describeIfDb("Stripe webhook", () => {
         expect(after.endDate.getTime()).toBe(ENDED_AT * 1000)
       },
     )
+
+    /**
+     * The run is the discount's input, and a rejoin is a new subscription that starts it again,
+     * so once the subscription has ended the row said the member had a run they no longer had.
+     * `lifetimeMonths` keeps what was paid, which is what points expiry needs, and the
+     * subscription id stays: it is what every late delivery for that subscription matches on,
+     * and each of them checks the subscription's live status and does nothing.
+     */
+    it("starts the run again, keeping the months paid and the subscription it was", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id, {
+        cancel: true,
+        totalMonths: 4,
+        lifetimeMonths: 9,
+      })
+
+      await deliver(subscriptionDeleted({ reason: "cancellation_requested" }))
+
+      const after = await db.membership.findUniqueOrThrow({
+        where: { id: membership.id },
+      })
+      expect(after).toMatchObject({
+        isActive: false,
+        totalMonths: 0,
+        lifetimeMonths: 9,
+        stripeSubscriptionId: SUBSCRIPTION,
+      })
+    })
 
     it("records a membership that ended because its payment failed", async () => {
       const user = await makeUser()
