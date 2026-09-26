@@ -1065,6 +1065,13 @@ dropped, so items vanished with nothing said.
 `props: { text1NumberOfLines: 0 }` blocks dotted through the call sites are inert; those
 toasts only wrap because `app/_layout.tsx` sets it for that type.
 
+**Toast placement belongs to `_components/toastHost.tsx`, not the call site.** It sits the
+toast above the tab bar on tab screens and above the safe area elsewhere, following the
+route, and hides it on navigation (bar one shown in the second before, which is about the
+screen being landed on). Don't pass `bottomOffset`, `onShow` or `onHide` to `Toast.show`:
+every call used to pass `bottomOffset: 90`, which left toasts floating a tab bar's height
+up on every other screen.
+
 Customers have no socket connection — realtime for them is Expo push notifications
 (`services/notifications.ts`, token synced on launch and on every foreground).
 

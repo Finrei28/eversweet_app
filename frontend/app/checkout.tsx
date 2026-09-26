@@ -997,7 +997,6 @@ function CheckoutContent() {
         position: "bottom",
         visibilityTime: undefined,
         autoHide: false,
-        bottomOffset: 90,
       })
     }
   }

@@ -3,7 +3,8 @@ import "./global.css"
 import { AppState, StatusBar, View } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
-import Toast, { BaseToast } from "react-native-toast-message"
+import { BaseToast, ToastConfig } from "react-native-toast-message"
+import ToastHost from "@/_components/toastHost"
 import { useEffect, useRef, useState } from "react"
 import * as Notifications from "expo-notifications"
 import { useLoyaltyStore } from "@/store/points"
@@ -33,7 +34,7 @@ SplashScreen.preventAutoHideAsync()
 // arrives at BaseToast as a nested `props` key, which BaseToast never reads — it
 // takes text1NumberOfLines from its own arguments, defaulting to one line. So a
 // type without an entry below silently truncates its message to "One or more…".
-const toastConfig = {
+const toastConfig: ToastConfig = {
   error: (props: any) => (
     <BaseToast
       {...props}
@@ -335,7 +336,7 @@ export default function RootLayout() {
               </>
             )}
 
-            <Toast config={toastConfig} />
+            <ToastHost config={toastConfig} />
           </AuthProvider>
         </SafeAreaProvider>
       </QueryClientProvider>

@@ -54,7 +54,6 @@ export default function ManageMembershipCard({
         position: "bottom",
         visibilityTime: 3000,
         autoHide: true,
-        bottomOffset: 60,
         props: {
           text1NumberOfLines: 0,
           text2NumberOfLines: 0, // allow wrapping

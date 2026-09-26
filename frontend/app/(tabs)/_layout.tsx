@@ -4,6 +4,7 @@ import { Tabs } from "expo-router"
 import Entypo from "@expo/vector-icons/Entypo"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { SweetPointIcon } from "@/_components/sweetPointIcon"
+import { TAB_BAR_HEIGHT } from "@/lib/layout"
 import AntDesign from "@expo/vector-icons/AntDesign"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 
@@ -45,7 +46,7 @@ export default function _layout() {
         tabBarInactiveTintColor: "#9CA3AF",
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         tabBarStyle: {
-          height: Platform.OS === "ios" ? 88 : 64,
+          height: TAB_BAR_HEIGHT,
           paddingTop: 8,
           paddingBottom: Platform.OS === "ios" ? 28 : 8,
           backgroundColor: "#ffffff",
