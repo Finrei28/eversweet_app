@@ -206,8 +206,9 @@ npm run lint
 Workflows live only in the **root** `.github/workflows/` (GitHub reads nothing else), are
 path-filtered per app, and `cd` into the app directory. Backend CI = `tsc --noEmit`,
 `npm audit --audit-level=critical`, and vitest against a real `postgres:16` service (Redis
-is stubbed in-process). Frontend CI = `tsc --noEmit`, `expo lint`, and a report-only
-audit. Both audits are gated at `critical` with the reasoning written into the workflow
+is stubbed in-process). Frontend CI = `tsc --noEmit`, `expo lint`, jest (`npm test -- --ci`,
+unit tests only, in the runner's UTC zone — the multi-zone run above is local), and a
+report-only audit. `admin/` has no CI; its tests run only locally. Both audits are gated at `critical` with the reasoning written into the workflow
 files — read those comments before "fixing" an advisory.
 
 ## Architecture
