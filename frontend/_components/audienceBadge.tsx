@@ -39,7 +39,13 @@ export default function AudienceBadge({
 }) {
   if (audience === "EVERYONE") return null
 
-  const style = STYLES[audience]
+  // Undefined for an audience added to the enum after this build. Reading `style.wrapper`
+  // then threw, and the home carousel renders this badge, so one new value would have taken
+  // down the home screen on every build already installed. Such an offer shows unbadged.
+  const style = STYLES[audience as keyof typeof STYLES] as
+    | (typeof STYLES)[keyof typeof STYLES]
+    | undefined
+  if (!style) return null
 
   return (
     <View

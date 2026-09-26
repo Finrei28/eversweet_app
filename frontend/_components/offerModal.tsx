@@ -30,7 +30,10 @@ export default function OfferModal({
   refetchOffers,
 }: OfferModalProps) {
   const [selectedDessert, setSelectedDessert] = useState<Dessert | null>(null)
-  const [modalVisible, setModalVisible] = useState(false)
+  // Open from the start for an offer on one dessert: there is no picker to choose from, and
+  // only the picker ever set this. It started false, so a single-dessert offer rendered an
+  // empty transparent modal over the Offers page and nothing could be tapped.
+  const [modalVisible, setModalVisible] = useState(!!offer.dessert)
 
   const handleSelectDessert = (dessert: Dessert) => {
     setSelectedDessert(dessert)
