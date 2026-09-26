@@ -53,6 +53,31 @@ export function calculatePriceAfterPromo(dessert: Dessert, now: Date = new Date(
     : Math.max(0, originalPrice - promo.value)
 }
 
+/**
+ * Which discount the order server will take off this dessert, or null when neither lowers
+ * the price: the better of the member discount and a running promotion, never both - the
+ * server's `lineDiscountInCents`. A tie is the member's, as `getTotalMembershipDiscount` has it.
+ *
+ * What the menu card, the dessert sheet and the cart line label a price with. They asked
+ * `promo.isActive` alone, so a promotion past its end date still struck the price through and
+ * said "Special Offer" over a price nothing had come off; and "Member Price" was said to a
+ * member whose promotion was the better of the two.
+ */
+export function appliedDiscount(
+  dessert: Dessert,
+  usersMembership: UsersMembership | null,
+  now: Date = new Date(),
+): "member" | "promo" | null {
+  const memberPrice = calculatePriceAfterMembershipDiscount(
+    dessert.priceInCents,
+    usersMembership,
+  )
+  const promoPrice = calculatePriceAfterPromo(dessert, now)
+
+  if (Math.min(memberPrice, promoPrice) >= dessert.priceInCents) return null
+  return memberPrice <= promoPrice ? "member" : "promo"
+}
+
 export function calculatePriceAfterMembershipDiscount(
   price: number,
   usersMembership: UsersMembership | null,

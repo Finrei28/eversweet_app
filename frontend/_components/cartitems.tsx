@@ -5,6 +5,8 @@ import debounce from "lodash/debounce"
 import { useEffect, useMemo, useState } from "react"
 import { View, Text, TouchableOpacity } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useAuth } from "@/store/authProvider"
+import { appliedDiscount } from "@/lib/priceHelper"
 
 type CartItemProps = {
   item: CartItem
@@ -25,6 +27,7 @@ export function CartItems({
   const incrementItem = useCartStore((state) => state.incrementItem)
   const decrementItem = useCartStore((state) => state.decrementItem)
   const [isDeleting, setIsDeleting] = useState(false)
+  const { usersMembership } = useAuth()
   const updateCartItemQuantity = useCartStore(
     (state) => state.updateCartItemQuantity,
   )
@@ -78,6 +81,14 @@ export function CartItems({
 
   const isIncrementDisabled = !!item.loyaltyPointsUsed || !!item.offerId
 
+  // Only when the promotion is what took money off this line. This asked `promo.isActive`
+  // alone, so an ended promotion - or one a member's own discount beat - still read as one.
+  const isPromotion =
+    !item.offerId &&
+    !item.loyaltyPointsUsed &&
+    item.discountedAmountInCents > 0 &&
+    appliedDiscount(item.dessert, usersMembership) === "promo"
+
   return (
     <View className="py-3 border-b border-gray-200">
       <View className="flex-col py-3">
@@ -85,11 +96,7 @@ export function CartItems({
           <View className="flex-1 pr-2">
             <Text className="text-lg font-semibold ">
               {item.dessert.name}{" "}
-              {item.offerId
-                ? "(Offer)"
-                : item.dessert.promo?.isActive
-                  ? "(Promotion)"
-                  : ""}
+              {item.offerId ? "(Offer)" : isPromotion ? "(Promotion)" : ""}
             </Text>
           </View>
           <Text className="text-lg font-semibold">
