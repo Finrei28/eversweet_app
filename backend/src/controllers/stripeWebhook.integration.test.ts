@@ -6,6 +6,7 @@ import app from "../app"
 import { db } from "../lib/db"
 import { describeIfDb, resetDatabase } from "../test/db"
 import { makeUser } from "../test/factories"
+import EmailSender from "../lib/emailSender"
 import { membershipPlanName } from "../lib/membership"
 import {
   resetStripeStub,
@@ -359,6 +360,51 @@ describeIfDb("Stripe webhook", () => {
         paymentStatus: "FAILED",
         totalMonths: 1,
       })
+    })
+
+    /**
+     * The payment reads the subscription as running and writes the membership on some moments
+     * later. If Stripe ends the subscription in between, and the end is recorded first - by
+     * the deletion webhook, or by a resume or join that reconciled it - the payment's write
+     * landed last and switched the ended membership back on, member prices and all, with
+     * nothing left to correct it.
+     */
+    it("does not leave a membership switched on when the subscription ended during the payment", async () => {
+      const user = await makeUser()
+      const membership = await makeMembership(user.id, { cancel: true, totalMonths: 3 })
+      const ended = subscription({
+        status: "canceled",
+        ended_at: Math.floor(Date.UTC(2026, 9, 1) / 1000),
+        cancellation_details: { reason: "cancellation_requested" },
+      })
+      stripeApi.subscriptions.retrieve
+        .mockImplementationOnce(async () => {
+          // Read as running; the end is recorded before this delivery writes.
+          await db.membership.update({
+            where: { id: membership.id },
+            data: { isActive: false, totalMonths: 0 },
+          })
+          return subscription()
+        })
+        .mockResolvedValue(ended)
+      stripeApi.invoices.list.mockResolvedValue(
+        paidInvoices(["in_first", "subscription_create"], ["in_second", "subscription_cycle"]),
+      )
+      vi.mocked(EmailSender).mockClear()
+
+      expect((await deliver(paymentSucceeded())).status).toBe(200)
+
+      const after = await db.membership.findUniqueOrThrow({
+        where: { id: membership.id },
+      })
+      expect(after).toMatchObject({
+        isActive: false,
+        paymentStatus: "SUCCESS",
+        totalMonths: 0,
+        cancel: true,
+      })
+      // Not welcomed into a membership that has already ended.
+      expect(EmailSender).not.toHaveBeenCalled()
     })
 
     /**

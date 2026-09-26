@@ -1625,6 +1625,14 @@ async function recordMembershipPayment(
   // it there.
   await recordLifetimeMonths(subscription.id, invoice, totalMonths)
 
+  // The subscription was read as running before the write, and Stripe can end it in between.
+  // When the end was recorded first - by customer.subscription.deleted, or by a resume or join
+  // that reconciled it - the write above switched the ended membership back on, member prices
+  // and all, and nothing was left to correct it. Asked again now, after the write: whoever
+  // recorded the end had read it from Stripe before writing, so if this write landed after
+  // theirs, this read is after the end too and puts the row back.
+  if (await endedDuringPayment(subscription.id)) return
+
   // Joining reprices what is already in the cart, a renewal steps the discount up, and a
   // paid retry lifts a hold - all three change what the cart should cost.
   const sync = await syncCartAfterMembershipChange(subscription.id)
@@ -1636,6 +1644,30 @@ async function recordMembershipPayment(
         typeof invoice.amount_paid === "number" ? invoice.amount_paid : null,
       cartRepriced: (sync?.repriced ?? 0) > 0,
     })
+  }
+}
+
+/**
+ * Whether the subscription a payment was just recorded for has ended since it was read, in
+ * which case the end is recorded again over the payment's write. Never throws: the payment is
+ * written by now, and a failure to ask leaves this race as open as it was before the check.
+ */
+async function endedDuringPayment(subscriptionId: string): Promise<boolean> {
+  try {
+    const now = await orNullIfMissing(stripe.subscriptions.retrieve(subscriptionId))
+    if (!now || !ENDED_SUBSCRIPTION_STATUSES.has(now.status)) return false
+
+    console.warn(
+      `Subscription ${subscriptionId} ended while its payment was being recorded; recording the end again.`,
+    )
+    await markMembershipEnded(now.id, now)
+    return true
+  } catch (error) {
+    console.error(
+      `Could not check whether subscription ${subscriptionId} ended during its payment:`,
+      getErrorMessage(error),
+    )
+    return false
   }
 }
 
